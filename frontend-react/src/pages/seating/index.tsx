@@ -391,7 +391,10 @@ export default function SeatingView() {
     if (!current || !dirty) return
     setLoading(true)
     try {
-      const item = await seatingApi.updateSeats(current.id, workingSeats)
+      // 后端契约：座位只接受 { row, col, student_id } 纯数字字段；
+      // 带上 student_name/gender 等附加字段会触发 422 校验错误（每字段一条）
+      const payload = workingSeats.map((s) => ({ row: s.row, col: s.col, student_id: s.student_id }))
+      const item = await seatingApi.updateSeats(current.id, payload)
       setArrangements((prev) => prev.map((a) => (a.id === item.id ? item : a)))
       setWorkingSeats(item.seats)
       setDirty(false)

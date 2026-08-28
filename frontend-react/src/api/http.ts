@@ -43,6 +43,26 @@ export function setAuthResolver(r: AuthResolver) {
   resolver = { ...resolver, ...r }
 }
 
+/** FastAPI 422 的 detail 是对象数组（{loc, msg, type}），拼成可读文案，避免页面出现 [object Object] */
+function normalizeErrorDetail(detail: unknown): string | undefined {
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((d) => {
+        const item = (d ?? {}) as { loc?: unknown; msg?: unknown }
+        const loc = Array.isArray(item.loc) ? item.loc.join('.') : ''
+        const msg = typeof item.msg === 'string' ? item.msg : ''
+        return [loc, msg].filter(Boolean).join(': ')
+      })
+      .filter(Boolean)
+    if (parts.length === 0) return undefined
+    const head = parts.length > 1 ? `${parts[0]}（等 ${parts.length} 条校验错误）` : parts[0]
+    return `参数校验失败：${head}`
+  }
+  if (detail && typeof detail === 'object') return JSON.stringify(detail)
+  if (typeof detail === 'string' && detail) return detail
+  return undefined
+}
+
 /** 判断是否为平台超管接口（/api/v1/admin/...） */
 function isAdminUrl(url?: string): boolean {
   return !!url && url.startsWith('/admin')
@@ -77,11 +97,11 @@ function createHttp(baseURL: string): AxiosInstance {
         throw new ApiError('登录已失效，请重新登录', 401, 401)
       }
       const msg =
-        error?.response?.data?.detail ||
+        normalizeErrorDetail(error?.response?.data?.detail) ||
         error?.response?.data?.message ||
         error.message ||
         '网络异常'
-      throw new ApiError(msg, status, status)
+      throw new ApiError(typeof msg === 'string' ? msg : JSON.stringify(msg), status, status)
     },
   )
   return http
