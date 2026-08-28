@@ -1,0 +1,37 @@
+# 智衡专属基础设施补充：自建 Kafka（KRaft 单节点）
+# 说明：本机已有 PostgreSQL(5432) / Redis(6379) 直连复用，无需在此编排；
+#       9092 已被其他项目占用，本机事件总线使用 9093 端口避免冲突。
+# 启动：docker compose -f docker-compose.kafka.yml up -d
+# 停止：docker compose -f docker-compose.kafka.yml down
+services:
+  zhiheng-kafka:
+    image: apache/kafka:3.7.0
+    container_name: zhiheng-kafka
+    restart: unless-stopped
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller        # KRaft：单节点同时承担 broker + 控制器
+      KAFKA_LISTENERS: PLAINTEXT://:9093,CONTROLLER://:9094
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://localhost:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@zhiheng-kafka:9094
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    ports:
+      - "9093:9093"
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9093 --list >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  kafka-data:

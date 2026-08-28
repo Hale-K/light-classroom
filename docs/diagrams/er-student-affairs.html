@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · 学生事务域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper:#f8fafc; --color-ink:#0f172a; --color-muted:#475569; --color-accent:#0ea5e9;
+      --font-sans:'Geist','PingFang SC',system-ui,sans-serif; --font-serif:'Instrument Serif','Noto Serif SC',serif; --font-mono:'Geist Mono',ui-monospace,monospace; }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:3rem 2rem; }
+    .frame { max-width:1120px; width:100%; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.5rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.5rem,2.4vw + .75rem,2rem); font-weight:400; letter-spacing:-0.02em; line-height:1.15; margin-bottom:1.5rem; }
+    svg { width:100%; min-width:900px; display:block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · DOMAIN 10 / 10</p>
+    <h1>学生事务域 · 实体关系</h1>
+    <svg viewBox="0 0 1000 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-student-affairs-title er-student-affairs-desc">
+      <title id="er-student-affairs-title">轻课堂学生事务域实体关系图</title>
+      <desc id="er-student-affairs-desc">新生按导入批次报名录入,报到签到产生签到记录,年级成员关系把学生挂到届别的年级组织单元。</desc>
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- 连线 -->
+      <path d="M 640 128 L 704 128" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="646" y="108" width="24" height="12" fill="#f8fafc"/><text x="658" y="117" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="676" y="108" width="24" height="12" fill="#f8fafc"/><text x="688" y="117" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="640" y="132" width="72" height="14" fill="#f8fafc"/><text x="676" y="143" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">批次导入</text>
+
+      <path d="M 500 208 L 500 264" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="476" y="214" width="14" height="12" fill="#f8fafc"/><text x="483" y="223" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="476" y="252" width="14" height="12" fill="#f8fafc"/><text x="483" y="261" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="508" y="228" width="60" height="14" fill="#f8fafc"/><text x="538" y="239" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">报到签到</text>
+
+      <path d="M 360 264 L 296 264" fill="none" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="306" y="244" width="48" height="12" fill="#f8fafc"/><text x="330" y="253" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">归属</text>
+
+      <!-- STUDENT(聚合根) -->
+      <g>
+        <rect x="360" y="64" width="280" height="144" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="368" y="70" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="390" y="79" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="368" y="102" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">学生 STUDENT</text>
+        <text x="368" y="122" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · name · gender</text>
+        <text x="368" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ class_id 可空 · → grade_id</text>
+        <text x="368" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">student_no UK · roster_order</text>
+        <text x="368" y="170" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : studying/leave/…</text>
+        <text x="368" y="192" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">详见排课核心域 · UK: tenant+student_no</text>
+      </g>
+
+      <!-- ENROLLMENT_BATCH -->
+      <g>
+        <rect x="704" y="72" width="240" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="712" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="734" y="87" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="712" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">导入批次 BATCH</text>
+        <text x="712" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · name · year</text>
+        <text x="712" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : 报名/分班/完成</text>
+        <text x="712" y="162" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">新生报名录入流水</text>
+      </g>
+
+      <!-- CHECKIN_RECORD -->
+      <g>
+        <rect x="360" y="264" width="280" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="368" y="270" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="390" y="279" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="368" y="302" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">签到记录 CHECKIN</text>
+        <text x="368" y="322" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → student_id</text>
+        <text x="368" y="338" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">method : 扫码/人工</text>
+        <text x="368" y="354" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">checked_at · operator</text>
+      </g>
+
+      <!-- GRADE_MEMBERSHIP -->
+      <g>
+        <rect x="40" y="208" width="256" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="214" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="223" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="246" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">年级成员关系</text>
+        <text x="48" y="266" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → student_id</text>
+        <text x="48" y="282" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ grade_id · → grade_unit_id</text>
+        <text x="48" y="298" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">学生挂到届别年级部的历史轨迹</text>
+      </g>
+
+      <!-- 图例 -->
+      <line x1="40" y1="420" x2="936" y2="420" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="440" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="436" x2="140" y2="436" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="439" fill="#475569" font-size="9" font-family="'Geist', sans-serif">外键</text>
+      <line x1="196" y1="436" x2="228" y2="436" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="236" y="439" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑/辅助</text>
+      <rect x="312" y="428" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="336" y="439" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根</text>
+    </svg>
+  </div>
+</body>
+</html>

@@ -1,0 +1,600 @@
+/* ============================================
+   排考管理 ExamSchedulingView（es- 前缀，页面级样式）
+   暖色单色极简：白卡片 + 1px 边框 + 圆角，无重阴影
+   ============================================ */
+
+.es-page .zh-page-desc {
+  margin: -8px 0 20px;
+}
+
+.es-nav {
+  display: flex;
+  gap: 28px;
+  margin-bottom: 18px;
+  padding: 0 2px;
+  border-bottom: 1px solid var(--border);
+}
+
+.es-nav a {
+  position: relative;
+  min-width: 132px;
+  padding: 0 0 13px;
+  border: 0;
+  background: transparent;
+  color: var(--text-3);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.es-nav a span {
+  display: block;
+  margin-top: 4px;
+  font-size: 10px;
+}
+
+.es-nav a.active {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+.es-nav a.active::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  left: 0;
+  height: 2px;
+  background: var(--ink);
+}
+
+.es-nav a:focus-visible {
+  outline: none;
+  color: var(--ink);
+}
+
+.es-exam-select {
+  min-width: 280px;
+}
+
+.es-personnel {
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.es-personnel-head,
+.es-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.es-personnel-head span,
+.es-section-head span {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.es-personnel-head h2,
+.es-section-head h3 {
+  margin: 4px 0 0;
+  color: var(--ink);
+}
+
+.es-personnel-head h2 { font-size: 20px; }
+.es-section-head h3 { font-size: 15px; }
+
+.es-kpis {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.es-kpis div {
+  padding: 22px 24px;
+  border-right: 1px solid var(--border);
+}
+
+.es-kpis div:last-child { border-right: 0; }
+.es-kpis span,
+.es-kpis strong { display: block; }
+.es-kpis span { color: var(--text-3); font-size: 10px; }
+.es-kpis strong { margin-top: 7px; color: var(--ink); font-size: 25px; font-variant-numeric: tabular-nums; }
+
+.es-personnel .ant-table-wrapper { padding: 0 24px 10px; }
+.es-person-tools { display: flex; gap: 10px; }
+.es-person-tools .ant-select { min-width: 260px; }
+.es-person-tools .ant-input-search { width: 260px; }
+.es-person strong,
+.es-person span { display: block; }
+.es-person strong { color: var(--ink); }
+.es-person span { margin-top: 3px; color: var(--text-3); font-size: 10px; }
+
+.es-filter-bar { display: flex; align-items: center; gap: 10px; padding: 14px 24px; border-bottom: 1px solid var(--border); }
+.es-filter-bar .ant-input-search { width: 240px; }
+.es-filter-bar .ant-select { min-width: 135px; }
+.es-state-flow { display: flex; align-items: center; gap: 12px; padding: 14px 24px; border-bottom: 1px solid var(--border); color: var(--text-2); font-size: 11px; }
+.es-state-flow span { padding: 6px 10px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface-2); }
+.es-state-flow i { color: var(--text-3); font-style: normal; }
+.es-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; }
+.es-status::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.es-status-available { color: #16805c; }
+.es-status-maintenance { color: #a36a14; }
+.es-status-disabled { color: #9a4d4d; }
+
+.es-room-manager,
+.es-venue-picker {
+  margin-bottom: 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.es-room-head,
+.es-venue-picker > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 22px 24px;
+  border-bottom: 1px solid var(--border);
+}
+
+.es-room-head > div:first-child > span,
+.es-venue-picker > header > div:first-child > span {
+  color: var(--text-3);
+  font-size: 10px;
+  letter-spacing: .08em;
+}
+
+.es-room-head h2,
+.es-venue-picker h2 {
+  margin: 4px 0 0;
+  color: var(--ink);
+  font-size: 20px;
+}
+
+.es-venue-picker header p {
+  margin: 6px 0 0;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.es-room-totals,
+.es-venue-total {
+  display: grid;
+  grid-template-columns: auto auto auto auto;
+  align-items: baseline;
+  gap: 5px 9px;
+  white-space: nowrap;
+}
+
+.es-room-totals strong,
+.es-venue-total strong {
+  color: var(--ink);
+  font-size: 23px;
+  font-variant-numeric: tabular-nums;
+}
+
+.es-room-totals span,
+.es-venue-total span {
+  color: var(--text-3);
+  font-size: 10px;
+}
+
+.es-venue-total .ant-tag {
+  grid-column: 1 / -1;
+  justify-self: end;
+  margin: 0;
+}
+
+.es-room-tools,
+.es-venue-tools {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 24px;
+}
+
+.es-room-tools .ant-input-search,
+.es-venue-tools .ant-input-search {
+  width: min(360px, 100%);
+}
+
+.es-room-tools .ant-btn {
+  margin-left: auto;
+}
+.es-room-tools > .ant-select { width: 140px; }
+
+.es-venue-tools .ant-checkbox-wrapper {
+  margin-left: auto;
+}
+
+.es-room-manager .ant-table-wrapper,
+.es-venue-picker .ant-table-wrapper {
+  padding: 0 24px;
+}
+
+.es-venue-picker .ant-table-tbody > tr.ant-table-row-selected > td {
+  background: color-mix(in srgb, var(--ink) 5%, var(--surface)) !important;
+}
+
+.es-venue-picker .ant-table-tbody > tr.ant-table-row-selected:hover > td {
+  background: color-mix(in srgb, var(--ink) 8%, var(--surface)) !important;
+}
+
+.es-room-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 16px;
+  padding: 14px 24px;
+  border-top: 1px solid var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.es-room-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+.es-room-form-grid .ant-input-number {
+  width: 100%;
+}
+
+/* 左右布局：左条件栏 + 右时间轴画布 */
+.es-layout {
+  display: grid;
+  grid-template-columns: 300px 1fr;
+  min-height: 660px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+
+/* 左侧条件面板 */
+.es-config {
+  padding: 20px;
+  border-right: 1px solid var(--border);
+}
+.es-panel-title {
+  margin-bottom: 20px;
+}
+.es-panel-title h3,
+.es-surface-head h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 600;
+}
+.es-panel-title span,
+.es-surface-head span {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.es-label {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-bottom: 16px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.es-label .ant-select,
+.es-label .ant-input,
+.es-label .ant-picker {
+  width: 100%;
+}
+.es-session {
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.es-session > span {
+  display: block;
+  margin-bottom: 10px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+.es-session > div {
+  display: grid;
+  grid-template-columns: 36px 1fr 18px 1fr;
+  align-items: center;
+  gap: 5px;
+  margin-bottom: 9px;
+}
+.es-session b {
+  color: var(--text-1);
+  font-size: 11px;
+  font-weight: 600;
+}
+.es-session i {
+  color: var(--text-3);
+  font-size: 10px;
+  font-style: normal;
+  text-align: center;
+}
+.es-rule-note {
+  margin-top: 20px;
+  padding: 13px;
+  border-left: 3px solid var(--ink);
+  background: var(--surface-2);
+  border-radius: 0 8px 8px 0;
+}
+.es-rule-note strong,
+.es-rule-note span {
+  display: block;
+}
+.es-rule-note strong {
+  color: var(--ink);
+  font-size: 11px;
+}
+.es-rule-note span {
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+/* 右侧时间轴 */
+.es-surface {
+  min-width: 0;
+  padding: 22px 26px;
+  background: var(--surface-2);
+}
+.es-surface-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 24px;
+}
+.es-summary {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.es-summary div {
+  min-width: 86px;
+  padding: 8px 12px;
+  border-right: 1px solid var(--border);
+  text-align: center;
+}
+.es-summary div:last-child {
+  border-right: 0;
+}
+.es-summary strong,
+.es-summary span {
+  display: block;
+}
+.es-summary strong {
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.es-summary span {
+  margin-top: 2px;
+  color: var(--text-3);
+  font-size: 9px;
+}
+.es-days {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 14px;
+}
+.es-day {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.es-day > header {
+  height: 66px;
+  padding: 0 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 3px solid var(--ink);
+  border-bottom: 1px solid var(--border);
+}
+.es-date-block {
+  display: flex;
+  align-items: baseline;
+  gap: 3px;
+}
+.es-date-block strong {
+  color: var(--ink);
+  font-size: 26px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.es-date-block span {
+  color: var(--text-3);
+  font-size: 10px;
+}
+.es-day header b,
+.es-day header small {
+  display: block;
+}
+.es-day header b {
+  color: var(--ink);
+  font-size: 12px;
+}
+.es-day header small {
+  margin-top: 3px;
+  color: var(--text-3);
+  font-size: 9px;
+}
+.es-day header em {
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 10px;
+  font-style: normal;
+}
+.es-day-line {
+  position: relative;
+  padding: 16px;
+}
+.es-day-line:before {
+  content: '';
+  position: absolute;
+  left: 22px;
+  top: 16px;
+  bottom: 16px;
+  width: 1px;
+  background: var(--border);
+}
+.es-card {
+  position: relative;
+  margin: 0 0 12px 18px;
+  padding: 13px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--ink);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.es-card:last-child {
+  margin-bottom: 0;
+}
+.es-card:before {
+  content: '';
+  position: absolute;
+  left: -25px;
+  top: 18px;
+  width: 7px;
+  height: 7px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--ink);
+  box-shadow: 0 0 0 1px var(--ink);
+}
+.es-time {
+  color: var(--ink);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.es-subject-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 8px;
+}
+.es-subject-row strong {
+  color: var(--ink);
+  font-size: 16px;
+}
+.es-paper {
+  display: block;
+  margin-top: 5px;
+  color: var(--text-3);
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.es-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 12px;
+  padding-top: 9px;
+  border-top: 1px solid var(--border);
+}
+.es-meta span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+  font-size: 9px;
+}
+.es-empty {
+  min-height: 500px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-3);
+}
+.es-empty svg {
+  color: var(--text-3);
+}
+.es-empty strong {
+  margin-top: 12px;
+  color: var(--ink);
+  font-size: 14px;
+}
+.es-empty span {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+@media (max-width: 980px) {
+  .es-nav { gap: 16px; overflow-x: auto; }
+  .es-nav a { min-width: 120px; }
+  .es-personnel-head,
+  .es-section-head { align-items: flex-start; flex-direction: column; }
+  .es-kpis { grid-template-columns: repeat(2, 1fr); }
+  .es-person-tools { width: 100%; flex-direction: column; }
+  .es-filter-bar { align-items: stretch; flex-direction: column; }
+  .es-filter-bar .ant-input-search,
+  .es-filter-bar .ant-select { width: 100%; }
+  .es-person-tools .ant-select,
+  .es-person-tools .ant-input-search,
+  .es-exam-select { width: 100%; min-width: 0; }
+  .es-room-head,
+  .es-venue-picker > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .es-room-tools,
+  .es-venue-tools {
+    flex-wrap: wrap;
+  }
+  .es-venue-tools .ant-checkbox-wrapper {
+    margin-left: 0;
+  }
+  .es-layout {
+    grid-template-columns: 1fr;
+  }
+  .es-config {
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .es-surface-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+@media print {
+  .es-page .chapter,
+  .es-config,
+  .es-nav,
+  .es-venue-picker {
+    display: none !important;
+  }
+  .es-page {
+    padding: 0;
+  }
+  .es-layout {
+    display: block;
+    border: 0;
+  }
+  .es-surface {
+    padding: 0;
+    background: var(--surface);
+  }
+}

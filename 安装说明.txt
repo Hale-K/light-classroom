@@ -1,0 +1,26 @@
+智衡轻课堂 Windows 一键安装包
+
+使用方法：
+1. 解压本压缩包。
+2. 右键 install-windows.bat，选择“以管理员身份运行”。
+3. 按提示完成安装；安装完成后启动 Docker Desktop。
+
+install-windows.bat 会自动检测并通过 winget 安装：
+- Python 3.12
+- Node.js LTS
+- Docker Desktop
+
+随后会自动执行 setup-windows.bat：
+- 创建 backend/.env
+- 启动 PostgreSQL 和 Redis
+- 创建 Python 虚拟环境
+- 安装前后端依赖
+- 执行数据库迁移
+- 初始化数据库结构和基础字典
+
+注意：
+- 需要 Windows 10/11，并且系统可用 winget。
+- 需要联网下载环境和依赖。
+- Docker Desktop 首次启动可能需要管理员权限或重启电脑。
+- 本安装包不包含本机 .env、数据库数据、node_modules 和 Python 虚拟环境。
+- 如果环境已经安装，可直接运行 setup-windows.bat。

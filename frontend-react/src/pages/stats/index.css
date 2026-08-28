@@ -1,0 +1,76 @@
+/* ============================================
+   成绩统计 StatsView（st- 前缀，页面级样式）
+   白卡片 + 1px #eaeaea 边框 + 10px 圆角
+   ============================================ */
+
+.st-sum-cards {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-bottom: 16px;
+}
+.st-sum-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 18px 20px;
+}
+.st-sum-num {
+  font-size: 30px;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+  line-height: 1.2;
+}
+.st-sum-num.st-blue {
+  color: var(--blue-ink);
+}
+.st-sum-num.st-green {
+  color: var(--green-ink);
+}
+.st-sum-num.st-amber {
+  color: var(--yellow-ink);
+}
+.st-sum-label {
+  font-size: 12px;
+  color: var(--text-2);
+  margin-top: 6px;
+}
+
+.st-charts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+.st-wide {
+  grid-column: 1 / -1;
+}
+.st-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  padding: 20px;
+}
+.st-card h3 {
+  margin: 0 0 12px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.st-chart {
+  height: 280px;
+}
+
+.st-empty-wrap {
+  padding: 40px 0;
+}
+
+@media (max-width: 900px) {
+  .st-sum-cards {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .st-charts {
+    grid-template-columns: 1fr;
+  }
+}

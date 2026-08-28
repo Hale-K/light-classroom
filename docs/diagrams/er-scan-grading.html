@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · 扫描阅卷域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper:#f8fafc; --color-ink:#0f172a; --color-muted:#475569; --color-accent:#0ea5e9;
+      --font-sans:'Geist','PingFang SC',system-ui,sans-serif; --font-serif:'Instrument Serif','Noto Serif SC',serif; --font-mono:'Geist Mono',ui-monospace,monospace; }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:3rem 2rem; }
+    .frame { max-width:1120px; width:100%; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.5rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.5rem,2.4vw + .75rem,2rem); font-weight:400; letter-spacing:-0.02em; line-height:1.15; margin-bottom:1.5rem; }
+    svg { width:100%; min-width:900px; display:block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · DOMAIN 5 / 10</p>
+    <h1>扫描阅卷域 · 实体关系</h1>
+    <svg viewBox="0 0 1000 540" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-scan-title er-scan-desc">
+      <title id="er-scan-title">轻课堂扫描阅卷域实体关系图</title>
+      <desc id="er-scan-desc">扫描批次切分为扫描页,按学生生成答卷,逐题打分汇总;试卷与题目定义评分目标,全链按考试组织。</desc>
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- 连线: 主链 批次→页 / 批次→答卷 / 答卷→题分 / 试卷→题 / 试卷→答卷 -->
+      <path d="M 248 136 L 328 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="254" y="116" width="24" height="12" fill="#f8fafc"/><text x="266" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="300" y="116" width="24" height="12" fill="#f8fafc"/><text x="312" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="256" y="140" width="72" height="14" fill="#f8fafc"/><text x="292" y="151" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">切分扫描页</text>
+
+      <path d="M 152 216 L 152 272" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="160" y="222" width="24" height="12" fill="#f8fafc"/><text x="172" y="231" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="160" y="258" width="24" height="12" fill="#f8fafc"/><text x="172" y="267" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="124" y="236" width="60" height="14" fill="#f8fafc"/><text x="154" y="247" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">生成答卷</text>
+
+      <path d="M 256 320 L 344 320" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="262" y="300" width="24" height="12" fill="#f8fafc"/><text x="274" y="309" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="316" y="300" width="24" height="12" fill="#f8fafc"/><text x="328" y="309" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="264" y="324" width="76" height="14" fill="#f8fafc"/><text x="302" y="335" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">逐题打分</text>
+
+      <path d="M 624 136 L 704 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="630" y="116" width="24" height="12" fill="#f8fafc"/><text x="642" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="676" y="116" width="24" height="12" fill="#f8fafc"/><text x="688" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <path d="M 528 216 L 528 272" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="536" y="222" width="24" height="12" fill="#f8fafc"/><text x="548" y="231" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="536" y="258" width="24" height="12" fill="#f8fafc"/><text x="548" y="267" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="540" y="236" width="60" height="14" fill="#f8fafc"/><text x="570" y="247" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">作答于</text>
+
+      <!-- SCAN_BATCH(聚合根) -->
+      <g>
+        <rect x="40" y="72" width="208" height="144" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="48" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="70" y="87" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="48" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">扫描批次 SCAN_BATCH</text>
+        <text x="48" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="48" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ exam_id · → paper_id ⌇</text>
+        <text x="48" y="162" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : uploaded→…</text>
+        <text x="48" y="194" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">uploaded/split/assigned</text>
+      </g>
+
+      <!-- SCAN_PAGE -->
+      <g>
+        <rect x="328" y="80" width="216" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="336" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="358" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="336" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">扫描页 SCAN_PAGE</text>
+        <text x="336" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → scan_batch_id</text>
+        <text x="336" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ student_id ⌇ 认领</text>
+        <text x="336" y="170" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">image_url · page_no</text>
+      </g>
+
+      <!-- SUBMISSION -->
+      <g>
+        <rect x="48" y="272" width="208" height="128" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="56" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="78" y="287" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="56" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">答卷 SUBMISSION</text>
+        <text x="56" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → paper_id</text>
+        <text x="56" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ student_id ⌇</text>
+        <text x="56" y="362" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : scanned/…</text>
+        <text x="56" y="384" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: paper + student</text>
+      </g>
+
+      <!-- ANSWER_SCORE -->
+      <g>
+        <rect x="344" y="272" width="216" height="128" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="352" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="374" y="287" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="352" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">题分 ANSWER_SCORE</text>
+        <text x="352" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → submission_id</text>
+        <text x="352" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ question_id</text>
+        <text x="352" y="362" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">score · grader · confidence</text>
+        <text x="352" y="384" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: submission + question</text>
+      </g>
+
+      <!-- PAPER -->
+      <g>
+        <rect x="624" y="80" width="216" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="632" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="654" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="632" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">试卷 PAPER</text>
+        <text x="632" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → exam_id</text>
+        <text x="632" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">subject · full_score</text>
+        <text x="632" y="170" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : draft/published</text>
+      </g>
+
+      <!-- QUESTION -->
+      <g>
+        <rect x="704" y="272" width="240" height="128" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="712" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="734" y="287" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="712" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">题目 QUESTION</text>
+        <text x="712" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · type · difficulty</text>
+        <text x="712" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ question_bank_id</text>
+        <text x="712" y="362" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">content · answer · score</text>
+        <text x="712" y="384" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">软删除 is_deleted</text>
+      </g>
+
+      <!-- 图例 -->
+      <line x1="40" y1="456" x2="936" y2="456" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="476" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="472" x2="140" y2="472" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="475" fill="#475569" font-size="9" font-family="'Geist', sans-serif">外键</text>
+      <line x1="196" y1="472" x2="228" y2="472" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="236" y="475" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑/辅助</text>
+      <rect x="312" y="464" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="336" y="475" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根</text>
+      <text x="420" y="475" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">打分事件驱动 student_profile 更新(见学情域)</text>
+    </svg>
+  </div>
+</body>
+</html>

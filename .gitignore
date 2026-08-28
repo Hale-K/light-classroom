@@ -1,0 +1,31 @@
+# ===== OS / 编辑器 =====
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
+
+# ===== 环境与密钥（保留 example）=====
+.env
+.env.*
+!.env.example
+
+# ===== 日志与临时文件 =====
+*.log
+logs/
+
+# ===== 依赖与构建产物（与子目录规则重叠，双保险）=====
+node_modules/
+dist/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+*.tsbuildinfo
+
+# ===== 数据备份（数据库 dump / 排查数据，不入库）=====
+backend/backups/
+
+# ===== 工具生成的索引（可重建的二进制图谱）=====
+.codebase-memory/

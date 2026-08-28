@@ -1,0 +1,4 @@
+/* 系统设置路由页外壳（stg-page-v2：页面去掉老的 stg-page 标题/面板样式） */
+.stg-page-v2 {
+  width: 100%;
+}

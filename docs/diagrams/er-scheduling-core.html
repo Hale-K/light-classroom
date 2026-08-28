@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · 排课核心域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --color-paper:   #f8fafc;   /* arctic-mist */
+      --color-ink:     #0f172a;   /* slate-black */
+      --color-muted:   #475569;   /* slate */
+      --color-soft:    #94a3b8;
+      --color-accent:  #0ea5e9;   /* ice-blue */
+      --font-sans:     'Geist', 'PingFang SC', system-ui, sans-serif;
+      --font-serif:    'Instrument Serif', 'Noto Serif SC', serif;
+      --font-mono:     'Geist Mono', ui-monospace, monospace;
+    }
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-paper);
+      color: var(--color-ink);
+      min-height: 100vh;
+      display: flex; align-items: center; justify-content: center;
+      padding: 3rem 2rem;
+    }
+    .frame { max-width: 1120px; width: 100%; }
+    .eyebrow {
+      font-family: var(--font-mono); font-size: 0.66rem; font-weight: 500;
+      letter-spacing: 0.18em; text-transform: uppercase;
+      color: var(--color-muted); margin-bottom: 0.5rem;
+    }
+    h1 {
+      font-family: var(--font-serif); font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+      font-weight: 400; letter-spacing: -0.02em; line-height: 1.15;
+      color: var(--color-ink); margin-bottom: 1.5rem;
+    }
+    svg { width: 100%; min-width: 900px; display: block; }
+    .note {
+      font-family: var(--font-serif); font-style: italic; font-size: 0.9rem;
+      color: var(--color-muted); margin-top: 1.25rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · LIGHT CLASSROOM</p>
+    <h1>排课核心域 · 实体关系</h1>
+
+    <svg viewBox="0 0 1000 640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-scheduling-core-title er-scheduling-core-desc">
+      <title id="er-scheduling-core-title">轻课堂排课核心域实体关系图</title>
+      <desc id="er-scheduling-core-desc">展示排课业务八个核心实体之间的关系：年级下辖班级、班级就读学生，班级×学科×教师组成任教关系并展开为课表，组织单元记录年级部与教研组任职。</desc>
+      <defs>
+        <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0, 8 3, 0 6" fill="#475569"/></marker>
+      </defs>
+
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- ============ 关系连线(先画线,后画框) ============ -->
+      <!-- GRADE 1—N CLASS -->
+      <path d="M 128 184 L 128 208" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="136" y="186" width="14" height="12" fill="#f8fafc"/><text x="143" y="195" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="136" y="196" width="14" height="12" fill="#f8fafc"/><text x="143" y="205" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <!-- CLASS 1—N STUDENT -->
+      <path d="M 128 360 L 128 392" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="136" y="362" width="14" height="12" fill="#f8fafc"/><text x="143" y="371" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="136" y="380" width="14" height="12" fill="#f8fafc"/><text x="143" y="389" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <!-- CLASS 1—N TEACHING_ASSIGNMENT(任教) -->
+      <path d="M 216 248 L 368 248" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="222" y="228" width="28" height="12" fill="#f8fafc"/><text x="236" y="237" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="338" y="228" width="28" height="12" fill="#f8fafc"/><text x="352" y="237" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="262" y="226" width="60" height="14" fill="#f8fafc"/><text x="292" y="237" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">任教关系</text>
+
+      <!-- SUBJECT 1—N TEACHING_ASSIGNMENT -->
+      <path d="M 472 128 L 472 184" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="448" y="132" width="14" height="12" fill="#f8fafc"/><text x="455" y="141" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="448" y="172" width="14" height="12" fill="#f8fafc"/><text x="455" y="181" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="480" y="146" width="60" height="14" fill="#f8fafc"/><text x="510" y="157" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">学科</text>
+
+      <!-- TEACHING_ASSIGNMENT N—1 USER(任课教师) -->
+      <path d="M 472 336 L 472 392" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="448" y="340" width="14" height="12" fill="#f8fafc"/><text x="455" y="349" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="448" y="380" width="14" height="12" fill="#f8fafc"/><text x="455" y="389" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="480" y="354" width="60" height="14" fill="#f8fafc"/><text x="510" y="365" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">任课教师</text>
+
+      <!-- SUBJECT 1—N SCHEDULE -->
+      <path d="M 576 104 L 664 104 Q 672 104 672 112 L 672 208 Q 672 216 680 216 L 704 216" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="582" y="84" width="28" height="12" fill="#f8fafc"/><text x="596" y="93" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="676" y="196" width="28" height="12" fill="#f8fafc"/><text x="690" y="205" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <!-- TEACHING_ASSIGNMENT 1—N SCHEDULE -->
+      <path d="M 576 248 L 704 248" fill="none" stroke="#0ea5e9" stroke-width="1.2"/>
+      <rect x="582" y="228" width="28" height="12" fill="#f8fafc"/><text x="596" y="237" font-size="8" fill="#0369a1" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="672" y="228" width="28" height="12" fill="#f8fafc"/><text x="686" y="237" font-size="8" fill="#0369a1" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="600" y="226" width="72" height="14" fill="#f8fafc"/><text x="636" y="237" font-size="9" fill="#0369a1" font-family="'Geist', sans-serif" text-anchor="middle">展开为课表</text>
+
+      <!-- USER 1—N SCHEDULE(授课) -->
+      <path d="M 576 452 L 612 452 Q 620 452 620 460 L 620 304 Q 620 296 628 296 L 704 296" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="582" y="432" width="28" height="12" fill="#f8fafc"/><text x="596" y="441" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="676" y="276" width="28" height="12" fill="#f8fafc"/><text x="690" y="285" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <!-- CLASS 1—N SCHEDULE(绕行下方,避开中枢) -->
+      <path d="M 216 280 L 272 280 Q 280 280 280 288 L 280 528 Q 280 536 288 536 L 660 536 Q 668 536 668 528 L 668 288 Q 668 280 676 280 L 704 280" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="222" y="260" width="28" height="12" fill="#f8fafc"/><text x="236" y="269" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="676" y="260" width="28" height="12" fill="#f8fafc"/><text x="690" y="269" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="432" y="516" width="88" height="14" fill="#f8fafc"/><text x="476" y="527" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">班级课表</text>
+
+      <!-- ORGANIZATION_UNIT 自引用 -->
+      <path d="M 896 392 L 896 372 Q 896 364 904 364 L 924 364 Q 932 364 932 372 L 932 412 Q 932 420 924 420 L 936 420" fill="none" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="872" y="346" width="76" height="14" fill="#f8fafc"/><text x="910" y="357" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">parent 自引用</text>
+
+      <!-- ============ 实体框 ============ -->
+      <!-- GRADE -->
+      <g>
+        <rect x="40" y="64" width="176" height="120" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="70" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="79" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="102" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">年级 GRADE</text>
+        <text x="48" y="122" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="48" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">name : 租户内唯一</text>
+        <text x="48" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">level : 1/2/3</text>
+        <text x="48" y="170" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ campus_id</text>
+      </g>
+
+      <!-- CLASS -->
+      <g>
+        <rect x="40" y="208" width="176" height="152" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="214" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="223" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="246" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">班级 CLASS</text>
+        <text x="48" y="266" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="48" y="282" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ grade_id</text>
+        <text x="48" y="298" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">cohort_label : 届</text>
+        <text x="48" y="314" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ head_teacher_id ⌇</text>
+        <text x="48" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ home_room_id ⌇</text>
+        <text x="48" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">class_type : 类型</text>
+      </g>
+
+      <!-- STUDENT -->
+      <g>
+        <rect x="40" y="392" width="176" height="136" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="398" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="407" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="430" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">学生 STUDENT</text>
+        <text x="48" y="450" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="48" y="466" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ class_id : 可空</text>
+        <text x="48" y="482" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">student_no : UK</text>
+        <text x="48" y="498" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : 在读/休学</text>
+        <text x="48" y="514" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">check_in_status</text>
+      </g>
+
+      <!-- SUBJECT -->
+      <g>
+        <rect x="368" y="40" width="208" height="88" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="376" y="46" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="398" y="55" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="376" y="78" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">学科 SUBJECT</text>
+        <text x="376" y="98" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="376" y="114" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">name : UK · 全局字典</text>
+      </g>
+
+      <!-- TEACHING_ASSIGNMENT(聚合根 · 焦点) -->
+      <g>
+        <rect x="368" y="184" width="208" height="152" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="376" y="190" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="398" y="199" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="376" y="222" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">任教关系 ASSIGNMENT</text>
+        <text x="376" y="242" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="376" y="258" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ class_id × subject_id</text>
+        <text x="376" y="274" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ teacher_id</text>
+        <text x="376" y="290" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">academic_year + term</text>
+        <text x="376" y="306" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">weekly_periods : 课时</text>
+        <text x="376" y="322" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: 租户+班+科+学年+期</text>
+      </g>
+
+      <!-- USER -->
+      <g>
+        <rect x="368" y="392" width="208" height="120" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="376" y="398" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="398" y="407" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="376" y="430" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">教师 USER</text>
+        <text x="376" y="450" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="376" y="466" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">name : 姓名</text>
+        <text x="376" y="482" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">phone : UK 登录账号</text>
+        <text x="376" y="498" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">role : 基础角色</text>
+      </g>
+
+      <!-- SCHEDULE -->
+      <g>
+        <rect x="704" y="184" width="232" height="168" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="712" y="190" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="734" y="199" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="712" y="222" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">课表项 SCHEDULE</text>
+        <text x="712" y="242" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="712" y="258" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ class_id / subject_id</text>
+        <text x="712" y="274" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ teacher_id · 代课改写</text>
+        <text x="712" y="290" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">weekday : 周 1-7</text>
+        <text x="712" y="306" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">period : 节次</text>
+        <text x="712" y="322" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">academic_year + term</text>
+        <text x="712" y="338" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: 租户+班+学年+期+时段</text>
+      </g>
+
+      <!-- ORGANIZATION_UNIT -->
+      <g>
+        <rect x="704" y="392" width="232" height="152" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="712" y="398" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="734" y="407" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="712" y="430" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">组织单元 ORG_UNIT</text>
+        <text x="712" y="450" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="712" y="466" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ parent_id : 自引用</text>
+        <text x="712" y="482" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">unit_type : 年级部/教研组</text>
+        <text x="712" y="498" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">cohort_label : 届</text>
+        <text x="712" y="514" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ staff_appointments</text>
+        <text x="712" y="530" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">圈定教师: 年级部任职</text>
+      </g>
+
+      <!-- ============ 图例(底部横条) ============ -->
+      <line x1="40" y1="568" x2="936" y2="568" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="588" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="585" x2="140" y2="585" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="588" fill="#475569" font-size="9" font-family="'Geist', sans-serif">数据库外键</text>
+      <line x1="228" y1="585" x2="260" y2="585" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="268" y="588" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑关联</text>
+      <line x1="348" y1="585" x2="380" y2="585" stroke="#0ea5e9" stroke-width="1.2"/>
+      <text x="388" y="588" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根关系</text>
+      <rect x="476" y="576" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="500" y="588" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根(任教关系)</text>
+      <text x="636" y="588" fill="#475569" font-size="9" font-family="'Geist', sans-serif">⌇ = 应用层软关联</text>
+      <text x="748" y="588" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">tenant_id 多租户省略</text>
+    </svg>
+
+    <p class="note">全库 63 表 · 本图为排课核心域 8 实体;组织架构域(校区/楼栋/教室/角色)与考务域可按同一皮肤续绘。</p>
+  </div>
+</body>
+</html>

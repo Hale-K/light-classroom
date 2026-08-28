@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · 学情题库域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper:#f8fafc; --color-ink:#0f172a; --color-muted:#475569; --color-accent:#0ea5e9;
+      --font-sans:'Geist','PingFang SC',system-ui,sans-serif; --font-serif:'Instrument Serif','Noto Serif SC',serif; --font-mono:'Geist Mono',ui-monospace,monospace; }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:3rem 2rem; }
+    .frame { max-width:1120px; width:100%; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.5rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.5rem,2.4vw + .75rem,2rem); font-weight:400; letter-spacing:-0.02em; line-height:1.15; margin-bottom:1.5rem; }
+    svg { width:100%; min-width:900px; display:block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · DOMAIN 7 / 10</p>
+    <h1>学情题库域 · 实体关系</h1>
+    <svg viewBox="0 0 1000 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-analysis-title er-analysis-desc">
+      <title id="er-analysis-title">轻课堂学情题库域实体关系图</title>
+      <desc id="er-analysis-desc">打分事件驱动学生画像按知识点沉淀,错题按学生去重累计,题库与题目支撑练习卷生成,教学计划输出改进建议。</desc>
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- 连线 -->
+      <path d="M 264 136 L 336 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="270" y="116" width="24" height="12" fill="#f8fafc"/><text x="282" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="308" y="116" width="24" height="12" fill="#f8fafc"/><text x="320" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+
+      <path d="M 264 320 L 336 320" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="270" y="300" width="24" height="12" fill="#f8fafc"/><text x="282" y="309" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="308" y="300" width="24" height="12" fill="#f8fafc"/><text x="320" y="309" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+
+      <path d="M 672 136 L 744 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="678" y="116" width="24" height="12" fill="#f8fafc"/><text x="690" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="716" y="116" width="24" height="12" fill="#f8fafc"/><text x="728" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <path d="M 864 216 L 864 272" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="872" y="222" width="24" height="12" fill="#f8fafc"/><text x="884" y="231" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="872" y="258" width="24" height="12" fill="#f8fafc"/><text x="884" y="267" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <path d="M 560 216 L 560 272" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="568" y="222" width="24" height="12" fill="#f8fafc"/><text x="580" y="231" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="568" y="258" width="24" height="12" fill="#f8fafc"/><text x="580" y="267" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <!-- STUDENT_PROFILE(聚合根) -->
+      <g>
+        <rect x="40" y="72" width="224" height="128" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="48" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="70" y="87" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="48" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">学生画像 PROFILE</text>
+        <text x="48" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → student_id ⌇</text>
+        <text x="48" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ knowledge_point_id</text>
+        <text x="48" y="162" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">mastery 0-100 · tier 分层</text>
+        <text x="48" y="184" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">打分事件驱动 · UK 三元</text>
+      </g>
+
+      <!-- KNOWLEDGE_POINT -->
+      <g>
+        <rect x="336" y="80" width="224" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="344" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="366" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="344" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">知识点 KNOWLEDGE_PT</text>
+        <text x="344" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → subject_id</text>
+        <text x="344" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">name · 树形预置</text>
+        <text x="344" y="170" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">九科×年级字典</text>
+      </g>
+
+      <!-- WRONG_QUESTION -->
+      <g>
+        <rect x="40" y="264" width="224" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="270" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="279" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="302" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">错题 WRONG_QUESTION</text>
+        <text x="48" y="322" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → student/question</text>
+        <text x="48" y="338" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">wrong_count ≥2 重点突破</text>
+        <text x="48" y="354" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">is_mastered 巩固回流</text>
+      </g>
+
+      <!-- QUESTION_BANK -->
+      <g>
+        <rect x="560" y="80" width="184" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="568" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="590" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="568" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">题库 BANK</text>
+        <text x="568" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · name · scope</text>
+        <text x="568" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">校级/个人题库</text>
+        <text x="568" y="170" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">题目按 bank 归档</text>
+      </g>
+
+      <!-- QUESTION ref -->
+      <g>
+        <rect x="744" y="80" width="216" height="136" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="752" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="774" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="752" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">题目 QUESTION</text>
+        <text x="752" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · type · difficulty</text>
+        <text x="752" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ knowledge_point ⌇</text>
+        <text x="752" y="170" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">详见扫描阅卷域</text>
+      </g>
+
+      <!-- PRACTICE_SHEET -->
+      <g>
+        <rect x="560" y="272" width="184" height="120" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="568" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="590" y="287" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="568" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">练习卷 SHEET</text>
+        <text x="568" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · title · → class</text>
+        <text x="568" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">由画像/错题生成</text>
+        <text x="568" y="362" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">practice_question 关联题</text>
+      </g>
+
+      <!-- TEACHING_PLAN -->
+      <g>
+        <rect x="744" y="272" width="216" height="120" rx="6" fill="rgba(15,23,42,0.03)" stroke="rgba(15,23,42,0.30)" stroke-width="1" stroke-dasharray="4,3"/>
+        <rect x="752" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.30)" stroke-width="0.8"/>
+        <text x="774" y="287" fill="rgba(15,23,42,0.60)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">AUX</text>
+        <text x="752" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">教学计划 PLAN</text>
+        <text x="752" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → class/subject</text>
+        <text x="752" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">AI 生成 · 老师编辑</text>
+        <text x="752" y="362" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">plan_type · period · status</text>
+      </g>
+
+      <!-- 图例 -->
+      <line x1="40" y1="456" x2="936" y2="456" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="476" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="472" x2="140" y2="472" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="475" fill="#475569" font-size="9" font-family="'Geist', sans-serif">外键</text>
+      <line x1="196" y1="472" x2="228" y2="472" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="236" y="475" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑/辅助</text>
+      <rect x="312" y="464" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="336" y="475" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根</text>
+    </svg>
+  </div>
+</body>
+</html>

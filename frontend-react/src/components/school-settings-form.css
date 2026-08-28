@@ -1,0 +1,253 @@
+/* ============================================
+   SchoolSettingsForm（ssf- 前缀）—— 按「建立规则」模板重写
+   大标题 + 右上新建按钮 + 两 Tab + 列表卡片 / 规则行
+   ============================================ */
+.ssf-page-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 22px;
+}
+.ssf-page-head-title h1 {
+  margin: 0;
+  font-size: 34px;
+  letter-spacing: -0.5px;
+  color: var(--ink);
+}
+.ssf-page-head-title p {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+}
+.ssf-page-head-actions {
+  flex-shrink: 0;
+}
+.ssf-tabs {
+  margin-bottom: 22px;
+}
+.ssf-tabs .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+.ssf-tabs .ant-tabs-tab {
+  font-size: 14px;
+}
+
+/* 卡片列表样式（模拟班级排座的规则行） */
+.ssf-rule-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 4px;
+}
+
+.ssf-rule-subnav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 20px 4px;
+}
+.ssf-rule-subnav h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 600;
+}
+.ssf-rule-subnav p {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ssf-rule-row {
+  display: grid;
+  grid-template-columns: 1.3fr 1.2fr 1fr 2fr 120px;
+  gap: 16px;
+  align-items: center;
+  padding: 14px 18px;
+  border-bottom: 1px solid var(--divider);
+}
+.ssf-rule-row:last-child {
+  border-bottom: none;
+}
+.ssf-rule-head {
+  display: grid;
+  grid-template-columns: 1.3fr 1.2fr 1fr 2fr 120px;
+  gap: 16px;
+  align-items: center;
+  padding: 10px 18px 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  letter-spacing: 0.3px;
+  background: var(--surface-2);
+  border-radius: 8px 8px 0 0;
+  border-bottom: 1px solid var(--border);
+  margin: 6px 10px 0;
+}
+
+.ssf-rule-name {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.ssf-rule-ico {
+  width: 34px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  flex-shrink: 0;
+}
+.ssf-rule-ico.blue { background: #eef3ff; color: #3e5fe6; border-color: #dde6ff; }
+.ssf-rule-ico.purple { background: #f4efff; color: #7a58d6; border-color: #e8dcff; }
+.ssf-rule-ico.pink { background: #fff0f4; color: #d6577e; border-color: #ffd8e2; }
+.ssf-rule-ico.green { background: #eefbf1; color: #3aa659; border-color: #d0f2db; }
+.ssf-rule-ico.orange { background: #fff3e5; color: #cc7e1b; border-color: #ffe2c1; }
+
+.ssf-rule-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.ssf-rule-text strong {
+  font-size: 14px;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ssf-rule-text small {
+  color: var(--text-3);
+  font-size: 12px;
+  margin-top: 2px;
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ssf-rule-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: var(--surface-2);
+  margin-right: 6px;
+}
+.ssf-rule-chip.blue { background: #eef3ff; color: #3e5fe6; border-color: #d0ddff; }
+.ssf-rule-chip.purple { background: #f4efff; color: #7a58d6; border-color: #e6d8ff; }
+.ssf-rule-chip.pink { background: #fff0f4; color: #d6577e; border-color: #ffd2dd; }
+.ssf-rule-chip.green { background: #eefbf1; color: #3aa659; border-color: #cff1d8; }
+.ssf-rule-chip.orange { background: #fff3e5; color: #cc7e1b; border-color: #ffdcb5; }
+
+.ssf-rule-desc {
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.ssf-rule-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 4px;
+}
+.ssf-rule-actions .ant-btn-link {
+  padding: 4px 6px;
+  height: auto;
+  font-size: 13px;
+}
+
+.ssf-pagination {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 14px 20px 8px;
+  color: var(--text-3);
+  font-size: 13px;
+  gap: 8px;
+}
+.ssf-pagination .ant-pagination {
+  margin-left: 6px;
+}
+
+.ssf-empty {
+  padding: 40px 0 10px;
+}
+
+/* 新建配置弹窗 */
+.ssf-form-modal .ssf-label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+.ssf-cohort-preview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-top: 6px;
+  padding: 12px;
+  background: var(--surface-2);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.ssf-cohort-preview span {
+  font-size: 12px;
+  color: var(--text-3);
+  display: block;
+  margin-bottom: 4px;
+}
+.ssf-cohort-preview strong {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+/* 顶部三枚生效卡（Tab 上方，可选） */
+.ssf-brief {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  margin-bottom: 22px;
+}
+.ssf-brief-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.ssf-brief-card span {
+  color: var(--text-3);
+  font-size: 12px;
+}
+.ssf-brief-card strong {
+  color: var(--ink);
+  font-size: 17px;
+  letter-spacing: 0.2px;
+}
+.ssf-brief-card small {
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+.ssf-brief-card.active {
+  border-color: var(--ink);
+  background: var(--surface-2);
+}
+
+/* ---- 旧样式清理占位：删除旧文件内容后重写 ---- */
+.ssf-label { color: var(--text-secondary); font-size: 13px; }

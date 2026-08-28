@@ -1,0 +1,254 @@
+.tp-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 章节 header（替换默认 PageHeader，加副文案） */
+.tp-header {
+  align-items: flex-end;
+  gap: 24px;
+}
+.tp-header-desc {
+  margin: 8px 0 0;
+  color: var(--text-3);
+  font-size: 13px;
+  line-height: 1.6;
+  max-width: 520px;
+}
+
+/* 顶栏统计 */
+.tp-header-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.tp-stat {
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: 10px 16px;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 120px;
+}
+.tp-stat-info { background: linear-gradient(135deg, rgba(99,102,241,0.08), rgba(59,130,246,0.04)); border-color: rgba(99,102,241,0.22); }
+.tp-stat-ok { background: linear-gradient(135deg, rgba(22,163,74,0.10), rgba(34,197,94,0.04)); border-color: rgba(22,163,74,0.22); }
+.tp-stat-warn { background: linear-gradient(135deg, rgba(245,158,11,0.10), rgba(239,68,68,0.04)); border-color: rgba(245,158,11,0.22); }
+.tp-stat-label { color: var(--text-3); font-size: 12px; letter-spacing: 1px; }
+.tp-stat-num { font-size: 26px; font-weight: 700; color: var(--text-1); font-variant-numeric: tabular-nums; line-height: 1; }
+.tp-stat-unit { color: var(--text-3); font-size: 12px; }
+
+/* 筛选条 */
+.tp-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 260px) 160px 220px auto auto auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+.tp-filter-ht-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 4px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.tp-filter-term {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.tp-filter-actions {
+  justify-self: end;
+  display: inline-flex;
+  gap: 8px;
+}
+
+/* 标签条 */
+.tp-summary-bar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 2px 4px;
+}
+.tp-summary-bar .ant-tag {
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border-2);
+  font-weight: 500;
+}
+
+/* 身份列 */
+.tp-identity {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.tp-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  color: #fff;
+  font-weight: 700;
+  font-size: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.1);
+  flex-shrink: 0;
+}
+.tp-identity-col { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.tp-name-row { display: flex; align-items: center; flex-wrap: wrap; }
+.tp-name { font-size: 15px; font-weight: 600; color: var(--text-1); }
+.tp-phone { font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+.tp-ht-classes { display: flex; gap: 6px; flex-wrap: wrap; }
+.tp-ht-class-tag {
+  background: linear-gradient(135deg, rgba(249,115,22,0.12), rgba(234,179,8,0.06));
+  border: 1px solid rgba(249,115,22,0.22);
+  color: #9a3412;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+/* 职务标签 */
+.tp-position-tags {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  max-width: 420px;
+}
+.tp-position-tag {
+  background: linear-gradient(135deg, #eef2ff, #f8fafc) !important;
+  color: #1e293b !important;
+  border: 1px solid #c7d2fe !important;
+  border-radius: 10px !important;
+  padding: 3px 8px 3px 10px !important;
+  font-size: 12px !important;
+  box-shadow: 0 1px 2px rgba(99,102,241,0.08);
+  line-height: 1.4;
+  margin-inline-end: 0 !important;
+}
+.tp-position-tag .ant-tag-close-icon {
+  margin-inline-start: 4px;
+  color: #6366f1;
+}
+.tp-position-tag:hover {
+  border-color: #818cf8 !important;
+  box-shadow: 0 2px 6px rgba(99,102,241,0.16);
+}
+
+/* 任教班级条目 */
+.tp-class-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  max-width: 360px;
+}
+.tp-class-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-2);
+  border: 1px solid var(--border-2);
+  border-radius: 10px;
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  transition: all 0.15s ease;
+}
+.tp-class-pill:hover {
+  border-color: var(--primary-1);
+  box-shadow: 0 2px 8px rgba(99,102,241,0.12);
+}
+.tp-class-subject-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.8);
+}
+.tp-class-name { color: var(--text-1); font-weight: 500; }
+.tp-class-subject { color: var(--text-2); }
+.tp-class-periods {
+  margin-left: 2px;
+  background: linear-gradient(135deg, rgba(15,23,42,0.04), rgba(2,6,23,0.02));
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 0 6px;
+  font-size: 11px;
+  border: 1px solid var(--border-2);
+}
+
+/* 比例列 */
+.tp-ratio-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tp-ratio-foot {
+  font-size: 12px;
+  color: var(--text-3);
+}
+.tp-ratio-foot b {
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 课数列 */
+.tp-lesson-count {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+}
+.tp-lesson-num {
+  font-size: 30px;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.5px;
+}
+.tp-lesson-unit {
+  color: var(--text-3);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+/* 课表按钮 */
+.tp-schedule-btn {
+  background: linear-gradient(135deg, #6366f1, #22c55e);
+  border: 0 !important;
+  box-shadow: 0 4px 12px rgba(99,102,241,0.25);
+}
+.tp-schedule-btn:hover {
+  box-shadow: 0 6px 18px rgba(99,102,241,0.35);
+  transform: translateY(-1px);
+}
+
+/* modal */
+.tp-modal-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.tp-modal-teacher-name {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-1);
+  padding-right: 8px;
+}
+.tp-modal-schedule {
+  padding-top: 8px;
+  overflow-x: auto;
+}
+.tp-modal-schedule .st-table {
+  max-width: 100%;
+}

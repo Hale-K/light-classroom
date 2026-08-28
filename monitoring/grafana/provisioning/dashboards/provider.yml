@@ -1,0 +1,7 @@
+apiVersion: 1
+providers:
+  - name: 轻课堂
+    folder: 轻课堂
+    type: file
+    options:
+      path: /var/lib/grafana/dashboards

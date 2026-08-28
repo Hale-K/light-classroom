@@ -1,0 +1,218 @@
+/* ============================================
+   学生选课 GaokaoView（gk- 前缀，页面级样式）
+   暖色单色极简：白卡片 + 1px 边框 + 圆角，无重阴影
+   ============================================ */
+
+.gk-page .zh-page-desc {
+  margin: -8px 0 20px;
+}
+
+/* 筛选条 */
+.gk-filters {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.gk-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.gk-field > span {
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.gk-field .ant-input,
+.gk-field .ant-select {
+  width: 150px;
+}
+.gk-chip {
+  margin-left: auto;
+  padding: 6px 12px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.gk-workflow {
+  margin-bottom: 16px;
+  padding: 18px 20px;
+  border: 1px solid #cad6e8;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #f8fbff 0%, #f3f7fc 100%);
+}
+.gk-workflow-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #dce5f1;
+}
+.gk-workflow-head span,
+.gk-workflow-step span {
+  display: block;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.gk-workflow-head strong {
+  display: block;
+  margin-top: 4px;
+  color: #173f82;
+  font-size: 20px;
+}
+.gk-workflow-head p {
+  max-width: 560px;
+  margin: 2px 0 0;
+  color: var(--text-2);
+  line-height: 1.65;
+}
+.gk-workflow-track {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 24px;
+  padding-top: 18px;
+}
+.gk-workflow-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 12px 1fr;
+  gap: 10px;
+}
+.gk-workflow-step:not(:last-child)::after {
+  position: absolute;
+  top: 5px;
+  left: 11px;
+  width: calc(100% + 24px);
+  height: 1px;
+  background: #ccd7e7;
+  content: '';
+}
+.gk-workflow-step i {
+  position: relative;
+  z-index: 1;
+  width: 11px;
+  height: 11px;
+  margin-top: 2px;
+  border: 2px solid #aebcd1;
+  border-radius: 50%;
+  background: #f6f9fd;
+}
+.gk-workflow-step div {
+  position: relative;
+  z-index: 1;
+  padding-right: 8px;
+  background: #f6f9fd;
+}
+.gk-workflow-step strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text-2);
+}
+.gk-workflow-step.is-done i,
+.gk-workflow-step.is-active i {
+  border-color: #2155d9;
+  background: #2155d9;
+}
+.gk-workflow-step.is-active strong {
+  color: #173f82;
+}
+.gk-workflow-warning {
+  margin-bottom: 16px;
+}
+
+/* 指标条 */
+.gk-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.gk-metrics > div {
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.gk-metrics span {
+  display: block;
+  color: var(--text-3);
+  font-size: 12px;
+}
+.gk-metrics strong {
+  display: block;
+  margin-top: 8px;
+  color: var(--ink);
+  font-size: 25px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.5px;
+}
+
+/* 内容双栏 */
+.gk-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.2fr;
+  gap: 16px;
+}
+.gk-card {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.gk-card .ant-card-head {
+  border-bottom: 1px solid var(--border);
+}
+.gk-num {
+  color: var(--ink);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+.gk-note-card .ant-card-body {
+  padding: 20px;
+}
+.gk-note p {
+  margin: 12px 0 0;
+  color: var(--text-2);
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+@media (max-width: 900px) {
+  .gk-filters {
+    flex-wrap: wrap;
+  }
+  .gk-chip {
+    margin-left: 0;
+  }
+  .gk-metrics,
+  .gk-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+@media (max-width: 600px) {
+  .gk-metrics,
+  .gk-grid {
+    grid-template-columns: 1fr;
+  }
+  .gk-workflow-head {
+    display: block;
+  }
+  .gk-workflow-head p {
+    margin-top: 10px;
+  }
+  .gk-workflow-track {
+    grid-template-columns: 1fr;
+  }
+  .gk-workflow-step:not(:last-child)::after {
+    width: 1px;
+    height: calc(100% + 24px);
+  }
+}

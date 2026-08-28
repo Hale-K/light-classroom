@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>魔法学院书架 · Arcane Library</title>
+<style>
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --wood-dark: #2a1810; --wood-mid: #3d2418; --wood-light: #5a3825; --wood-edge: #6b4423;
+    --gold: #c9a84c; --gold-light: #e8d48b; --gold-dim: #8a7230;
+    --parchment: #f0e6d2; --parchment-dark: #d4c4a0;
+  }
+  body {
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse at 50% 0%, rgba(80,50,20,0.3) 0%, transparent 60%),
+      radial-gradient(ellipse at 20% 80%, rgba(40,25,15,0.5) 0%, transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(40,25,15,0.5) 0%, transparent 50%),
+      linear-gradient(180deg, #1a1512 0%, #0f0c0a 100%);
+    font-family: Georgia, 'Times New Roman', serif;
+    color: var(--parchment);
+    overflow-x: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    padding: 40px 20px 60px;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image:
+      repeating-linear-gradient(0deg, transparent, transparent 38px, rgba(0,0,0,0.08) 38px, rgba(0,0,0,0.08) 40px),
+      repeating-linear-gradient(90deg, transparent, transparent 78px, rgba(0,0,0,0.06) 78px, rgba(0,0,0,0.06) 80px);
+    pointer-events: none; z-index: 0;
+  }
+  .library-header { text-align: center; margin-bottom: 36px; position: relative; z-index: 1; }
+  .library-header .crest { font-size: 42px; margin-bottom: 8px; filter: drop-shadow(0 0 12px rgba(201,168,76,0.5)); }
+  .library-header h1 {
+    font-size: 28px; font-weight: normal; letter-spacing: 6px;
+    color: var(--gold-light); text-shadow: 0 0 20px rgba(201,168,76,0.3); margin-bottom: 6px;
+  }
+  .library-header .subtitle { font-size: 12px; letter-spacing: 4px; color: var(--gold-dim); text-transform: uppercase; }
+  .library-header .divider { width: 200px; height: 1px; margin: 14px auto 0; background: linear-gradient(90deg, transparent, var(--gold-dim), transparent); }
+
+  .bookshelf-wrapper { position: relative; z-index: 1; width: 100%; max-width: 860px; }
+  .bookshelf {
+    position: relative;
+    background: linear-gradient(180deg, var(--wood-mid) 0%, var(--wood-dark) 100%);
+    border-radius: 8px 8px 4px 4px;
+    padding: 20px 16px 0;
+    box-shadow: 0 0 0 2px var(--wood-edge), 0 0 0 4px var(--wood-dark), 0 20px 60px rgba(0,0,0,0.6), inset 0 2px 4px rgba(255,200,120,0.08);
+  }
+  .bookshelf::before {
+    content: ''; position: absolute; inset: 0;
+    background-image: repeating-linear-gradient(90deg, transparent 0px, transparent 40px, rgba(0,0,0,0.06) 40px, rgba(0,0,0,0.06) 41px, transparent 41px, transparent 85px, rgba(255,200,120,0.03) 85px, rgba(255,200,120,0.03) 86px);
+    border-radius: inherit; pointer-events: none;
+  }
+  .shelf-top {
+    height: 14px; margin: -20px -16px 16px;
+    background: linear-gradient(180deg, var(--wood-light) 0%, var(--wood-mid) 50%, var(--wood-dark) 100%);
+    border-radius: 8px 8px 0 0; border-bottom: 1px solid var(--wood-edge); position: relative;
+  }
+  .shelf-top::after { content: ''; position: absolute; bottom: -1px; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--gold-dim), transparent); }
+
+  .shelf-row { position: relative; display: flex; align-items: flex-end; gap: 3px; padding: 0 6px; min-height: 140px; }
+  .shelf-board {
+    height: 12px; margin: 0 -16px;
+    background: linear-gradient(180deg, var(--wood-light) 0%, var(--wood-mid) 40%, var(--wood-dark) 100%);
+    border-top: 1px solid var(--wood-edge); border-bottom: 1px solid #1a0e08;
+    position: relative; box-shadow: 0 4px 8px rgba(0,0,0,0.4);
+  }
+  .shelf-board::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent 5%, rgba(201,168,76,0.15) 30%, rgba(201,168,76,0.25) 50%, rgba(201,168,76,0.15) 70%, transparent 95%);
+  }
+
+  .book {
+    position: relative; width: 32px; border-radius: 2px 2px 0 0; cursor: pointer;
+    transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1), box-shadow 0.3s;
+    flex-shrink: 0; display: flex; flex-direction: column; justify-content: flex-end; overflow: hidden;
+  }
+  .book:hover { transform: translateY(-12px); box-shadow: 0 8px 20px rgba(0,0,0,0.5), 0 0 15px var(--book-glow, rgba(201,168,76,0.3)); z-index: 10; }
+  .book::before { content: ''; position: absolute; top: 0; left: 0; right: 0; height: 6px; background: linear-gradient(180deg, rgba(255,255,255,0.15), transparent); }
+  .book::after { content: ''; position: absolute; bottom: 0; left: 0; right: 0; height: 8px; background: linear-gradient(0deg, rgba(0,0,0,0.3), transparent); }
+  .book .spine-line { position: absolute; left: 4px; right: 4px; height: 1px; background: var(--gold); opacity: 0.6; }
+  .book .spine-line.top { top: 14px; }
+  .book .spine-line.bottom { bottom: 14px; }
+  .book .title {
+    writing-mode: vertical-rl; text-orientation: mixed; font-size: 9px; letter-spacing: 1px;
+    color: var(--gold-light); text-shadow: 0 1px 2px rgba(0,0,0,0.5); margin: 0 auto 18px;
+    max-height: 80px; overflow: hidden; opacity: 0.85;
+  }
+  .book .bookmark {
+    position: absolute; top: 0; right: 4px; width: 6px; height: 20px; background: var(--gold);
+    clip-path: polygon(0 0, 100% 0, 100% 100%, 50% 70%, 0 100%); opacity: 0.9;
+  }
+  .book.crimson { background: linear-gradient(90deg, #5a1010, #8b1a1a 30%, #a52a2a 50%, #8b1a1a 70%, #5a1010); --book-glow: rgba(165,42,42,0.4); }
+  .book.navy { background: linear-gradient(90deg, #0a1a3a, #1a3a6a 30%, #2a4a8a 50%, #1a3a6a 70%, #0a1a3a); --book-glow: rgba(42,74,138,0.4); }
+  .book.forest { background: linear-gradient(90deg, #0a2a1a, #1a4a2a 30%, #2a6a3a 50%, #1a4a2a 70%, #0a2a1a); --book-glow: rgba(42,106,58,0.4); }
+  .book.purple { background: linear-gradient(90deg, #2a0a3a, #4a1a6a 30%, #6a2a8a 50%, #4a1a6a 70%, #2a0a3a); --book-glow: rgba(106,42,138,0.4); }
+  .book.brown { background: linear-gradient(90deg, #2a1a0a, #4a2a1a 30%, #6a3a2a 50%, #4a2a1a 70%, #2a1a0a); --book-glow: rgba(106,58,42,0.4); }
+  .book.teal { background: linear-gradient(90deg, #0a2a3a, #1a4a5a 30%, #2a6a7a 50%, #1a4a5a 70%, #0a2a3a); --book-glow: rgba(42,106,122,0.4); }
+  .book.gold-book { background: linear-gradient(90deg, #5a4a10, #8a7a20 30%, #bfa830 50%, #8a7a20 70%, #5a4a10); --book-glow: rgba(191,168,48,0.5); }
+  .book.h-tall { height: 130px; }
+  .book.h-mid { height: 115px; }
+  .book.h-short { height: 100px; }
+  .book.h-fat { width: 40px; }
+  .book.h-thin { width: 26px; }
+  .book.lean-l { transform: rotate(-3deg); transform-origin: bottom center; }
+  .book.lean-r { transform: rotate(3deg); transform-origin: bottom center; }
+  .book.lean-l:hover, .book.lean-r:hover { transform: translateY(-12px) rotate(0deg); }
+
+  .decor { position: relative; flex-shrink: 0; display: flex; align-items: flex-end; justify-content: center; }
+
+  .candle { width: 28px; height: 90px; position: relative; margin: 0 8px; }
+  .candle .holder {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 24px; height: 10px; background: linear-gradient(180deg, var(--gold-light), var(--gold), var(--gold-dim));
+    border-radius: 2px 2px 4px 4px; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .candle .holder::before { content: ''; position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 16px; height: 6px; background: linear-gradient(180deg, var(--gold), var(--gold-dim)); border-radius: 2px; }
+  .candle .wax {
+    position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%);
+    width: 14px; height: 65px; background: linear-gradient(90deg, #d4c4a0, #f0e6d2 30%, #e8dcc0 50%, #f0e6d2 70%, #d4c4a0);
+    border-radius: 2px 2px 1px 1px;
+  }
+  .candle .wick { position: absolute; top: -3px; left: 50%; transform: translateX(-50%); width: 2px; height: 4px; background: #2a1810; }
+  .candle .flame {
+    position: absolute; top: -18px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 18px;
+    background: radial-gradient(ellipse at 50% 70%, #fff8e0 0%, #ffd060 30%, #ff8c20 60%, #ff4500 90%, transparent 100%);
+    border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+    animation: flicker 0.15s ease-in-out infinite alternate;
+    box-shadow: 0 0 20px 8px rgba(255,160,60,0.4), 0 0 40px 16px rgba(255,120,40,0.2);
+  }
+  .candle .flame::after { content: ''; position: absolute; top: 3px; left: 50%; transform: translateX(-50%); width: 4px; height: 8px; background: radial-gradient(ellipse, #fff, #ffe0a0 60%, transparent); border-radius: 50%; }
+  @keyframes flicker {
+    0% { transform: translateX(-50%) scale(1) rotate(-1deg); opacity: 0.95; }
+    25% { transform: translateX(-50%) scale(1.05,0.95) rotate(1deg); opacity: 1; }
+    50% { transform: translateX(-50%) scale(0.95,1.05) rotate(-0.5deg); opacity: 0.9; }
+    75% { transform: translateX(-50%) scale(1.02,0.98) rotate(0.5deg); opacity: 1; }
+    100% { transform: translateX(-50%) scale(1) rotate(1deg); opacity: 0.95; }
+  }
+
+  .crystal-ball { width: 50px; height: 60px; position: relative; margin: 0 10px; }
+  .crystal-ball .base {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 36px; height: 14px; background: linear-gradient(180deg, var(--gold-light), var(--gold), var(--gold-dim));
+    border-radius: 4px 4px 8px 8px; box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+  }
+  .crystal-ball .base::before { content: ''; position: absolute; top: -3px; left: 50%; transform: translateX(-50%); width: 24px; height: 5px; background: linear-gradient(180deg, var(--gold), var(--gold-dim)); border-radius: 2px; }
+  .crystal-ball .orb {
+    position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%);
+    width: 40px; height: 40px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, rgba(200,230,255,0.8) 0%, rgba(100,160,220,0.4) 30%, rgba(40,80,140,0.6) 60%, rgba(20,40,80,0.8) 100%);
+    box-shadow: inset -4px -4px 10px rgba(0,0,0,0.3), inset 4px 4px 10px rgba(255,255,255,0.2), 0 0 20px rgba(100,160,220,0.4), 0 0 40px rgba(80,120,200,0.2);
+    animation: orbGlow 3s ease-in-out infinite;
+  }
+  .crystal-ball .orb::before { content: ''; position: absolute; top: 6px; left: 8px; width: 10px; height: 8px; background: radial-gradient(ellipse, rgba(255,255,255,0.7), transparent); border-radius: 50%; }
+  .crystal-ball .orb::after { content: ''; position: absolute; inset: 0; border-radius: 50%; background: radial-gradient(circle at 60% 70%, rgba(180,100,255,0.3), transparent 50%); animation: orbSwirl 4s ease-in-out infinite; }
+  @keyframes orbGlow {
+    0%,100% { box-shadow: inset -4px -4px 10px rgba(0,0,0,0.3), inset 4px 4px 10px rgba(255,255,255,0.2), 0 0 20px rgba(100,160,220,0.4), 0 0 40px rgba(80,120,200,0.2); }
+    50% { box-shadow: inset -4px -4px 10px rgba(0,0,0,0.3), inset 4px 4px 10px rgba(255,255,255,0.2), 0 0 30px rgba(120,180,255,0.6), 0 0 60px rgba(100,140,220,0.3); }
+  }
+  @keyframes orbSwirl { 0%,100% { transform: rotate(0deg) scale(1); opacity: 0.5; } 50% { transform: rotate(180deg) scale(1.1); opacity: 0.8; } }
+
+  .quill-set { width: 50px; height: 80px; position: relative; margin: 0 8px; }
+  .quill-set .inkwell {
+    position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 28px; height: 22px; background: linear-gradient(180deg, #1a1a2e, #0a0a15);
+    border-radius: 4px 4px 8px 8px; border: 1px solid var(--gold-dim);
+    box-shadow: 0 2px 6px rgba(0,0,0,0.5), inset 0 2px 4px rgba(255,255,255,0.05);
+  }
+  .quill-set .inkwell::before { content: ''; position: absolute; top: -4px; left: 50%; transform: translateX(-50%); width: 18px; height: 5px; background: linear-gradient(180deg, var(--gold), var(--gold-dim)); border-radius: 2px; }
+  .quill-set .quill {
+    position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%) rotate(-15deg);
+    width: 8px; height: 55px;
+    background: linear-gradient(180deg, #f0e6d2 0%, #d4c4a0 40%, #8a7a5a 80%, #3a2a1a 100%);
+    border-radius: 50% 50% 2px 2px / 80% 80% 2px 2px;
+    transform-origin: bottom center; animation: quillSway 3s ease-in-out infinite;
+  }
+  .quill-set .quill::before { content: ''; position: absolute; top: 4px; left: 50%; transform: translateX(-50%); width: 2px; height: 35px; background: rgba(0,0,0,0.15); }
+  @keyframes quillSway { 0%,100% { transform: translateX(-50%) rotate(-15deg); } 50% { transform: translateX(-50%) rotate(-10deg); } }
+
+  .hourglass { width: 36px; height: 70px; position: relative; margin: 0 10px; }
+  .hourglass .frame { position: absolute; inset: 0; border: 2px solid var(--gold); border-radius: 4px; background: linear-gradient(180deg, rgba(201,168,76,0.1), rgba(201,168,76,0.05)); }
+  .hourglass .frame::before, .hourglass .frame::after { content: ''; position: absolute; left: -4px; right: -4px; height: 4px; background: linear-gradient(90deg, var(--gold-dim), var(--gold-light), var(--gold-dim)); border-radius: 2px; }
+  .hourglass .frame::before { top: -2px; }
+  .hourglass .frame::after { bottom: -2px; }
+  .hourglass .sand-top { position: absolute; top: 6px; left: 4px; right: 4px; height: 22px; background: linear-gradient(180deg, #e8d48b, #c9a84c); clip-path: polygon(0 0, 100% 0, 60% 100%, 40% 100%); animation: sandDrop 4s linear infinite; }
+  .hourglass .sand-bottom { position: absolute; bottom: 6px; left: 4px; right: 4px; height: 22px; background: linear-gradient(180deg, #c9a84c, #8a7230); clip-path: polygon(40% 0, 60% 0, 100% 100%, 0 100%); animation: sandRise 4s linear infinite; }
+  @keyframes sandDrop { 0% { height: 22px; } 100% { height: 2px; } }
+  @keyframes sandRise { 0% { height: 2px; } 100% { height: 22px; } }
+
+  .owl-figurine { width: 40px; height: 50px; position: relative; margin: 0 8px; font-size: 36px; display: flex; align-items: flex-end; justify-content: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.5)); animation: owlBlink 4s ease-in-out infinite; }
+  @keyframes owlBlink { 0%,90%,100% { transform: scaleY(1); } 93% { transform: scaleY(0.1); } 96% { transform: scaleY(1); } }
+
+  .scroll { width: 45px; height: 35px; position: relative; margin: 0 8px 0 4px; align-self: flex-end; }
+  .scroll .paper { position: absolute; bottom: 0; left: 6px; right: 6px; height: 28px; background: linear-gradient(180deg, #f0e6d2, #d4c4a0); border-radius: 1px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+  .scroll .paper::before { content: ''; position: absolute; inset: 4px 6px; background: repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(139,90,43,0.15) 3px, rgba(139,90,43,0.15) 4px); }
+  .scroll .roll-left, .scroll .roll-right { position: absolute; bottom: -2px; width: 10px; height: 32px; background: linear-gradient(90deg, var(--wood-dark), var(--wood-mid), var(--wood-dark)); border-radius: 3px; border: 1px solid var(--gold-dim); }
+  .scroll .roll-left { left: 0; }
+  .scroll .roll-right { right: 0; }
+
+  .dust-container { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+  .dust { position: absolute; width: 2px; height: 2px; background: rgba(255,220,150,0.5); border-radius: 50%; animation: dustFloat linear infinite; }
+  @keyframes dustFloat { 0% { transform: translateY(100vh) translateX(0); opacity: 0; } 10% { opacity: 0.6; } 90% { opacity: 0.6; } 100% { transform: translateY(-10vh) translateX(30px); opacity: 0; } }
+
+  .book-tooltip {
+    position: fixed; z-index: 1000;
+    background: linear-gradient(180deg, var(--parchment), var(--parchment-dark));
+    color: #3a2a1a; padding: 14px 18px; border-radius: 4px; border: 1px solid var(--gold-dim);
+    box-shadow: 0 8px 30px rgba(0,0,0,0.5), 0 0 20px rgba(201,168,76,0.2);
+    max-width: 240px; font-size: 13px; line-height: 1.6; pointer-events: none;
+    opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s;
+  }
+  .book-tooltip.show { opacity: 1; transform: translateY(0); }
+  .book-tooltip .tt-title { font-size: 15px; font-weight: bold; color: #5a3825; margin-bottom: 4px; border-bottom: 1px solid rgba(139,90,43,0.3); padding-bottom: 4px; }
+  .book-tooltip .tt-author { font-size: 11px; color: #8a7230; font-style: italic; margin-bottom: 6px; }
+  .book-tooltip .tt-desc { font-size: 12px; color: #5a4a3a; }
+
+  .library-footer { margin-top: 28px; text-align: center; position: relative; z-index: 1; }
+  .library-footer p { font-size: 11px; color: var(--gold-dim); letter-spacing: 2px; }
+  .library-footer .hint { margin-top: 6px; font-size: 10px; color: rgba(201,168,76,0.4); }
+
+  @media (max-width: 640px) {
+    .bookshelf-wrapper { max-width: 100%; }
+    .book { width: 24px; }
+    .book.h-fat { width: 30px; }
+    .book.h-thin { width: 20px; }
+    .book .title { font-size: 7px; max-height: 60px; }
+    .candle, .crystal-ball, .quill-set, .hourglass { transform: scale(0.8); margin: 0 2px; }
+    .library-header h1 { font-size: 20px; letter-spacing: 3px; }
+    .shelf-row { min-height: 110px; }
+    .book.h-tall { height: 100px; }
+    .book.h-mid { height: 90px; }
+    .book.h-short { height: 78px; }
+  }
+</style>
+</head>
+<body>
+<div class="dust-container" id="dustContainer"></div>
+
+<header class="library-header">
+  <div class="crest">📜</div>
+  <h1>ARCANE LIBRARY</h1>
+  <div class="subtitle">魔法学院禁书区 · Restricted Section</div>
+  <div class="divider"></div>
+</header>
+
+<div class="bookshelf-wrapper">
+  <div class="bookshelf">
+    <div class="shelf-top"></div>
+
+    <div class="shelf-row">
+      <div class="book crimson h-tall" data-title="魔咒大全" data-author="梅林·安布罗修斯" data-desc="收录了从基础到高阶的各类魔咒，配有详细施法手势和发音指南。"><span class="spine-line top"></span><span class="title">魔咒大全</span><span class="spine-line bottom"></span></div>
+      <div class="book navy h-mid lean-l" data-title="星象占卜" data-author="诺斯特拉达姆斯" data-desc="通过星辰运行预知未来，包含十二宫位详解与千年预言。"><span class="spine-line top"></span><span class="title">星象占卜</span><span class="spine-line bottom"></span><span class="bookmark"></span></div>
+      <div class="decor"><div class="candle"><div class="holder"></div><div class="wax"><div class="wick"></div><div class="flame"></div></div></div></div>
+      <div class="book forest h-short" data-title="草药图鉴" data-author="尼古拉斯·库尔佩珀" data-desc="七百余种魔法草药的采集、炮制与配伍方法，附手绘彩色插图。"><span class="spine-line top"></span><span class="title">草药图鉴</span><span class="spine-line bottom"></span></div>
+      <div class="book purple h-mid h-fat" data-title="变形术原理" data-author="阿不思·邓布利多" data-desc="从火柴到银针，从老鼠到酒杯，系统讲解变形术的四大法则。"><span class="spine-line top"></span><span class="title">变形术原理</span><span class="spine-line bottom"></span></div>
+      <div class="book brown h-tall lean-r" data-title="魔药配制" data-author="西弗勒斯·斯内普" data-desc="高级魔药制作秘方，包含福灵剂、活地狱汤剂等禁方的精确步骤。"><span class="spine-line top"></span><span class="title">魔药配制</span><span class="spine-line bottom"></span><span class="bookmark"></span></div>
+      <div class="decor"><div class="crystal-ball"><div class="base"></div><div class="orb"></div></div></div>
+      <div class="book teal h-mid" data-title="符文秘典" data-author="奥丁·博尔森" data-desc="北欧古符文的起源与力量，每一枚符文都蕴含着宇宙的基本法则。"><span class="spine-line top"></span><span class="title">符文秘典</span><span class="spine-line bottom"></span></div>
+      <div class="book gold-book h-short h-thin" data-title="贤者之石" data-author="尼可·勒梅" data-desc="炼金术的终极奥秘，点石成金与长生不老的秘密全在其中。"><span class="spine-line top"></span><span class="title">贤者之石</span><span class="spine-line bottom"></span></div>
+    </div>
+    <div class="shelf-board"></div>
+
+    <div class="shelf-row">
+      <div class="decor"><div class="quill-set"><div class="inkwell"></div><div class="quill"></div></div></div>
+      <div class="book navy h-tall" data-title="黑魔法防御" data-author="疯眼汉穆迪" data-desc="面对不可饶恕咒时的防御与反击，包含实战案例与心理建设。"><span class="spine-line top"></span><span class="title">黑魔法防御</span><span class="spine-line bottom"></span></div>
+      <div class="book crimson h-mid lean-l" data-title="吸血鬼编年史" data-author="布拉姆·斯托克" data-desc="德古拉伯爵的真实历史，以及猎杀不死生物的全套方法论。"><span class="spine-line top"></span><span class="title">吸血鬼编年史</span><span class="spine-line bottom"></span></div>
+      <div class="book forest h-short h-fat" data-title="神奇动物在哪里" data-author="纽特·斯卡曼德" data-desc="收录全球八十五种魔法生物的习性、栖息地与危险等级。"><span class="spine-line top"></span><span class="title">神奇动物</span><span class="spine-line bottom"></span><span class="bookmark"></span></div>
+      <div class="decor"><div class="hourglass"><div class="frame"></div><div class="sand-top"></div><div class="sand-bottom"></div></div></div>
+      <div class="book purple h-tall lean-r" data-title="时间魔法" data-author="赫敏·格兰杰" data-desc="时间转换器的制造原理与使用禁忌，篡改时间线的严重后果警示。"><span class="spine-line top"></span><span class="title">时间魔法</span><span class="spine-line bottom"></span></div>
+      <div class="book brown h-mid" data-title="幽灵通信" data-author="差点没头的尼克" data-desc="如何与逝者沟通，招魂术的仪式流程与灵界存在的哲学探讨。"><span class="spine-line top"></span><span class="title">幽灵通信</span><span class="spine-line bottom"></span></div>
+      <div class="decor"><div class="candle"><div class="holder"></div><div class="wax"><div class="wick"></div><div class="flame"></div></div></div></div>
+      <div class="book teal h-short" data-title="水占术" data-author="梅林·安布罗修斯" data-desc="通过水面倒影窥视远方，镜池施法的准备工作与注意力训练法。"><span class="spine-line top"></span><span class="title">水占术</span><span class="spine-line bottom"></span></div>
+      <div class="book gold-book h-mid h-thin" data-title="龙语入门" data-author="查理·韦斯莱" data-desc="龙类的语言体系与情绪表达，包含五十个常用龙语词汇的发音。"><span class="spine-line top"></span><span class="title">龙语入门</span><span class="spine-line bottom"></span><span class="bookmark"></span></div>
+    </div>
+    <div class="shelf-board"></div>
+
+    <div class="shelf-row">
+      <div class="book crimson h-short h-fat" data-title="诅咒破解" data-author="西弗勒斯·斯内普" data-desc="各类诅咒的识别与解除方法，包含反咒、解毒剂与净化仪式。"><span class="spine-line top"></span><span class="title">诅咒破解</span><span class="spine-line bottom"></span></div>
+      <div class="book navy h-tall lean-l" data-title="魁地奇溯源" data-author="肯尼沃思·惠斯普" data-desc="魔法世界最受欢迎运动的完整历史，从古老的飞毯赛到现代世界杯。"><span class="spine-line top"></span><span class="title">魁地奇溯源</span><span class="spine-line bottom"></span></div>
+      <div class="decor"><div class="owl-figurine">🦉</div></div>
+      <div class="book forest h-mid" data-title="魔杖学" data-author="加里克·奥利凡德" data-desc="魔杖木材与杖芯的匹配法则，冬青木、紫衫木、葡萄藤木等特性全解。"><span class="spine-line top"></span><span class="title">魔杖学</span><span class="spine-line bottom"></span><span class="bookmark"></span></div>
+      <div class="book purple h-short" data-title="梦境解读" data-author="弗洛伊德·魔法版" data-desc="魔法师的梦境分析体系，预言梦与日有所思的区分方法。"><span class="spine-line top"></span><span class="title">梦境解读</span><span class="spine-line bottom"></span></div>
+      <div class="decor"><div class="scroll"><div class="roll-left"></div><div class="paper"></div><div class="roll-right"></div></div></div>
+      <div class="book brown h-tall lean-r" data-title="分院帽秘史" data-author="戈德里克·格兰芬多" data-desc="四大创始人的遗物——分院帽的制造过程与每年新生分院的内部机制。"><span class="spine-line top"></span><span class="title">分院帽秘史</span><span class="spine-line bottom"></span></div>
+      <div class="decor"><div class="crystal-ball"><div class="base"></div><div class="orb"></div></div></div>
+      <div class="book teal h-mid h-thin" data-title="幻影移形" data-author="魔法部交通司" data-desc="合法幻影移形的资质考试指南，分体风险与安全距离计算方法。"><span class="spine-line top"></span><span class="title">幻影移形</span><span class="spine-line bottom"></span></div>
+      <div class="book gold-book h-short" data-title="死亡圣器" data-author="贝德尔·博德" data-desc="老魔杖、复活石与隐形斗篷的传说，三兄弟的故事与死神的交易。"><span class="spine-line top"></span><span class="title">死亡圣器</span><span class="spine-line bottom"></span><span class="bookmark"></span></div>
+    </div>
+    <div class="shelf-board"></div>
+  </div>
+</div>
+
+<div class="book-tooltip" id="bookTooltip">
+  <div class="tt-title" id="ttTitle"></div>
+  <div class="tt-author" id="ttAuthor"></div>
+  <div class="tt-desc" id="ttDesc"></div>
+</div>
+
+<footer class="library-footer">
+  <p>✦ 轻触书卷，开启魔法 ✦</p>
+  <div class="hint">悬停抽出 · 点击查阅</div>
+</footer>
+
+<script>
+  const dustContainer = document.getElementById('dustContainer');
+  for (let i = 0; i < 25; i++) {
+    const dust = document.createElement('div');
+    dust.className = 'dust';
+    dust.style.left = Math.random() * 100 + '%';
+    dust.style.animationDuration = (8 + Math.random() * 12) + 's';
+    dust.style.animationDelay = (Math.random() * 10) + 's';
+    dust.style.width = dust.style.height = (1 + Math.random() * 2) + 'px';
+    dust.style.opacity = 0.3 + Math.random() * 0.4;
+    dustContainer.appendChild(dust);
+  }
+
+  const tooltip = document.getElementById('bookTooltip');
+  const ttTitle = document.getElementById('ttTitle');
+  const ttAuthor = document.getElementById('ttAuthor');
+  const ttDesc = document.getElementById('ttDesc');
+
+  document.querySelectorAll('.book').forEach(book => {
+    book.addEventListener('mouseenter', () => {
+      ttTitle.textContent = book.dataset.title || '神秘古籍';
+      ttAuthor.textContent = '— ' + (book.dataset.author || '佚名');
+      ttDesc.textContent = book.dataset.desc || '这本书的内容已被时间遗忘...';
+      tooltip.classList.add('show');
+    });
+    book.addEventListener('mousemove', (e) => {
+      const x = e.clientX + 16, y = e.clientY - 10;
+      const rect = tooltip.getBoundingClientRect();
+      tooltip.style.left = Math.min(x, window.innerWidth - rect.width - 10) + 'px';
+      tooltip.style.top = Math.min(y, window.innerHeight - rect.height - 10) + 'px';
+    });
+    book.addEventListener('mouseleave', () => tooltip.classList.remove('show'));
+    book.addEventListener('click', () => {
+      book.style.filter = 'brightness(1.5) drop-shadow(0 0 12px gold)';
+      setTimeout(() => book.style.filter = '', 400);
+    });
+  });
+</script>
+</body>
+</html>

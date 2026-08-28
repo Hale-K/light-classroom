@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · 考务编排域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper:#f8fafc; --color-ink:#0f172a; --color-muted:#475569; --color-accent:#0ea5e9;
+      --font-sans:'Geist','PingFang SC',system-ui,sans-serif; --font-serif:'Instrument Serif','Noto Serif SC',serif; --font-mono:'Geist Mono',ui-monospace,monospace; }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:3rem 2rem; }
+    .frame { max-width:1120px; width:100%; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.5rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.5rem,2.4vw + .75rem,2rem); font-weight:400; letter-spacing:-0.02em; line-height:1.15; margin-bottom:1.5rem; }
+    svg { width:100%; min-width:900px; display:block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · DOMAIN 4 / 10</p>
+    <h1>考务编排域 · 实体关系</h1>
+    <svg viewBox="0 0 1000 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-exam-title er-exam-desc">
+      <title id="er-exam-title">轻课堂考务编排域实体关系图</title>
+      <desc id="er-exam-desc">考试为核心,关联试卷与考试日程;考点含考场,考生分配与监考可用性挂在考试上,排考配置控制编排。</desc>
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- 连线 -->
+      <path d="M 480 152 L 480 208" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="456" y="158" width="14" height="12" fill="#f8fafc"/><text x="463" y="167" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="456" y="196" width="14" height="12" fill="#f8fafc"/><text x="463" y="205" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <path d="M 624 136 L 704 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="630" y="116" width="24" height="12" fill="#f8fafc"/><text x="642" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="676" y="116" width="24" height="12" fill="#f8fafc"/><text x="688" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="628" y="140" width="76" height="14" fill="#f8fafc"/><text x="666" y="151" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">考生分配</text>
+
+      <path d="M 336 136 L 256 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="304" y="116" width="24" height="12" fill="#f8fafc"/><text x="316" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="258" y="116" width="24" height="12" fill="#f8fafc"/><text x="270" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="264" y="140" width="64" height="14" fill="#f8fafc"/><text x="296" y="151" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">监考可用</text>
+
+      <path d="M 480 360 L 480 416" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="456" y="366" width="14" height="12" fill="#f8fafc"/><text x="463" y="375" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="456" y="404" width="14" height="12" fill="#f8fafc"/><text x="463" y="413" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <path d="M 624 304 L 704 304" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="630" y="284" width="24" height="12" fill="#f8fafc"/><text x="642" y="293" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="676" y="284" width="24" height="12" fill="#f8fafc"/><text x="690" y="293" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+
+      <!-- EXAM(聚合根) -->
+      <g>
+        <rect x="336" y="40" width="288" height="112" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="344" y="46" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="366" y="55" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="344" y="78" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">考试 EXAM</text>
+        <text x="344" y="98" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · name 如 十月月考</text>
+        <text x="344" y="114" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">exam_type · academic_year</text>
+        <text x="344" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">status : preparing/…</text>
+      </g>
+
+      <!-- EXAM_SCHEDULE -->
+      <g>
+        <rect x="336" y="208" width="288" height="152" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="344" y="214" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="366" y="223" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="344" y="246" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">考试日程 EXAM_SCHEDULE</text>
+        <text x="344" y="266" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → exam_id · → paper_id</text>
+        <text x="344" y="282" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ grade_id · → subject_id</text>
+        <text x="344" y="298" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">exam_date · session_index</text>
+        <text x="344" y="330" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: exam+grade+session</text>
+      </g>
+
+      <!-- EXAMROOM -->
+      <g>
+        <rect x="40" y="80" width="216" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">考场 EXAM_ROOM</text>
+        <text x="48" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · name : UK</text>
+        <text x="48" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">capacity · building · room_type</text>
+        <text x="48" y="170" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ source_class_id ⌇</text>
+      </g>
+
+      <!-- CANDIDATE_ASSIGNMENT -->
+      <g>
+        <rect x="704" y="80" width="240" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="712" y="86" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="734" y="95" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="712" y="118" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">考生分配 CANDIDATE</text>
+        <text x="712" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → exam_id · → paper_id</text>
+        <text x="712" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ student_id ⌇ · 考场座位</text>
+        <text x="712" y="170" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: exam+paper+student</text>
+      </g>
+
+      <!-- EXAM_VENUE -->
+      <g>
+        <rect x="336" y="416" width="288" height="104" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="344" y="422" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="366" y="431" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="344" y="454" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">考点 EXAM_VENUE</text>
+        <text x="344" y="474" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → exam_id · name : UK</text>
+        <text x="344" y="490" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">capacity · source_type · confirmed_at</text>
+        <text x="344" y="506" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: tenant+exam+name</text>
+      </g>
+
+      <!-- INVIGILATOR + CONFIG 辅助 -->
+      <g>
+        <rect x="704" y="248" width="240" height="152" rx="6" fill="rgba(15,23,42,0.03)" stroke="rgba(15,23,42,0.30)" stroke-width="1" stroke-dasharray="4,3"/>
+        <rect x="712" y="254" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.30)" stroke-width="0.8"/>
+        <text x="734" y="263" fill="rgba(15,23,42,0.60)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">AUX</text>
+        <text x="712" y="286" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">监考与排考配置</text>
+        <text x="712" y="306" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">invigilator_avail :</text>
+        <text x="712" y="322" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">  UK exam+teacher · 可时段</text>
+        <text x="712" y="338" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">scheduling_config :</text>
+        <text x="712" y="354" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">  UK tenant+exam 编排参数</text>
+        <text x="712" y="370" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">room_assignment :</text>
+        <text x="712" y="386" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">  UK schedule+room_name</text>
+      </g>
+
+      <!-- 图例 -->
+      <line x1="40" y1="560" x2="936" y2="560" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="580" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="576" x2="140" y2="576" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="579" fill="#475569" font-size="9" font-family="'Geist', sans-serif">外键</text>
+      <line x1="196" y1="576" x2="228" y2="576" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="236" y="579" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑/辅助</text>
+      <rect x="312" y="568" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="336" y="579" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根</text>
+      <text x="420" y="579" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">paper/question 见扫描阅卷域</text>
+    </svg>
+  </div>
+</body>
+</html>

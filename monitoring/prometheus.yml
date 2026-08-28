@@ -1,0 +1,25 @@
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  # Prometheus 自监控
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # 轻课堂后端 FastAPI(host.docker.internal 指向宿主机)
+  - job_name: light-classroom-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ['host.docker.internal:8001']
+
+  # 宿主机 CPU/内存/磁盘
+  - job_name: node
+    static_configs:
+      - targets: ['node-exporter:9100']
+
+  # 容器指标
+  - job_name: cadvisor
+    static_configs:
+      - targets: ['cadvisor:8080']

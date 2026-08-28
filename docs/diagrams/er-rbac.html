@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · RBAC 权限域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper:#f8fafc; --color-ink:#0f172a; --color-muted:#475569; --color-accent:#0ea5e9;
+      --font-sans:'Geist','PingFang SC',system-ui,sans-serif; --font-serif:'Instrument Serif','Noto Serif SC',serif; --font-mono:'Geist Mono',ui-monospace,monospace; }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:3rem 2rem; }
+    .frame { max-width:1120px; width:100%; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.5rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.5rem,2.4vw + .75rem,2rem); font-weight:400; letter-spacing:-0.02em; line-height:1.15; margin-bottom:1.5rem; }
+    svg { width:100%; min-width:900px; display:block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · DOMAIN 3 / 10</p>
+    <h1>RBAC 权限域 · 实体关系</h1>
+    <svg viewBox="0 0 1000 600" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-rbac-title er-rbac-desc">
+      <title id="er-rbac-title">轻课堂RBAC权限域实体关系图</title>
+      <desc id="er-rbac-desc">用户与角色多对多,角色关联权限点与菜单,组织任职把用户挂到组织单元,审计日志记录写操作留痕。</desc>
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- 连线 -->
+      <path d="M 264 136 L 352 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="270" y="116" width="24" height="12" fill="#f8fafc"/><text x="282" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="324" y="116" width="24" height="12" fill="#f8fafc"/><text x="336" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="272" y="140" width="76" height="14" fill="#f8fafc"/><text x="310" y="151" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">user_role 关联</text>
+
+      <path d="M 568 136 L 656 136" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="574" y="116" width="24" height="12" fill="#f8fafc"/><text x="586" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="628" y="116" width="24" height="12" fill="#f8fafc"/><text x="640" y="125" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="576" y="140" width="76" height="14" fill="#f8fafc"/><text x="612" y="151" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">role_perm</text>
+
+      <path d="M 804 216 L 804 272" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="812" y="222" width="24" height="12" fill="#f8fafc"/><text x="824" y="231" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="812" y="258" width="24" height="12" fill="#f8fafc"/><text x="824" y="267" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+
+      <path d="M 128 216 L 128 272" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="136" y="222" width="24" height="12" fill="#f8fafc"/><text x="148" y="231" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="136" y="258" width="24" height="12" fill="#f8fafc"/><text x="148" y="267" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="100" y="236" width="60" height="14" fill="#f8fafc"/><text x="130" y="247" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">任职</text>
+
+      <path d="M 264 456 L 352 456" fill="none" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="286" y="436" width="48" height="12" fill="#f8fafc"/><text x="310" y="445" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">写入</text>
+
+      <!-- USER(聚合根) -->
+      <g>
+        <rect x="40" y="72" width="224" height="144" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="48" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="70" y="87" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="48" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">用户 USER</text>
+        <text x="48" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="48" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">name : 姓名</text>
+        <text x="48" y="162" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">phone : UK 登录账号</text>
+        <text x="48" y="178" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">role : 基础角色</text>
+        <text x="48" y="194" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">tenant_id : 所属学校</text>
+      </g>
+
+      <!-- ROLE -->
+      <g>
+        <rect x="352" y="72" width="216" height="128" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="360" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="382" y="87" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="360" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">角色 ROLE</text>
+        <text x="360" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id : int</text>
+        <text x="360" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">code : UK teacher/…</text>
+        <text x="360" y="162" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">name · description</text>
+        <text x="360" y="184" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: tenant + code</text>
+      </g>
+
+      <!-- PERMISSION -->
+      <g>
+        <rect x="656" y="72" width="240" height="144" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="664" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="686" y="87" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="664" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">权限点 PERMISSION</text>
+        <text x="664" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · code : UK</text>
+        <text x="664" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">module : 所属模块</text>
+        <text x="664" y="162" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">如 paper:create</text>
+        <text x="664" y="194" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">接口级 require_permission</text>
+      </g>
+
+      <!-- MENU -->
+      <g>
+        <rect x="656" y="272" width="240" height="120" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="664" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="686" y="287" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="664" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">菜单 MENU</text>
+        <text x="664" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → parent_id 树</text>
+        <text x="664" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">path · icon · sort</text>
+        <text x="664" y="362" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ permission_id ⌇ 可空</text>
+      </g>
+
+      <!-- STAFF_APPOINTMENT -->
+      <g>
+        <rect x="40" y="272" width="224" height="128" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="48" y="278" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="70" y="287" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="48" y="310" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">任职 APPOINTMENT</text>
+        <text x="48" y="330" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → staff_id</text>
+        <text x="48" y="346" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ organization_unit_id</text>
+        <text x="48" y="362" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">position_code · academic_year</text>
+        <text x="48" y="384" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">UK: 单元+人+岗+学年</text>
+      </g>
+
+      <!-- AUDIT_LOG -->
+      <g>
+        <rect x="352" y="416" width="416" height="104" rx="6" fill="rgba(15,23,42,0.03)" stroke="rgba(15,23,42,0.30)" stroke-width="1" stroke-dasharray="4,3"/>
+        <rect x="360" y="422" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.30)" stroke-width="0.8"/>
+        <text x="382" y="431" fill="rgba(15,23,42,0.60)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">AUX</text>
+        <text x="360" y="454" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">审计日志 AUDIT_LOG</text>
+        <text x="360" y="474" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">action · resource · resource_id · old/new_value · ip</text>
+        <text x="360" y="490" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">由中间件对全部写操作留痕 · → user_id ⌇</text>
+        <text x="360" y="506" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">关联表 user_role / role_perm / role_menu 均为纯关联表(去重 UK)</text>
+      </g>
+
+      <!-- 图例 -->
+      <line x1="40" y1="548" x2="936" y2="548" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="568" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="564" x2="140" y2="564" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="567" fill="#475569" font-size="9" font-family="'Geist', sans-serif">外键</text>
+      <line x1="196" y1="564" x2="228" y2="564" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="236" y="567" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑/辅助</text>
+      <rect x="312" y="556" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="336" y="567" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根</text>
+    </svg>
+  </div>
+</body>
+</html>

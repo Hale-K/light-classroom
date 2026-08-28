@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>轻课堂 · 预测分析域 ER 图</title>
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Geist:wght@400;500;600&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root { --color-paper:#f8fafc; --color-ink:#0f172a; --color-muted:#475569; --color-accent:#0ea5e9;
+      --font-sans:'Geist','PingFang SC',system-ui,sans-serif; --font-serif:'Instrument Serif','Noto Serif SC',serif; --font-mono:'Geist Mono',ui-monospace,monospace; }
+    body { font-family:var(--font-sans); background:var(--color-paper); color:var(--color-ink); min-height:100vh; display:flex; align-items:center; justify-content:center; padding:3rem 2rem; }
+    .frame { max-width:1120px; width:100%; }
+    .eyebrow { font-family:var(--font-mono); font-size:0.66rem; font-weight:500; letter-spacing:0.18em; text-transform:uppercase; color:var(--color-muted); margin-bottom:0.5rem; }
+    h1 { font-family:var(--font-serif); font-size:clamp(1.5rem,2.4vw + .75rem,2rem); font-weight:400; letter-spacing:-0.02em; line-height:1.15; margin-bottom:1.5rem; }
+    svg { width:100%; min-width:900px; display:block; }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <p class="eyebrow">ER / DATA MODEL · DOMAIN 8 / 10</p>
+    <h1>预测分析域 · 实体关系</h1>
+    <svg viewBox="0 0 1000 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="er-prediction-title er-prediction-desc">
+      <title id="er-prediction-title">轻课堂预测分析域实体关系图</title>
+      <desc id="er-prediction-desc">预测任务生成逐题预测项并收集教师反馈,成绩趋势与教师出题风格、热门考点作为分析的输入快照。</desc>
+      <rect width="100%" height="100%" fill="#f8fafc"/>
+
+      <!-- 连线 -->
+      <path d="M 500 152 L 500 208" fill="none" stroke="#475569" stroke-width="1"/>
+      <rect x="476" y="158" width="14" height="12" fill="#f8fafc"/><text x="483" y="167" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">1</text>
+      <rect x="476" y="196" width="14" height="12" fill="#f8fafc"/><text x="483" y="205" font-size="8" fill="#475569" font-family="'Geist Mono', monospace" text-anchor="middle">N</text>
+      <rect x="508" y="172" width="60" height="14" fill="#f8fafc"/><text x="538" y="183" font-size="9" fill="#475569" font-family="'Geist', sans-serif" text-anchor="middle">预测明细</text>
+
+      <path d="M 636 128 L 704 128" fill="none" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="644" y="108" width="48" height="12" fill="#f8fafc"/><text x="668" y="117" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">反馈</text>
+
+      <path d="M 364 128 L 296 128" fill="none" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <rect x="310" y="108" width="48" height="12" fill="#f8fafc"/><text x="334" y="117" font-size="8" fill="#7a8399" font-family="'Geist Mono', monospace" text-anchor="middle">输入</text>
+
+      <!-- PREDICTION_TASK(聚合根) -->
+      <g>
+        <rect x="364" y="48" width="272" height="104" rx="6" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1.2"/>
+        <rect x="372" y="54" width="44" height="12" rx="2" fill="none" stroke="rgba(14,165,233,0.50)" stroke-width="0.8"/>
+        <text x="394" y="63" fill="rgba(2,132,199,0.90)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ROOT</text>
+        <text x="372" y="86" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">预测任务 PREDICTION</text>
+        <text x="372" y="106" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · scope · status</text>
+        <text x="372" y="122" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ exam_id · academic_year</text>
+        <text x="372" y="138" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">跑批生成考点/题型预测</text>
+      </g>
+
+      <!-- PREDICTION_ITEM -->
+      <g>
+        <rect x="364" y="208" width="272" height="120" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="372" y="214" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="394" y="223" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="372" y="246" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">预测项 ITEM</text>
+        <text x="372" y="266" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → task_id</text>
+        <text x="372" y="282" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ knowledge_point ⌇</text>
+        <text x="372" y="298" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">hit_rate · confidence</text>
+        <text x="372" y="316" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">命中/题型/分值预测</text>
+      </g>
+
+      <!-- PREDICTION_FEEDBACK -->
+      <g>
+        <rect x="704" y="72" width="240" height="112" rx="6" fill="#ffffff" stroke="#0f172a" stroke-width="1"/>
+        <rect x="712" y="78" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.40)" stroke-width="0.8"/>
+        <text x="734" y="87" fill="rgba(15,23,42,0.80)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">ENTITY</text>
+        <text x="712" y="110" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">预测反馈 FEEDBACK</text>
+        <text x="712" y="130" fill="#475569" font-size="9" font-family="'Geist Mono', monospace"># id · → task_id · → item_id</text>
+        <text x="712" y="146" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">→ teacher_id · 采纳/驳回</text>
+        <text x="712" y="162" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">教师校正预测模型</text>
+      </g>
+
+      <!-- 快照输入组 -->
+      <g>
+        <rect x="40" y="64" width="256" height="128" rx="6" fill="rgba(15,23,42,0.03)" stroke="rgba(15,23,42,0.30)" stroke-width="1" stroke-dasharray="4,3"/>
+        <rect x="48" y="70" width="44" height="12" rx="2" fill="none" stroke="rgba(15,23,42,0.30)" stroke-width="0.8"/>
+        <text x="70" y="79" fill="rgba(15,23,42,0.60)" font-size="7" font-family="'Geist Mono', monospace" text-anchor="middle" letter-spacing="0.08em">INPUT</text>
+        <text x="48" y="102" fill="#0f172a" font-size="12" font-weight="600" font-family="'Geist', sans-serif">分析快照输入</text>
+        <text x="48" y="122" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">exam_trend : 成绩趋势</text>
+        <text x="48" y="138" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">teacher_style : 出题风格</text>
+        <text x="48" y="154" fill="#475569" font-size="9" font-family="'Geist Mono', monospace">hottopic : 热门考点</text>
+        <text x="48" y="176" fill="#94a3b8" font-size="9" font-family="'Geist Mono', monospace">按时间追加的快照,不修改历史</text>
+      </g>
+
+      <!-- 图例 -->
+      <line x1="40" y1="420" x2="936" y2="420" stroke="rgba(148,163,184,0.30)" stroke-width="0.8"/>
+      <text x="40" y="440" fill="#475569" font-size="8" font-family="'Geist Mono', monospace" letter-spacing="0.14em">LEGEND</text>
+      <line x1="108" y1="436" x2="140" y2="436" stroke="#475569" stroke-width="1"/>
+      <text x="148" y="439" fill="#475569" font-size="9" font-family="'Geist', sans-serif">外键</text>
+      <line x1="196" y1="436" x2="228" y2="436" stroke="#475569" stroke-width="1" stroke-dasharray="4,3"/>
+      <text x="236" y="439" fill="#475569" font-size="9" font-family="'Geist', sans-serif">逻辑/辅助</text>
+      <rect x="312" y="428" width="16" height="12" rx="2" fill="rgba(14,165,233,0.10)" stroke="#0ea5e9" stroke-width="1"/>
+      <text x="336" y="439" fill="#475569" font-size="9" font-family="'Geist', sans-serif">聚合根</text>
+    </svg>
+  </div>
+</body>
+</html>
