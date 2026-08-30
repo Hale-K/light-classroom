@@ -1,10 +1,11 @@
-import { Button, Form, InputNumber, Modal, Select, Tag } from 'antd'
+import { Button, Modal, Select, Tag } from 'antd'
 import type {
   ScheduleRuleConfig,
   ScheduleRuleSuggestion,
   ScheduleStrategyOption,
   ScheduleValidationIssue,
   ScheduleValidationResult,
+  SchedulingGridConfig,
 } from '@/types'
 
 interface RuleDesignerProps {
@@ -17,6 +18,7 @@ interface RuleDesignerProps {
   onChange: (value: ScheduleRuleConfig) => void
   onValidate: () => void
   onClose: () => void
+  gridConfig: SchedulingGridConfig
   readOnly?: boolean
   onConfirm?: () => void
 }
@@ -33,6 +35,7 @@ export default function RuleDesigner({
   onChange,
   onValidate,
   onClose,
+  gridConfig,
   readOnly = false,
   onConfirm,
 }: RuleDesignerProps) {
@@ -40,14 +43,19 @@ export default function RuleDesigner({
     onChange({ ...value, [field]: next })
   }
 
-  const slotOptions = Array.from({ length: value.days }, (_, day) =>
-    Array.from({ length: value.periods_per_day }, (_, period) => ({
+  const lastConfiguredDay = gridConfig.daily_periods.reduce((lastDay, periods, day) => periods > 0 ? day + 1 : lastDay, 0)
+  const configuredDayCount = Math.min(Math.max(gridConfig.days, lastConfiguredDay), 7)
+  const slotDayProfiles = Array.from({ length: configuredDayCount }, (_, day) => ({
+    day,
+    periods: gridConfig.daily_periods[day] ?? 0,
+  })).filter(({ periods }) => periods > 0)
+  const slotOptions = slotDayProfiles.map(({ day, periods }) =>
+    Array.from({ length: periods }, (_, period) => ({
       value: `${day + 1}-${period + 1}`,
       label: `${WEEKDAY_LABELS[day]} 第 ${period + 1} 节`,
     })),
   ).flat()
 
-  const availableSlots = value.days * value.periods_per_day - value.forbidden_slots.length
   const activeSuggestion = (suggestion: ScheduleRuleSuggestion) =>
     suggestion.field !== 'weekly_periods' && suggestion.field in value
 
@@ -87,52 +95,7 @@ export default function RuleDesigner({
       <div className="sk-rule-layout">
         <div className="sk-rule-editor">
           <section className="sk-rule-section">
-            <div className="sk-rule-title"><span>01</span><div><h3>时间结构</h3><p>定义一周有多少个可用于排课的时段。</p></div></div>
-            <Form layout="vertical" className="sk-form-grid">
-              <Form.Item label="每周教学日">
-                <InputNumber disabled={readOnly} value={value.days} min={1} max={7} onChange={(next) => update('days', next ?? 5)} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item label="每日节数">
-                <InputNumber disabled={readOnly} value={value.periods_per_day} min={1} max={12} onChange={(next) => update('periods_per_day', next ?? 7)} style={{ width: '100%' }} />
-              </Form.Item>
-            </Form>
-            <div className="sk-rule-equation">
-              <span>基础容量</span>
-              <strong>{value.days} 天 × {value.periods_per_day} 节 − {value.forbidden_slots.length} 个禁排 = {availableSlots} 节</strong>
-            </div>
-          </section>
-
-          <section className="sk-rule-section">
-            <div className="sk-rule-title"><span>02</span><div><h3>负荷上限</h3><p>这些是硬约束，任何生成策略都不能突破。</p></div></div>
-            <Form layout="vertical" className="sk-form-grid">
-              <Form.Item label="班级每日最多课时">
-                <InputNumber disabled={readOnly} value={value.max_class_lessons_per_day} min={1} max={value.periods_per_day} onChange={(next) => update('max_class_lessons_per_day', next ?? value.periods_per_day)} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item label="教师每日最多课时">
-                <InputNumber disabled={readOnly} value={value.max_teacher_lessons_per_day} min={1} max={value.periods_per_day} onChange={(next) => update('max_teacher_lessons_per_day', next ?? value.periods_per_day)} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item label="教师每周最多课时">
-                <InputNumber disabled={readOnly} value={value.max_teacher_weekly_periods ?? 30} min={1} max={60} onChange={(next) => update('max_teacher_weekly_periods', next ?? 30)} style={{ width: '100%' }} />
-              </Form.Item>
-              <Form.Item label="体育课每周节数">
-                <InputNumber
-                  disabled={readOnly}
-                  value={value.pe_weekly_periods}
-                  min={1}
-                  max={6}
-                  placeholder="默认 4"
-                  onChange={(next) => update('pe_weekly_periods', next ?? undefined)}
-                  style={{ width: '100%' }}
-                />
-              </Form.Item>
-              <Form.Item label="同班同科每日最多课时">
-                <InputNumber disabled={readOnly} value={value.max_same_subject_per_day} min={1} max={6} onChange={(next) => update('max_same_subject_per_day', next ?? 1)} style={{ width: '100%' }} />
-              </Form.Item>
-            </Form>
-          </section>
-
-          <section className="sk-rule-section">
-            <div className="sk-rule-title"><span>03</span><div><h3>禁排时段</h3><p>适用于全校例会、教研活动或场地关闭。</p></div></div>
+            <div className="sk-rule-title"><span>01</span><div><h3>禁排时段</h3><p>适用于全校例会、教研活动或场地关闭；可排课时段统一来自“周格设置”。</p></div></div>
             <Select
               disabled={readOnly}
               mode="multiple"
@@ -141,12 +104,11 @@ export default function RuleDesigner({
               options={slotOptions}
               optionFilterProp="label"
               placeholder="选择全校不可排课的时段"
-              style={{ width: '100%' }}
             />
           </section>
 
           <section className="sk-rule-section">
-            <div className="sk-rule-title"><span>04</span><div><h3>优化策略</h3><p>属于软约束，选择顺序就是算法比较优先级。</p></div></div>
+            <div className="sk-rule-title"><span>02</span><div><h3>优化策略</h3><p>属于软约束，选择顺序就是算法比较优先级；默认优先分散同科课程，避免集中到同一天。</p></div></div>
             <Select
               disabled={readOnly}
               mode="multiple"
@@ -159,7 +121,6 @@ export default function RuleDesigner({
               }))}
               optionFilterProp="label"
               placeholder="至少选择一种策略"
-              style={{ width: '100%' }}
             />
             <ol className="sk-strategy-order">
               {value.strategy_codes.map((code, index) => {

@@ -11,7 +11,7 @@ from sqlalchemy import JSON, UniqueConstraint
 from app.db.base import TimestampMixin, TenantMixin
 from app.models.enums import (
     BaseUserRole, CheckInMethod, CheckInStatus, EnrollmentStatus,
-    Gender, SeatLayout, SeatRule, SeatStatus, StudentStatus, TenantType, UserStatus,
+    Gender, SeatLayout, SeatRule, SeatStatus, StudentStatus, TenantType, UserStatus, WeekParity,
 )
 
 
@@ -66,6 +66,7 @@ class OrganizationUnit(TimestampMixin, TenantMixin, SQLModel, table=True):
     parent_id: int | None = Field(default=None, index=True)
     name: str = Field(max_length=100)
     unit_type: str = Field(default="department", max_length=30, index=True)
+    subject_id: int | None = Field(default=None, index=True, foreign_key="subject.id", ondelete="RESTRICT", description="学科组关联的租户科目")
     grade_id: int | None = Field(default=None, index=True, foreign_key="grade.id", ondelete="RESTRICT", description="年级部对应的基础年级")
     academic_year: str | None = Field(default=None, max_length=20, index=True)
     cohort_label: str | None = Field(default=None, max_length=30, index=True)
@@ -114,7 +115,7 @@ class Class(TenantMixin, SQLModel, table=True):
     campus_id: int | None = Field(default=None, index=True)
     home_room_id: int | None = Field(default=None, index=True)
     class_type: str = Field(default="regular", max_length=30, index=True, description="尖子班/重点班/普通班等")
-    planned_student_count: int | None = Field(default=None, ge=1, le=45)
+    planned_student_count: int | None = Field(default=None, ge=1, le=5000)
     name: str = Field(max_length=50, description="如 高一(1)班")
     cohort_label: str | None = Field(default=None, max_length=30, index=True, description="届（入学年，如 2026）；同一届的班级随学年升级整体改挂年级")
     head_teacher_id: int | None = Field(default=None, description="班主任(本班×全学科视角)")
@@ -168,10 +169,16 @@ class StudentGradeMembership(TimestampMixin, TenantMixin, SQLModel, table=True):
 
 
 class Subject(SQLModel, table=True):
-    """学科（全局字典）"""
-    __table_args__ = {"comment": "学科字典"}
+    """学科字典；tenant_id 为空表示系统公共科目。"""
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_subject_tenant_name"),
+        {"comment": "学科字典"},
+    )
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(max_length=20, unique=True, description="语文/数学/英语/物理/化学/生物/政治/历史/地理")
+    tenant_id: int | None = Field(default=None, index=True, description="租户 ID；为空表示系统公共科目")
+    name: str = Field(max_length=20, description="语文/数学/英语/物理/化学/生物/政治/历史/地理")
+    course_type: str = Field(default="subject", max_length=20, description="subject=学科课；activity=活动课")
+    evening_study_allowed: bool = Field(default=False, description="是否允许安排为主课晚自习")
 
 
 class TeachingAssignment(TenantMixin, SQLModel, table=True):
@@ -184,13 +191,36 @@ class TeachingAssignment(TenantMixin, SQLModel, table=True):
         {"comment": "任教关系"},
     )
     id: int | None = Field(default=None, primary_key=True)
-    teacher_id: int = Field(index=True, foreign_key="user.id", ondelete="RESTRICT")
+    teacher_id: int | None = Field(default=None, index=True, foreign_key="user.id", ondelete="RESTRICT")
     subject_id: int = Field(index=True, foreign_key="subject.id", ondelete="RESTRICT")
     class_id: int = Field(index=True, foreign_key="class.id", ondelete="RESTRICT")
     academic_year: str = Field(max_length=20, description="如 2026-2027")
     term: str = Field(default="1", max_length=20)
-    weekly_periods: int = Field(default=4, ge=1, le=20)
+    weekly_periods: float = Field(default=4, ge=0.5, le=20)
     room: str | None = Field(default=None, max_length=50)
+
+
+class CourseHourPlan(TenantMixin, SQLModel, table=True):
+    """班级课时方案；不绑定教师，实际任教关系在 TeachingAssignment 中维护。"""
+    __tablename__ = "coursehourplan"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "academic_year", "term", "class_id", "subject_id", "week_parity",
+            name="uq_coursehourplan_scope",
+        ),
+        {"comment": "班级课时方案"},
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    class_id: int = Field(index=True, foreign_key="class.id", ondelete="CASCADE")
+    subject_id: int = Field(index=True, foreign_key="subject.id", ondelete="RESTRICT")
+    academic_year: str = Field(max_length=20, index=True, description="如 2026-2027")
+    term: str = Field(default="1", max_length=20, index=True)
+    weekday_periods: float = Field(default=4, ge=0, le=20, description="周一至周五课时")
+    saturday_periods: float = Field(default=0, ge=0, le=10, description="周六课时")
+    weekly_periods: float = Field(default=4, ge=0.5, le=20)
+    week_parity: WeekParity = Field(default=WeekParity.all, max_length=10, index=True, description="每周/单周/双周")
+    evening_periods_odd: int = Field(default=0, ge=0, le=1, description="单周晚自习节数")
+    evening_periods_even: int = Field(default=0, ge=0, le=1, description="双周晚自习节数")
 
 
 class KnowledgePoint(SQLModel, table=True):
@@ -234,8 +264,8 @@ class Schedule(TimestampMixin, TenantMixin, SQLModel, table=True):
     """行政班课表项"""
     __table_args__ = (
         UniqueConstraint(
-            "tenant_id", "academic_year", "term", "class_id", "weekday", "period",
-            name="uq_schedule_class_slot",
+            "tenant_id", "academic_year", "term", "class_id", "weekday", "period", "week_parity",
+            name="uq_schedule_class_slot_parity",
         ),
         {"comment": "课表项", "sqlite_autoincrement": True},
     )
@@ -248,6 +278,7 @@ class Schedule(TimestampMixin, TenantMixin, SQLModel, table=True):
     room: str | None = Field(default=None, max_length=50)
     academic_year: str = Field(max_length=20)
     term: str = Field(default=None, max_length=20)
+    week_parity: WeekParity = Field(default=WeekParity.all, description="周次: all=每周 odd=单周 even=双周")
 
 
 class SeatArrangement(TimestampMixin, TenantMixin, SQLModel, table=True):

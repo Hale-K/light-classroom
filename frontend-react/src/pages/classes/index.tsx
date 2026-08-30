@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App, Button, Input, Modal, Select, Space, Switch, Table, Tabs, Tag } from 'antd'
 import type { TableProps } from 'antd'
 import { examApi, orgApi, organizationApi, schedulingApi, staffApi } from '@/api'
-import { allocateWithSubjectBudget } from './head-teacher-allocation'
+import { allocateHeadTeachers, coreSubjectScore as getCoreSubjectScore } from './head-teacher-allocation'
 import PageHeader from '@/components/PageHeader'
 import TableCard from '@/components/TableCard'
 import DictTag from '@/components/DictTag'
@@ -87,7 +87,6 @@ export default function ClassesView() {
   const [batchHeadTeacherDialog, setBatchHeadTeacherDialog] = useState(false)
   const [batchHeadTeacherMap, setBatchHeadTeacherMap] = useState<Record<number, number>>({})
   const [batchHeadTeacherSaving, setBatchHeadTeacherSaving] = useState(false)
-  const [batchHeadTeacherMaxLead, setBatchHeadTeacherMaxLead] = useState(1)
   const [batchHeadTeacherPage, setBatchHeadTeacherPage] = useState(1)
   const [batchHeadTeacherPageSize, setBatchHeadTeacherPageSize] = useState(10)
   const [academicYear, setAcademicYear] = useState(() => {
@@ -207,9 +206,9 @@ export default function ClassesView() {
     }
     const teachers = new Map(headTeacherCandidates.map((item) => [item.id, item]))
     const assignedCandidates = (teachingAssignmentsByClass.get(classId) ?? [])
-      .filter((assignment) => teachers.has(assignment.teacher_id))
+      .filter((assignment) => assignment.teacher_id !== null && teachers.has(assignment.teacher_id))
       .map((assignment) => ({
-        teacher: teachers.get(assignment.teacher_id)!,
+        teacher: teachers.get(assignment.teacher_id!)!,
         subjectName: assignment.subject_name,
       }))
       .sort((left, right) => subjectPriority(left.subjectName) - subjectPriority(right.subjectName) || left.teacher.id - right.teacher.id)
@@ -302,13 +301,6 @@ export default function ClassesView() {
     // 先打开方案窗口，避免等待配置接口时按钮看起来无响应
     setBatchHeadTeacherDialog(true)
     setBatchHeadTeacherPage(1)
-    let maxLead = 1
-    try {
-      maxLead = (await orgApi.headTeacherPolicy()).max_lead_classes || 1
-    } catch {
-      // 接口不可用时沿用后端默认值，仍允许预览方案
-    }
-    setBatchHeadTeacherMaxLead(maxLead)
     const nextMap: Record<number, number> = Object.fromEntries(
       filteredClasses
         .filter((item) => item.head_teacher_id)
@@ -321,23 +313,24 @@ export default function ClassesView() {
       setBatchHeadTeacherMap(nextMap)
       return
     }
-    // 按学科配额分配:每科最多出 (普通带班×人数 − 班级数) 个班主任,防止单一学科教师全被封顶在班主任 2 班
-    const budgetCandidates = pendingClasses.flatMap((item) =>
-      classHeadTeacherCandidates(item.id).map((entry) => ({ id: entry.teacher.id, subject: entry.subjectName || '其他' })))
+    // 先按主科优先汇总候选，再轮换分配；班主任不设置固定带班数上限。
+    const budgetCandidates = pendingClasses.flatMap((item) => {
+      const assignments = teachingAssignmentsByClass.get(item.id) ?? []
+      return classHeadTeacherCandidates(item.id).map((teacher) => ({
+        id: teacher.id,
+        subject: assignments.find((assignment) => assignment.teacher_id === teacher.id)?.subject_name || '其他',
+      }))
+    })
     // 去重(同一教师跨班候选只算一次),学科取其主科归属
     const uniqueCandidates = Array.from(new Map(budgetCandidates.map((c) => [c.id, c])).values())
-    const budget = allocateWithSubjectBudget(
-      pendingClasses.map((item) => item.id),
-      uniqueCandidates,
-      filteredClasses.length,
-      maxLead,
-    )
-    Object.assign(nextMap, budget.assignments)
+    const orderedCandidates = uniqueCandidates
+      .sort((left, right) => getCoreSubjectScore([left.subject]) - getCoreSubjectScore([right.subject]) || left.id - right.id)
+      .map((item) => ({ id: item.id }))
+    const allocation = allocateHeadTeachers(pendingClasses.map((item) => item.id), orderedCandidates, nextMap)
+    Object.assign(nextMap, allocation.assignments)
     setBatchHeadTeacherMap(nextMap)
-    if (budget.capacityShort) {
-      message.warning(`按带班上限测算,候选教师配额不足以覆盖全部班级(仍有 ${budget.unfilledCount} 个班)。建议补充对应学科教师或上调班主任带班数`)
-    } else if (budget.unfilledCount) {
-      message.warning(`当前可用班主任不足,仍有 ${budget.unfilledCount} 个班级待安排`)
+    if (allocation.unfilledCount) {
+      message.warning(`当前可用班主任不足,仍有 ${allocation.unfilledCount} 个班级待安排`)
     }
   }
 
@@ -737,7 +730,7 @@ export default function ClassesView() {
         confirmLoading={batchHeadTeacherSaving}
         width={720}
       >
-        <p className="zh-page-desc">仅从已任教本班的教师中安排；语文、数学、英语优先。确认时会为入选教师补充班主任角色，已安排的班主任保持不变，每位教师最多担任 {batchHeadTeacherMaxLead} 个班。</p>
+        <p className="zh-page-desc">仅从已任教本班的教师中安排；语文、数学、英语优先。确认时会为入选教师补充班主任角色，已安排的班主任保持不变；同一教师可担任多个班的班主任。</p>
         <Table
           rowKey="id"
           size="small"

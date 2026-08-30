@@ -137,9 +137,9 @@ export const schedulingApi = {
   strategies: () => unwrap<ScheduleStrategyOption[]>(http.get('/scheduling/strategies')),
   createTeacher: (data: { name: string; phone: string; password: string }) =>
     unwrap(http.post('/scheduling/teachers', data)),
-  createSubject: (name: string) => unwrap(http.post('/scheduling/subjects', { name })),
+  createSubject: (name: string, courseType: 'subject' | 'activity' = 'subject') => unwrap(http.post('/scheduling/subjects', { name, course_type: courseType })),
   saveAssignment: (data: {
-    teacher_id: number
+    teacher_id?: number
     subject_id: number
     class_id: number
     academic_year: string

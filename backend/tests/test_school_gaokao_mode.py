@@ -54,23 +54,23 @@ def test_menu_capabilities_follow_school_gaokao_mode():
         "工作台",
         "学校管理",
         "人员配置",
+        "资源管理",
         "学籍管理",
         "选科走班",
         "教学安排",
         "考试实施",
         "协同办公",
-        "资源管理",
     ]
     assert [group["icon"] for group in new_groups] == [
         "dashboard",
         "school",
         "users",
+        "building",
         "file-text",
         "git-branch",
         "book",
         "clipboard",
         "message",
-        "building",
     ]
     assert [
         item["key"]
@@ -78,11 +78,13 @@ def test_menu_capabilities_follow_school_gaokao_mode():
         for item in group["children"]
     ] == [
         "dashboard",
-        "settings",
+        "settings", "subjects",
         "staff-accounts",
         "roles",
         "permissions",
+        "facilities",
         "students",
+        "teacher-profiles",
         "classes",
         "gaokao",
         "scheduling",
@@ -91,7 +93,6 @@ def test_menu_capabilities_follow_school_gaokao_mode():
         "exam-scheduling",
         "scans",
         "meetings",
-        "facilities",
     ]
     assert "gaokao" in new_items
     assert "stream-choice" not in new_items
@@ -100,7 +101,7 @@ def test_menu_capabilities_follow_school_gaokao_mode():
     assert "scheduling" in traditional_items
     assert all(item["available"] for group in new_groups for item in group["children"])
     assert {
-        "students", "classes", "staff-accounts", "roles", "permissions", "settings"
+        "students", "classes", "staff-accounts", "roles", "permissions", "settings", "subjects"
     }.issubset(new_items)
 
 
@@ -108,7 +109,7 @@ def test_academic_director_gets_teaching_management_but_not_school_admin_menus()
     groups = build_menu("academic_director", "3+1+2")
     items = {item["key"] for group in groups for item in group["children"]}
 
-    assert {"classes", "scheduling", "gaokao", "exam-scheduling"}.issubset(items)
+    assert {"classes", "scheduling", "subjects", "gaokao", "exam-scheduling"}.issubset(items)
     assert "organization" not in items
     assert "staff-accounts" not in items
     assert "staff-positions" not in items

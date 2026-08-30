@@ -874,14 +874,18 @@ kbd {
    ============================================ */
 .schedule-table-wrap {
   overflow: auto;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  border-radius: 8px;
+  box-sizing: border-box;
+  transform: none;
+  border: 1px solid #d9e2ec;
+  background: #f3f7fb;
+  border-radius: 16px;
+  box-shadow: 0 8px 22px rgba(15, 35, 60, 0.05);
 }
 .schedule-table {
-  min-width: 840px;
+  min-width: calc(108px + var(--schedule-days, 5) * 170px);
   display: grid;
-  grid-template-columns: 88px repeat(5, 1fr);
+  grid-template-columns: 108px repeat(var(--schedule-days, 5), minmax(170px, 1fr));
+  transform: none;
 }
 .st-corner,
 .st-day-head,
@@ -897,12 +901,12 @@ kbd {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background: var(--surface-2);
+  background: #f8fafc;
 }
 .st-corner span,
 .st-period strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 14px;
 }
 .st-corner small,
 .st-period small,
@@ -914,47 +918,177 @@ kbd {
 .st-corner,
 .st-period,
 .st-lesson {
-  min-height: 76px;
+  min-height: 82px;
 }
 .st-day-head {
-  min-height: 54px;
-  border-top: 3px solid var(--ink);
+  min-height: 74px;
+  border-top: 3px solid #172338;
+  transition: background-color 160ms ease, box-shadow 160ms ease;
 }
 .st-day-head strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+}
+.st-day-head.current {
+  background: #eaf6fd;
+  box-shadow: inset 0 -3px 0 var(--primary);
 }
 .st-lesson {
-  padding: 11px 12px;
+  position: relative;
+  padding: 9px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  background: var(--surface);
+  background: #f4f8fc;
+  transition: background-color 160ms ease;
 }
 .st-lesson.filled {
-  border-left: 3px solid var(--blue-ink);
-  background: #f7fbfe;
+  border-left: 0;
+  background: #f4f8fc;
 }
-.st-lesson strong {
+.st-lesson.filled:hover {
+  background: #edf5fb;
+}
+.st-lessons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 58px;
+  box-sizing: border-box;
+  padding: 11px 8px;
+  border: 1px solid #dce6ef;
+  border-left: 4px solid #8ca1b5;
+  border-radius: 11px;
+  background: #fff;
+  box-shadow: 0 3px 9px rgba(25, 42, 70, 0.05);
+  transition: transform 160ms ease, box-shadow 160ms ease;
+}
+.st-lessons:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 7px 16px rgba(25, 42, 70, 0.09);
+}
+.st-subject-line {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 3px;
+  width: 100%;
+}
+.st-subject-token {
+  display: inline-flex;
+  align-items: center;
+}
+.st-subject-name {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  line-height: 1.35;
 }
-.st-lesson span {
-  margin-top: 5px;
-  color: var(--text-2);
-  font-size: 11px;
+.st-subject-divider {
+  margin: 0 5px;
+  color: #a5b4c2;
+  font-size: 15px;
+  font-weight: 700;
+}
+.st-lesson-entry {
+  display: flex;
+  min-width: 72px;
+  flex-direction: column;
+  align-items: center;
+}
+.st-evening-period {
+  background: #eaf5fb;
+  border-top: 1px solid #b9d9eb;
+}
+.st-unavailable-mark {
+  align-self: center;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 600;
 }
 .st-lesson small {
   margin-top: 3px;
   color: var(--blue-ink);
   font-size: 10px;
 }
+.st-class-line {
+  margin-top: 5px !important;
+  color: #71859b !important;
+  font-size: 11px !important;
+  font-weight: 500;
+  line-height: 1.35;
+  text-align: center;
+}
 .st-empty-mark {
   align-self: center;
-  color: var(--text-3);
+  color: #a7b4c1;
+  font-size: 16px;
 }
-.schedule-table > :nth-child(6n) {
-  border-right: 0;
+.st-tone-language {
+  border-left-color: #2b93c9;
+  background: #f4fbff;
+}
+.st-tone-math {
+  border-left-color: #7367c9;
+  background: #f8f7ff;
+}
+.st-tone-science {
+  border-left-color: #42a47b;
+  background: #f4fbf7;
+}
+.st-tone-humanities {
+  border-left-color: #d69a3a;
+  background: #fffaf1;
+}
+.st-tone-pe,
+.st-tone-activity {
+  border-left-color: #8d79c7;
+  background: #faf8ff;
+}
+.st-tone-self-study {
+  border-left-color: #a0aab5;
+  background: #f8fafc;
+}
+.st-tone-multi {
+  border-left-color: #8798aa;
+  background: #f8fafc;
+}
+.st-subject-language {
+  color: #17628a;
+}
+.st-subject-math {
+  color: #51458f;
+}
+.st-subject-science {
+  color: #28694e;
+}
+.st-subject-humanities {
+  color: #8d5615;
+}
+.st-subject-pe {
+  color: #68499a;
+}
+.st-subject-activity {
+  color: #58428f;
+}
+.st-subject-self-study {
+  color: #7e8994;
+}
+@media (max-width: 900px) {
+  .schedule-table {
+    min-width: calc(92px + var(--schedule-days, 5) * 146px);
+    grid-template-columns: 92px repeat(var(--schedule-days, 5), minmax(146px, 1fr));
+  }
+  .st-subject-name {
+    font-size: 14px;
+  }
+  .st-lesson {
+    padding: 7px;
+  }
 }
 @media print {
   .schedule-table-wrap {

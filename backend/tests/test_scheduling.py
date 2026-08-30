@@ -7,11 +7,13 @@ from app.services.scheduling import (
     ExamRoomResource,
     arrange_students,
     arrange_exam_candidates,
+    build_evening_study_items,
     diagnose_staffing_gaps,
     expand_schedule,
     generate_exam_schedule,
     generate_schedule,
     normalize_exam_room_resources,
+    compact_class_gaps,
     repair_class_gaps,
     resolve_exam_candidates,
     validate_schedule_requirements,
@@ -90,6 +92,48 @@ def test_remaining_gap_reports_the_subject_teacher_conflict_and_staffing_need():
     }]
 
 
+def test_evening_study_items_use_course_hours_and_teaching_relations():
+    assignments = [
+        {
+            "id": 101,
+            "class_id": 1,
+            "subject_id": 10,
+            "teacher_id": 1001,
+            "room": "高一（1）班",
+            "week_parity": "all",
+            "evening_periods_odd": 1,
+            "evening_periods_even": 1,
+        },
+        {
+            "id": 102,
+            "class_id": 1,
+            "subject_id": 20,
+            "teacher_id": 1002,
+            "room": "高一（1）班",
+            "week_parity": "all",
+            "evening_periods_odd": 0,
+            "evening_periods_even": 1,
+        },
+    ]
+
+    items = build_evening_study_items(
+        assignments,
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 1, 0, 0, 0, 0, 0],
+        activity_subject_id=999,
+    )
+
+    assert [
+        (item.week_parity.value, item.weekday, item.period, item.subject_id, item.teacher_id)
+        for item in items
+    ] == [
+        ("odd", 1, 9, 10, 1001), ("odd", 2, 9, 999, None),
+        ("even", 1, 9, 10, 1001), ("even", 2, 9, 20, 1002),
+    ]
+
+
 def test_cross_class_gap_repair_relocates_a_teacher_blocker():
     from app.services.scheduling import ScheduleItem
 
@@ -113,6 +157,36 @@ def test_cross_class_gap_repair_relocates_a_teacher_blocker():
     assert class_one_monday == [1, 2, 3, 4, 5, 6]
     assert len({(item.class_id, item.weekday, item.period) for item in repaired}) == len(repaired)
     assert len({(item.teacher_id, item.weekday, item.period) for item in repaired}) == len(repaired)
+
+
+def test_class_gap_repair_leaves_empty_slots_only_after_the_last_lesson():
+    from app.services.scheduling import ScheduleItem
+
+    items = [
+        ScheduleItem(period=3, weekday=1, class_id=1, teacher_id=10,
+                     subject_id=1, assignment_id=1),
+        ScheduleItem(period=4, weekday=1, class_id=1, teacher_id=11,
+                     subject_id=2, assignment_id=2),
+    ]
+
+    repaired = repair_class_gaps(items, days=1, periods_per_day=4)
+
+    assert sorted(item.period for item in repaired) == [1, 2]
+
+
+def test_compact_class_gaps_moves_a_non_conflicting_lesson_forward():
+    from app.services.scheduling import ScheduleItem
+
+    items = [
+        ScheduleItem(period=2, weekday=1, class_id=1, teacher_id=10,
+                     subject_id=1, assignment_id=1),
+        ScheduleItem(period=4, weekday=1, class_id=1, teacher_id=11,
+                     subject_id=2, assignment_id=2),
+    ]
+
+    compacted = compact_class_gaps(items, days=1, periods_per_day=4)
+
+    assert sorted(item.period for item in compacted) == [1, 2]
 
 
 def test_generate_schedule_has_no_teacher_or_class_conflicts():
@@ -144,6 +218,28 @@ def test_validate_schedule_requirements_reports_class_capacity_shortage():
     assert [(issue.code, issue.entity_id, issue.requested, issue.capacity) for issue in result.issues] == [
         ("class_capacity_exceeded", 7, 5, 4),
     ]
+
+
+def test_activity_teacher_is_not_counted_in_subject_workload_or_class_count():
+    result = validate_schedule_requirements(
+        [
+            {"id": 1, "class_id": 1, "subject_id": 10, "teacher_id": 7, "weekly_periods": 5},
+            {
+                "id": 2,
+                "class_id": 2,
+                "subject_id": 20,
+                "teacher_id": 7,
+                "weekly_periods": 1,
+                "counts_toward_teacher_load": False,
+            },
+        ],
+        days=1,
+        periods_per_day=8,
+        max_teacher_weekly_periods=5,
+    )
+
+    assert result.valid is True
+    assert not any(item.entity_type == "teacher" for item in result.issues)
 
 
 def test_subject_capacity_shortage_explains_rule_and_suggests_a_valid_limit():
@@ -233,6 +329,23 @@ def test_generate_schedule_accepts_a_registered_strategy_combination():
     assert len(result.items) == 11
     assert len({(item.class_id, item.weekday, item.period) for item in result.items}) == 11
     assert len({(item.teacher_id, item.weekday, item.period) for item in result.items}) == 11
+
+
+def test_generate_schedule_spreads_same_subject_without_a_daily_cap():
+    result = generate_schedule(
+        [{"id": 1, "class_id": 1, "subject_id": 1, "teacher_id": 1, "weekly_periods": 8}],
+        days=5,
+        periods_per_day=8,
+        strategy_codes=["daily_balance"],
+    )
+
+    daily_counts = {
+        weekday: sum(item.weekday == weekday for item in result.items)
+        for weekday in range(1, 6)
+    }
+    assert result.unplaced == []
+    assert all(count >= 1 for count in daily_counts.values())
+    assert max(daily_counts.values()) == 2
 
 
 def test_generate_schedule_preserves_required_weekly_periods():

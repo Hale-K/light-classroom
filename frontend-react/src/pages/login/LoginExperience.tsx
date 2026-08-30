@@ -1,5 +1,5 @@
-import { Button, Form, Input } from 'antd'
-import Icon from '@/components/Icon'
+import { useEffect, useRef, useState } from 'react'
+import { Form, Input } from 'antd'
 import { APP_NAME } from '@/types'
 import './login-experience.css'
 
@@ -13,79 +13,110 @@ interface LoginExperienceProps {
   onSubmit: (values: LoginExperienceForm) => void
 }
 
+const VIDEO_SRC = '/videos/mainframe-hero.mp4'
+
 export default function LoginExperience({ submitting, onSubmit }: LoginExperienceProps) {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const targetTimeRef = useRef(0)
+  const previousXRef = useRef<number | null>(null)
+  const seekingRef = useRef(false)
+  const [menuOpen, setMenuOpen] = useState(false)
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const handleMouseMove = (event: MouseEvent) => {
+      if (!video.duration || !Number.isFinite(video.duration)) return
+      const previousX = previousXRef.current
+      previousXRef.current = event.clientX
+      if (previousX === null) return
+
+      const delta = event.clientX - previousX
+      const offset = (delta / Math.max(window.innerWidth, 1)) * 0.8 * video.duration
+      targetTimeRef.current = Math.min(video.duration, Math.max(0, targetTimeRef.current + offset))
+
+      if (!seekingRef.current) {
+        seekingRef.current = true
+        video.currentTime = targetTimeRef.current
+      }
+    }
+
+    const handleMouseLeave = () => {
+      previousXRef.current = null
+    }
+
+    const handleLoadedMetadata = () => {
+      targetTimeRef.current = video.currentTime
+    }
+
+    const handleSeeked = () => {
+      if (Math.abs(video.currentTime - targetTimeRef.current) > 0.01) {
+        video.currentTime = targetTimeRef.current
+        return
+      }
+      seekingRef.current = false
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseleave', handleMouseLeave)
+    video.addEventListener('loadedmetadata', handleLoadedMetadata)
+    video.addEventListener('seeked', handleSeeked)
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseleave', handleMouseLeave)
+      video.removeEventListener('loadedmetadata', handleLoadedMetadata)
+      video.removeEventListener('seeked', handleSeeked)
+    }
+  }, [])
+
+  const closeMenu = () => setMenuOpen(false)
+
   return (
     <main className="login-experience" aria-label="轻课堂登录">
-      <section className="login-experience__intro" aria-labelledby="login-intro-title">
-        <div className="login-experience__intro-inner">
-          <div className="login-experience__brand">
-            <span className="login-experience__brand-mark">轻</span>
-            <span>
-              <strong>{APP_NAME}</strong>
-              <small>轻课堂教务系统</small>
-            </span>
-          </div>
+      <video ref={videoRef} className="login-experience__bg-video" aria-hidden="true" muted playsInline preload="auto" src={VIDEO_SRC} />
+      <div className="login-experience__video-tint" aria-hidden="true" />
+      <div className="login-experience__grain" aria-hidden="true" />
+      <div className="login-experience__frame" aria-hidden="true"><span /><span /><span /><span /></div>
 
-          <div className="login-experience__message">
-            <p className="login-experience__eyebrow">SCHOOL OPERATIONS / 01</p>
-            <h1 id="login-intro-title">让每一次教学安排，<em>有据可循。</em></h1>
-            <p className="login-experience__lead">
-              从排课、排考到班级与座位管理，把学校每天发生的复杂事务，收拢成清晰可执行的工作流。
-            </p>
-          </div>
-
-          <div className="login-experience__signals" aria-label="系统能力">
-            <div><b>01</b><span>统一教务工作台</span></div>
-            <div><b>02</b><span>按学校隔离数据</span></div>
-            <div><b>03</b><span>全流程留痕可追溯</span></div>
-          </div>
-
-          <p className="login-experience__edition">EDUCATION MANAGEMENT PLATFORM · 2026</p>
+      <header className="login-experience__nav">
+        <a className="login-experience__brand" href="#login-card" onClick={closeMenu}>
+          <span className="login-experience__brand-name">轻课堂<sup>®</sup></span>
+          <span className="login-experience__brand-mark">✳︎</span>
+        </a>
+        <nav className="login-experience__links" aria-label="主导航">
+          <a href="#login-card">排课</a><span>, </span><a href="#login-card">排考</a><span>, </span><a href="#login-card">班级</a><span>, </span><a href="#login-card">教师</a>
+        </nav>
+        <div className="login-experience__nav-actions">
+          <a className="login-experience__contact" href="#login-card">进入工作台</a>
+          <button type="button" className={`login-experience__menu-toggle${menuOpen ? ' is-open' : ''}`} aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><span /><span /><span /></button>
         </div>
-      </section>
+      </header>
 
-      <section className="login-experience__form-side" aria-labelledby="login-form-title">
-        <div className="login-experience__form-wrap">
-          <div className="login-experience__form-heading">
-            <span className="login-experience__section-index">WORKSPACE ACCESS</span>
-            <h2 id="login-form-title">登录工作台</h2>
-            <p>使用学校分配的账号继续工作。</p>
-          </div>
+      <div className={`login-experience__mobile-menu${menuOpen ? ' is-open' : ''}`} aria-hidden={!menuOpen}>
+        <a href="#login-card" onClick={closeMenu}>排课</a><a href="#login-card" onClick={closeMenu}>排考</a><a href="#login-card" onClick={closeMenu}>班级</a><a href="#login-card" onClick={closeMenu}>教师</a><a href="#login-card" onClick={closeMenu}>进入工作台</a>
+      </div>
 
+      <section className="login-experience__content">
+        <div id="login-card" className="login-experience__card" role="group" aria-labelledby="login-form-title">
+          <div className="login-experience__card-topline"><span>工作台入口</span><span>// 01</span></div>
+          <div className="login-experience__form-heading"><h2 id="login-form-title">登录轻课堂</h2><span>SECURE ACCESS</span></div>
           <Form<LoginExperienceForm> layout="vertical" requiredMark={false} onFinish={onSubmit}>
-            <Form.Item
-              name="phone"
-              label="手机号"
-              rules={[
-                { required: true, message: '请输入手机号' },
-                { pattern: /^1\d{10}$/, message: '手机号格式不正确' },
-              ]}
-            >
-              <Input
-                size="large"
-                prefix={<Icon name="users" size={16} />}
-                placeholder="请输入手机号"
-                maxLength={11}
-                autoFocus
-              />
+            <Form.Item name="phone" label="手机号" rules={[{ required: true, message: '请输入手机号' }, { pattern: /^1\d{10}$/, message: '手机号格式不正确' }]}>
+              <Input size="large" placeholder="请输入手机号" maxLength={11} autoFocus autoComplete="username" />
             </Form.Item>
             <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-              <Input.Password size="large" prefix={<Icon name="keyboard" size={16} />} placeholder="请输入密码" />
+              <Input.Password size="large" placeholder="请输入密码" autoComplete="current-password" />
             </Form.Item>
-            <Button className="login-experience__submit" type="primary" htmlType="submit" block size="large" loading={submitting}>
-              进入工作台
-              <Icon name="arrow-right" size={16} />
-            </Button>
+            <button type="submit" className="login-experience__submit" disabled={submitting}><span>{submitting ? '正在进入…' : '进入工作台'}</span><span aria-hidden="true">↗</span></button>
           </Form>
-
-          <div className="login-experience__trust">
-            <span><i />学校数据隔离</span>
-            <span><i />私有化部署</span>
-            <span><i />操作全程留痕</span>
-          </div>
-          <p className="login-experience__copyright">{APP_NAME} · 轻课堂 <span>© 2026</span></p>
+          <div className="login-experience__trust"><span><i />学校数据隔离</span><span><i />操作全程留痕</span></div>
+          <p className="login-experience__card-footer">{APP_NAME} / SCHOOL ADMINISTRATION PLATFORM</p>
         </div>
       </section>
+
+      <footer className="login-experience__footer"><span>轻课堂 · 学校教务管理平台</span><span>© 2026 LIGHTCLASS</span></footer>
     </main>
   )
 }

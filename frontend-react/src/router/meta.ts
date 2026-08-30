@@ -19,6 +19,7 @@ const TITLE_MAP: Record<string, string> = {
   '/exam-calendar': '考试日程',
   '/exam-invigilators': '监考教师',
   '/settings': '系统设置',
+  '/subjects': '科目管理',
   '/campus-buildings': '空间资源',
   '/rooms': '场室资源',
   '/meetings': '会议管理',

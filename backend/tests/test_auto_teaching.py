@@ -80,7 +80,6 @@ def test_scope_rule_pins_teacher_to_subject():
         assignments,
         [100, 101],
         [TeacherScopeRule(teacher_id=1, class_id=101, subject_id=10, mode="allow")],
-        max_classes_per_teacher=3,
     )
     created_keys = {(item["teacher_id"], item["subject_id"], item["class_id"]) for item in created}
     # 101 班的 10 学科按固定规则由教师 1 担任
@@ -100,7 +99,6 @@ def test_pin_rule_does_not_restrict_other_classes():
         [100, 101, 102],
         [TeacherScopeRule(teacher_id=1, class_id=100, mode="allow")],
         max_weekly_periods=30,
-        max_classes_per_teacher=3,
     )
     created_keys = {(item["teacher_id"], item["subject_id"], item["class_id"]) for item in created}
     # 教师 1 固定带 100(已满足),还能继续带 101、102
@@ -136,7 +134,6 @@ def test_auto_teaching_covers_classes_without_existing_relations():
         [],
         weekly_periods=4,
         max_weekly_periods=20,
-        max_classes_per_teacher=4,
         subject_ids=[10, 20],
     )
     # 没有教师具备学科资格 → 全部无法匹配（合理：必须先有教师/学科基础数据）
@@ -156,7 +153,6 @@ def test_auto_teaching_all_classes_when_subject_ids_given():
         [],
         weekly_periods=4,
         max_weekly_periods=20,
-        max_classes_per_teacher=4,
         subject_ids=[10, 20],
     )
     created_keys = {(item["teacher_id"], item["subject_id"], item["class_id"]) for item in created}
@@ -217,8 +213,8 @@ def test_time_structure_reports_class_capacity_skip():
     assert any("班级周课时已达上限" in item["reason"] for item in skipped), skipped
 
 
-def test_head_teachers_are_limited_to_two_classes_while_other_teachers_can_take_three():
-    """班主任保留本班且最多带 2 班，非班主任可以带 3 班。"""
+def test_head_teachers_and_subject_teachers_have_no_class_count_limit():
+    """班主任和任课教师的班级数量不设固定上限，课时上限仍然生效。"""
     class_ids = list(range(1, 39))
     head_teacher_ids = list(range(101, 114))
     other_teacher_ids = list(range(201, 205))
@@ -233,8 +229,6 @@ def test_head_teachers_are_limited_to_two_classes_while_other_teachers_can_take_
         rules,
         weekly_periods=5,
         max_weekly_periods=20,
-        max_classes_per_teacher=3,
-        teacher_max_classes={teacher_id: 2 for teacher_id in head_teacher_ids},
         subject_ids=[10],
         subject_weekly_periods={10: 5},
         teacher_subject_fallback={teacher_id: [10] for teacher_id in [*head_teacher_ids, *other_teacher_ids]},
@@ -246,9 +240,46 @@ def test_head_teachers_are_limited_to_two_classes_while_other_teachers_can_take_
     }
     assert skipped == []
     assert len(created) == 38
-    assert max(class_counts[teacher_id] for teacher_id in head_teacher_ids) <= 2
-    assert max(class_counts[teacher_id] for teacher_id in other_teacher_ids) <= 3
-    assert sorted(class_counts.values(), reverse=True) == [3, 3, 3, 3, *([2] * 13)]
+    assert max(class_counts.values()) <= 4  # 20 节周上限 ÷ 每班 5 节
+
+
+def test_auto_teaching_does_not_limit_classes_per_teacher():
+    """教师可以跨多个班任教，自动匹配只受课时和授课资格约束。"""
+    assignments = [{"teacher_id": 1, "subject_id": 10, "class_id": 1, "weekly_periods": 5}]
+
+    created, skipped = build_auto_assignments(
+        assignments,
+        [1, 2, 3, 4],
+        [],
+        weekly_periods=5,
+        max_weekly_periods=30,
+        teacher_subject_fallback={1: [10]},
+        subject_ids=[10],
+    )
+
+    assert {item["class_id"] for item in created} == {2, 3, 4}
+    assert skipped == []
+
+
+def test_activity_relation_without_teacher_is_ignored_by_auto_teaching():
+    """活动关系没有任课教师，不应参与自动任教匹配或触发类型转换错误。"""
+    created, skipped = build_auto_assignments(
+        [{"teacher_id": None, "subject_id": 99, "class_id": 1, "weekly_periods": 1}],
+        [1],
+        [],
+        subject_ids=[10],
+        teacher_subject_fallback={1: [10]},
+    )
+
+    assert created == [{
+        "teacher_id": 1,
+        "subject_id": 10,
+        "class_id": 1,
+        "weekly_periods": 3,
+        "student_count": None,
+        "suggested_weekly_periods": 3,
+    }]
+    assert skipped == []
 
 
 def test_unassigned_teacher_cannot_receive_a_class():
@@ -259,7 +290,6 @@ def test_unassigned_teacher_cannot_receive_a_class():
         eligible_teacher_ids=[101],
         weekly_periods=5,
         max_weekly_periods=30,
-        max_classes_per_teacher=3,
     )
 
     assert len(created) == 1
@@ -276,7 +306,6 @@ def test_stale_assignment_from_unassigned_teacher_is_rebuilt():
         eligible_teacher_ids=[101],
         weekly_periods=5,
         max_weekly_periods=30,
-        max_classes_per_teacher=3,
     )
 
     assert len(created) == 1

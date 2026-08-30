@@ -281,7 +281,7 @@ async def preview_academic_year_rollover(
 ):
     """只读预览：不修改届次、班级、学生或任教关系。"""
     plan = build_rollover_plan(body.source_entry_year)
-    source_label = f"{body.source_entry_year}届"
+    source_label = str(body.source_entry_year)
     classes = (await session.execute(select(Class).where(
         Class.tenant_id == user.tenant_id,
         Class.cohort_label == source_label,
@@ -309,7 +309,7 @@ async def preview_academic_year_rollover(
         "source_entry_year": body.source_entry_year,
         "source_cohort_label": source_label,
         "target_entry_year": plan.target_entry_year,
-        "target_cohort_label": f"{plan.target_entry_year}届",
+        "target_cohort_label": str(plan.target_entry_year),
         "source_academic_year": plan.source_academic_year,
         "target_academic_year": plan.target_academic_year,
         "class_count": len(classes),
@@ -332,7 +332,7 @@ async def commit_academic_year_rollover(
     if user.role != BaseUserRole.director:
         raise HTTPException(status_code=403, detail="仅校长可以执行学年滚动")
     plan = build_rollover_plan(body.source_entry_year)
-    source_label = f"{body.source_entry_year}届"
+    source_label = str(body.source_entry_year)
     history_config = (await session.execute(select(TenantConfig).where(
         TenantConfig.tenant_id == user.tenant_id,
         TenantConfig.config_key == "academic_year_rollover_history",
@@ -362,13 +362,13 @@ async def commit_academic_year_rollover(
             continue
         existing = (await session.execute(select(Class).where(
             Class.tenant_id == user.tenant_id, Class.grade_id == target_grade_id,
-            Class.cohort_label == f"{plan.target_entry_year}届", Class.name == promoted_class_name(old.name, level),
+            Class.cohort_label == str(plan.target_entry_year), Class.name == promoted_class_name(old.name, level),
         ))).scalars().first()
         new_class = existing or Class(
             tenant_id=user.tenant_id, grade_id=target_grade_id, campus_id=old.campus_id,
             home_room_id=old.home_room_id, class_type=old.class_type,
             planned_student_count=old.planned_student_count, name=promoted_class_name(old.name, level),
-            cohort_label=f"{plan.target_entry_year}届", head_teacher_id=old.head_teacher_id,
+            cohort_label=str(plan.target_entry_year), head_teacher_id=old.head_teacher_id,
             deputy_head_teacher_id=old.deputy_head_teacher_id,
         )
         if existing is None:
@@ -409,7 +409,7 @@ async def commit_academic_year_rollover(
             # 每个年级部对应“当前在读届”：滚动后高一是新生届，高二/高三分别沿用上一届。
             cohort_year = plan.target_entry_year - level + 1
             unit.name = f"{cohort_year}届 · {grade_labels[level]}"
-            unit.cohort_label = f"{cohort_year}届"
+            unit.cohort_label = str(cohort_year)
             unit.academic_year = plan.target_academic_year
     if years_config is None:
         session.add(TenantConfig(tenant_id=user.tenant_id, config_key="academic_years", config_value=next_value, updated_by=user.id))

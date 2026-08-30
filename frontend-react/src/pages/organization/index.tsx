@@ -3,16 +3,17 @@ import type { CSSProperties } from 'react'
 import type { Key } from 'react'
 import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tree } from 'antd'
 import type { DataNode } from 'antd/es/tree'
-import { organizationApi, orgApi } from '@/api'
+import { organizationApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import Icon from '@/components/Icon'
-import type { OrganizationTreeResult, OrganizationUnit, OrganizationUnitType } from '@/types'
+import type { OrganizationTreeResult, OrganizationUnit, OrganizationUnitType, SubjectInfo } from '@/types'
 import { academicYearOptions } from '@/academicYear'
 import { flattenOrganizationUnits, organizationExpandedKeys } from './tree-utils'
 
 interface UnitFormValues {
   name: string
   unit_type: OrganizationUnitType
+  subject_id?: number
   parent_id?: number
   academic_year?: string
   cohort_label?: string
@@ -39,6 +40,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
   const { message, modal } = App.useApp()
   const [data, setData] = useState<OrganizationTreeResult>()
   const [grades, setGrades] = useState<Array<{ id: number; name: string }>>([])
+  const [subjects, setSubjects] = useState<SubjectInfo[]>([])
   const [selectedId, setSelectedId] = useState<number>()
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -72,9 +74,10 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
   const load = async () => {
     setLoading(true)
     try {
-      const [result, gradeList] = await Promise.all([organizationApi.tree(), orgApi.grades()])
+      const [result, gradeList, subjectList] = await Promise.all([organizationApi.tree(), orgApi.grades(), schedulingApi.subjects()])
       setData(result)
       setGrades(gradeList)
+      setSubjects(subjectList)
       setExpandedKeys(organizationExpandedKeys(result.units))
     }
     catch (error) { message.error(error instanceof Error ? error.message : '组织机构加载失败') }
@@ -104,7 +107,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
 
   const startCreate = () => {
     setEditing(undefined)
-    form.setFieldsValue({ name: '', unit_type: 'department', parent_id: selectedId, grade_id: undefined, is_grade: false, is_grade_center: false })
+    form.setFieldsValue({ name: '', unit_type: 'department', parent_id: selectedId, subject_id: undefined, grade_id: undefined, is_grade: false, is_grade_center: false })
     setOpen(true)
   }
   const startEdit = () => {
@@ -112,6 +115,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
     setEditing(selected)
     form.setFieldsValue({
       name: selected.name, unit_type: selected.unit_type, parent_id: selected.parent_id ?? undefined, grade_id: selected.grade_id ?? undefined,
+      subject_id: selected.subject_id ?? undefined,
       academic_year: selected.academic_year ?? undefined, cohort_label: selected.cohort_label ?? undefined,
       is_grade: selected.unit_type === 'grade_group',
       is_grade_center: gradeCenterMarker.unit_id === selected.id,
@@ -185,6 +189,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
             <div><Button onClick={startCreate}>创建下级</Button><Button onClick={startEdit}>修改</Button><Button danger onClick={archive}>归档</Button></div></div>
           <dl className="zh-organization-facts">
             <div><dt>当前成员</dt><dd>{selected.member_count} 人</dd></div>
+            {selected.unit_type === 'subject_group' && <div><dt>关联科目</dt><dd>{subjects.find((subject) => subject.id === selected.subject_id)?.name || '未关联'}</dd></div>}
             <div><dt>所属学年</dt><dd>{selected.academic_year || '长期有效'}</dd></div>
             <div><dt>对应届</dt><dd>{selected.cohort_label || '不限定'}</dd></div>
             <div><dt>组织状态</dt><dd>使用中</dd></div>
@@ -246,6 +251,11 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
                 options={units.filter((unit) => unit.id !== editing?.id).map((unit) => ({ value: unit.id, label: unit.name }))} /></Form.Item>
             </>
           }}
+        </Form.Item>
+        <Form.Item noStyle shouldUpdate={(prev, next) => prev.unit_type !== next.unit_type}>
+          {({ getFieldValue }) => getFieldValue('unit_type') === 'subject_group' ? <Form.Item name="subject_id" label="关联科目" rules={[{ required: true, message: '请选择学科组关联的科目' }]}>
+            <Select showSearch optionFilterProp="label" placeholder="选择该学科组负责的科目" options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))} />
+          </Form.Item> : null}
         </Form.Item>
         <div className="zh-form-grid">
           <Form.Item name="academic_year" label="所属学年"><Select allowClear placeholder="选择学年；长期部门留空" options={yearOptions} /></Form.Item>

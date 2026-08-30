@@ -176,28 +176,37 @@ export default function AllocationRuleDrawer({
       </div>
       <ViewAllocationPreview rooms={viewedRooms} />
     </section> : <>
-    <Form form={form} layout="vertical" initialValues={{ term: '1', allocation_mode: 'shared' }} requiredMark={false}>
+    <Form
+      form={form}
+      layout="vertical"
+      initialValues={{ term: '1', allocation_mode: 'shared' }}
+      requiredMark
+    >
       <div className="facility-form-grid">
-        <Form.Item name="name" label="规则名称" rules={[{ required: true }]}><Input placeholder="例如：2029届低楼层普通教室" /></Form.Item>
+        <Form.Item name="name" label="规则名称" rules={[
+          { required: true, message: '请输入规则名称' },
+          { whitespace: true, message: '规则名称不能只包含空格' },
+          { max: 100, message: '规则名称不能超过100个字符' },
+        ]}><Input placeholder="例如：2029届低楼层普通教室" maxLength={100} /></Form.Item>
         <Form.Item name="target_grade_unit_id" label="目标年级部" rules={[{ required: true, message: '请选择目标年级部' }]}><Select showSearch optionFilterProp="label" options={gradeUnitOptions} placeholder="选择年级管理中心下的年级部" /></Form.Item>
       </div>
       <div className="facility-form-grid">
-        <Form.Item name="academic_year" label="适用学年" rules={[{ required: true }]}><Select options={academicYearOptions} placeholder="选择学年" /></Form.Item>
-        <Form.Item name="term" label="适用学期" rules={[{ required: true }]}><Select options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} /></Form.Item>
+        <Form.Item name="academic_year" label="适用学年" rules={[{ required: true, message: '请选择适用学年' }]}><Select options={academicYearOptions} placeholder="选择学年" /></Form.Item>
+        <Form.Item name="term" label="适用学期" rules={[{ required: true, message: '请选择适用学期' }]}><Select options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} /></Form.Item>
       </div>
       <div className="facility-form-grid">
-        <Form.Item name="campus_id" label="校区" rules={[{ required: true }]}><Select options={campuses.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
+        <Form.Item name="campus_id" label="校区" rules={[{ required: true, message: '请选择校区' }]}><Select options={campuses.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
         <Form.Item name="building_ids" label="楼宇范围"><Select mode="multiple" allowClear placeholder="全部楼宇，可多选" options={buildings.filter((item) => item.campus_id === campusId).map((item) => ({ value: item.id, label: item.name }))} maxTagCount="responsive" /></Form.Item>
       </div>
       <div className="facility-form-grid">
-        <Form.Item label="楼层范围"><Space.Compact block><Form.Item name="floor_from" noStyle><InputNumber min={-5} max={100} placeholder="起始" style={{ width: '50%' }} /></Form.Item><Form.Item name="floor_to" noStyle><InputNumber min={-5} max={100} placeholder="结束" style={{ width: '50%' }} /></Form.Item></Space.Compact></Form.Item>
+        <Form.Item label="楼层范围"><Space.Compact block><Form.Item name="floor_from" noStyle rules={[({ getFieldValue }) => ({ validator: async (_, value) => { const end = getFieldValue('floor_to'); if (value !== undefined && end !== undefined && value > end) throw new Error('起始楼层不能大于结束楼层') } })]}><InputNumber min={-5} max={100} placeholder="起始" style={{ width: '50%' }} /></Form.Item><Form.Item name="floor_to" noStyle dependencies={['floor_from']} rules={[({ getFieldValue }) => ({ validator: async (_, value) => { const start = getFieldValue('floor_from'); if (start !== undefined && value !== undefined && start > value) throw new Error('结束楼层不能小于起始楼层') } })]}><InputNumber min={-5} max={100} placeholder="结束" style={{ width: '50%' }} /></Form.Item></Space.Compact></Form.Item>
         <Form.Item name="room_type" label="场室类型"><Select allowClear placeholder="全部类型" options={ROOM_TYPES} /></Form.Item>
       </div>
       <div className="facility-form-grid">
-        <Form.Item name="min_capacity" label="最低容量"><InputNumber min={1} max={5000} addonAfter="人" style={{ width: '100%' }} /></Form.Item>
+        <Form.Item name="min_capacity" label="最低容量" rules={[{ type: 'number', min: 1, max: 5000, message: '最低容量应为1至5000之间的整数' }]}><InputNumber min={1} max={5000} addonAfter="人" style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="required_feature" label="必备能力"><Select allowClear placeholder="不限制" options={[{ value: 'multimedia', label: '多媒体' }]} /></Form.Item>
       </div>
-      <Form.Item name="allocation_mode" label="划分方式" rules={[{ required: true }]}><Select options={[{ value: 'shared', label: '共享：允许同一场室分给多个届' }, { value: 'exclusive', label: '专属：排除已分给其他届的场室' }]} /></Form.Item>
+      <Form.Item name="allocation_mode" label="划分方式" rules={[{ required: true, message: '请选择划分方式' }]}><Select options={[{ value: 'shared', label: '共享：允许同一场室分给多个届' }, { value: 'exclusive', label: '专属：排除已分给其他届的场室' }]} /></Form.Item>
       <Space wrap><Button onClick={() => void preview()}>预览匹配</Button><Button type="primary" loading={saving} disabled={!selectedRoomIds.length || !capacitySufficient} onClick={() => void create()}>执行划分</Button>{previewCount !== undefined && <span className="facility-muted">可选 {selectedRoomIds.length} 间 · 已占用 {occupiedCount} 间</span>}</Space>
     </Form>
     {previewRooms.length > 0 && <div className={`facility-capacity-summary ${capacitySufficient ? 'is-ok' : 'is-shortage'}`} role="status">

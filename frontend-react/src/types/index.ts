@@ -49,6 +49,7 @@ export interface OrganizationUnit {
   parent_id: number | null
   name: string
   unit_type: OrganizationUnitType
+  subject_id?: number | null
   grade_id?: number | null
   academic_year: string | null
   cohort_label: string | null
@@ -84,7 +85,7 @@ export interface FacilityOverview {
 export interface RoomResource {
   id: number; building_id: number; building_name: string; name: string; code: string | null; floor: number
   capacity: number; room_type: 'classroom' | 'laboratory' | 'computer' | 'meeting' | 'auditorium' | 'office'
-  features: string[]; is_schedulable: boolean; is_exam_enabled: boolean; is_meeting_enabled: boolean; status: string
+  features: string[] | Record<string, unknown> | null; is_schedulable: boolean; is_exam_enabled: boolean; is_meeting_enabled: boolean; status: string
   cohort_allocations?: Array<{ rule_id: number; cohort_label: string; academic_year: string; term: string; allocation_mode: 'exclusive' | 'shared' }>
   class_assignments?: Array<{ id: number; name: string; grade_id: number; grade_name: string }>
 }
@@ -211,12 +212,34 @@ export interface TeacherInfo {
 
 export interface SubjectInfo {
   id: number
+  tenant_id?: number | null
   name: string
+  course_type?: 'subject' | 'activity'
+  evening_study_allowed?: boolean
+}
+
+export type WeekParity = 'all' | 'odd' | 'even'
+
+export interface CourseHourPlanInfo {
+  id: number
+  tenant_id: number
+  class_id: number
+  class_name?: string
+  subject_id: number
+  subject_name?: string
+  academic_year: string
+  term: string
+  weekday_periods: number
+  saturday_periods: number
+  weekly_periods: number
+  week_parity: WeekParity
+  evening_periods_odd: number
+  evening_periods_even: number
 }
 
 export interface TeachingAssignment {
   id: number
-  teacher_id: number
+  teacher_id: number | null
   teacher_name?: string
   subject_id: number
   subject_name?: string
@@ -246,6 +269,7 @@ export interface SchedulingResources {
   classes: ClassInfo[]
   assignments: TeachingAssignment[]
   teaching_track_subject_ids?: number[]
+  teacher_subject_ids?: Record<string, number[]>
 }
 
 export interface ScheduleEntry {
@@ -261,12 +285,31 @@ export interface ScheduleEntry {
   room?: string | null
   academic_year: string
   term: string
+  week_parity?: 'all' | 'odd' | 'even'
   lesson_date?: string
+}
+
+export interface SchedulingGridConfig {
+  days: number
+  periods_per_day: number
+  daily_periods: number[]
+  enable_saturday: boolean
+  enable_evening: boolean
+  evening_start_period?: number | null
+  evening_daily_periods_odd: number[]
+  evening_daily_periods_even: number[]
+  evening_subject_ids: number[]
+  evening_subject_ids_odd: number[]
+  evening_subject_ids_even: number[]
+  evening_subject_ids_odd_by_day?: Array<number | null>
+  evening_subject_ids_even_by_day?: Array<number | null>
+  term_start_monday?: string | null
+  first_week_parity: 'odd' | 'even'
 }
 
 /** 排课前资源校验：单条无解条件（后端 /scheduling/validate） */
 export interface ScheduleValidationIssue {
-  code: 'class_capacity_exceeded' | 'teacher_capacity_exceeded' | 'teacher_class_count_exceeded' | 'subject_capacity_exceeded' | 'primary_admin_track_conflict'
+  code: 'class_capacity_exceeded' | 'teacher_capacity_exceeded' | 'subject_capacity_exceeded' | 'primary_admin_track_conflict'
   message: string
   entity_type: 'class' | 'teacher' | 'class_subject'
   entity_id: number
@@ -299,15 +342,41 @@ export interface ScheduleRuleExplanation {
 export interface ScheduleRuleConfig {
   days: number
   periods_per_day: number
+  /** 周六专用课位；0 表示不开周六，兼容旧模板 */
+  saturday_periods?: number
+  /** 旧模板兼容字段；周六现在固定为每周，隔周由任教关系的 0.5 课时表达 */
+  saturday_parity?: 'all' | 'odd' | 'even'
+  /** 是否启用单双周晚自习配置 */
+  enable_evening?: boolean
+  /** 晚自习在整天课程序号中的起始节次，不根据正式课自动推断 */
+  evening_start_period?: number | null
+  /** 周一至周日每天的单周晚自习节数 */
+  evening_daily_periods_odd?: number[]
+  /** 周一至周日每天的双周晚自习节数 */
+  evening_daily_periods_even?: number[]
+  /** 允许进入晚自习的学科，由规则模板保存 */
+  evening_subject_ids?: number[]
+  /** 单周允许进入晚自习的主课科目 */
+  evening_subject_ids_odd?: number[]
+  /** 双周允许进入晚自习的主课科目 */
+  evening_subject_ids_even?: number[]
+  /** 单周周一至周日的晚自习科目；null 表示自主学习 */
+  evening_subject_ids_odd_by_day?: Array<number | null>
+  /** 双周周一至周日的晚自习科目；null 表示自主学习 */
+  evening_subject_ids_even_by_day?: Array<number | null>
   max_class_lessons_per_day: number
   max_teacher_lessons_per_day: number
+  /** 周六独立负载上限，不与工作日上限联动 */
+  max_class_lessons_on_saturday?: number
+  max_teacher_lessons_on_saturday?: number
+  /** 体育教师每日授课上限 */
+  max_pe_teacher_lessons_per_day?: number
   /** 教师每周最多课时（可省略，默认 30；旧规则模板无此字段） */
   max_teacher_weekly_periods?: number
   /** 体育课每周节数（可省略；未设置时按默认每周课时处理） */
   pe_weekly_periods?: number
   max_same_subject_per_day: number
   require_full_week: boolean
-  max_classes_per_teacher: number
   avoid_consecutive_teacher_lessons: boolean
   forbidden_slots: string[]
   strategy_codes: string[]

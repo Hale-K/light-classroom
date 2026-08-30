@@ -501,7 +501,7 @@ export default function TeacherProfilesView() {
           </div>
         ) : (
           <div className="tp-modal-schedule">
-            <ScheduleGrid entries={scheduleEntries} periods={schedulePeriods} />
+            <ScheduleGrid entries={scheduleEntries} periods={schedulePeriods} showClassName />
           </div>
         )}
       </Modal>

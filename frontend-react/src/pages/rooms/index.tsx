@@ -7,6 +7,7 @@ import FilterCard from '@/components/FilterCard'
 import TableCard from '@/components/TableCard'
 import EmptyState from '@/components/EmptyState'
 import type { FacilityOverview, RoomResource } from '@/types'
+import { hasRoomFeature } from '@/pages/campus-buildings/room-features'
 
 const TYPE_LABEL: Record<RoomResource['room_type'], string> = { classroom: '普通教室', laboratory: '实验室', computer: '计算机房', meeting: '会议室', auditorium: '报告厅', office: '办公室' }
 type RoomForm = Omit<RoomResource, 'id' | 'building_name' | 'status' | 'features'> & { multimedia?: boolean }
@@ -44,7 +45,7 @@ export default function RoomsView({ embedded = false }: { embedded?: boolean }) 
     { title: '场室', dataIndex: 'name', render: (name, row) => <><strong>{name}</strong><div className="facility-cell-note">{row.building_name} · {row.floor} 层</div></> },
     { title: '类型', dataIndex: 'room_type', width: 120, render: (value) => TYPE_LABEL[value as RoomResource['room_type']] },
     { title: '容量', dataIndex: 'capacity', width: 90, render: (value) => `${value} 人` },
-    { title: '设备与用途', key: 'uses', render: (_, row) => <Space size={[4, 4]} wrap>{row.features.includes('multimedia') && <Tag>多媒体</Tag>}{row.is_schedulable && <Tag color="blue">可排课</Tag>}{row.is_exam_enabled && <Tag color="gold">可排考</Tag>}{row.is_meeting_enabled && <Tag color="green">可开会</Tag>}</Space> },
+    { title: '设备与用途', key: 'uses', render: (_, row) => <Space size={[4, 4]} wrap>{hasRoomFeature(row.features, 'multimedia') && <Tag>多媒体</Tag>}{row.is_schedulable && <Tag color="blue">可排课</Tag>}{row.is_exam_enabled && <Tag color="gold">可排考</Tag>}{row.is_meeting_enabled && <Tag color="green">可开会</Tag>}</Space> },
     { title: '状态', dataIndex: 'status', width: 90, render: (value) => <span className="facility-status"><i />{value === 'available' ? '可用' : value}</span> },
   ]
 

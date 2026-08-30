@@ -28,6 +28,7 @@ import ExamVenuesView from '@/pages/exam-venues'
 import ExamCalendarView from '@/pages/exam-calendar'
 import ExamInvigilatorsView from '@/pages/exam-invigilators'
 import SchoolSettingsView from '@/pages/settings'
+import SubjectManagementView from '@/pages/subjects'
 import SpaceResourcesView from '@/pages/space-resources'
 import MeetingsView from '@/pages/meetings'
 import GradingWorkbench from '@/pages/grading'
@@ -109,6 +110,7 @@ export const router = createBrowserRouter([
           { path: 'exam-calendar', element: <ExamCalendarView /> },
           { path: 'exam-invigilators', element: <ExamInvigilatorsView /> },
           { path: 'settings', element: <SchoolSettingsView /> },
+          { path: 'subjects', element: <SubjectManagementView /> },
           { path: 'campus-buildings', element: <SpaceResourcesView /> },
           { path: 'rooms', element: <Navigate to="/campus-buildings?tab=rooms" replace /> },
           { path: 'meetings', element: <MeetingsView /> },

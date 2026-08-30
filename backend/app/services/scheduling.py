@@ -8,6 +8,7 @@ import random
 from typing import Any, Iterable, Mapping
 from collections import defaultdict
 
+from app.models.enums import WeekParity
 from app.services.scheduling_strategies import CandidateContext, build_schedule_strategy
 
 
@@ -41,6 +42,25 @@ def resolve_exam_room_status(
     return 'selected' if selected else 'available'
 
 
+def parity_conflicts(left: WeekParity | str, right: WeekParity | str) -> bool:
+    """Return whether two week-parity lessons cannot occupy the same slot."""
+    left_value = WeekParity(left)
+    right_value = WeekParity(right)
+    return WeekParity.all in {left_value, right_value} or left_value == right_value
+
+
+def occupancy_keys(
+    owner_id: int,
+    weekday: int,
+    period: int,
+    parity: WeekParity | str,
+) -> list[tuple[int, int, int, str]]:
+    """Expand an all-week lesson into both odd and even occupancy legs."""
+    value = WeekParity(parity)
+    legs = (WeekParity.odd, WeekParity.even) if value is WeekParity.all else (value,)
+    return [(owner_id, weekday, period, leg.value) for leg in legs]
+
+
 @dataclass(frozen=True)
 class ScheduleItem:
     assignment_id: int
@@ -50,6 +70,7 @@ class ScheduleItem:
     weekday: int
     period: int
     room: str | None = None
+    week_parity: WeekParity = WeekParity.all
 
 
 @dataclass(frozen=True)
@@ -60,7 +81,7 @@ class DatedScheduleItem(ScheduleItem):
 @dataclass(frozen=True)
 class ScheduleResult:
     items: list[ScheduleItem]
-    unplaced: list[dict[str, int]]
+    unplaced: list[dict[str, int | float]]
     staffing_issues: list[dict[str, int]]
 
 
@@ -89,8 +110,8 @@ class ScheduleValidationIssue:
     message: str
     entity_type: str
     entity_id: int
-    requested: int
-    capacity: int
+    requested: int | float
+    capacity: int | float
     related_id: int | None = None
     severity: str = "error"
     rule_code: str | None = None
@@ -103,7 +124,7 @@ class ScheduleValidationResult:
     valid: bool
     issues: list[ScheduleValidationIssue]
     assignment_count: int
-    requested_lessons: int
+    requested_lessons: int | float
     available_slots: int
     rules: tuple[ScheduleRuleExplanation, ...] = ()
 
@@ -338,9 +359,10 @@ def validate_schedule_requirements(
     forbidden_slots: set[tuple[int, int]] | None = None,
     max_class_lessons_per_day: int | None = None,
     max_teacher_lessons_per_day: int | None = None,
+    max_class_lessons_on_saturday: int | None = None,
+    max_teacher_lessons_on_saturday: int | None = None,
     max_same_subject_per_day: int | None = None,
     require_full_week: bool = False,
-    max_classes_per_teacher: int | None = None,
     max_teacher_weekly_periods: int | None = None,
 ) -> ScheduleValidationResult:
     """在运行排课算法前检查班级、教师和学科课时是否超过可用容量。"""
@@ -355,24 +377,34 @@ def validate_schedule_requirements(
         )
         for weekday in range(1, days + 1)
     }
+    def daily_limit(weekday: int, weekday_limit: int | None, saturday_limit: int | None) -> int | None:
+        return saturday_limit if weekday == 6 and saturday_limit is not None else weekday_limit
+
     class_capacity = sum(
-        min(slots, max_class_lessons_per_day) if max_class_lessons_per_day is not None else slots
-        for slots in available_by_day.values()
+        min(slots, limit) if (limit := daily_limit(
+            weekday, max_class_lessons_per_day, max_class_lessons_on_saturday,
+        )) is not None else slots
+        for weekday, slots in available_by_day.items()
     )
     teacher_capacity = sum(
-        min(slots, max_teacher_lessons_per_day) if max_teacher_lessons_per_day is not None else slots
-        for slots in available_by_day.values()
+        min(slots, limit) if (limit := daily_limit(
+            weekday, max_teacher_lessons_per_day, max_teacher_lessons_on_saturday,
+        )) is not None else slots
+        for weekday, slots in available_by_day.items()
     )
     subject_capacity = sum(
         min(slots, max_same_subject_per_day) if max_same_subject_per_day is not None else slots
         for slots in available_by_day.values()
     )
 
-    def capacity_formula(limit: int | None, capacity: int) -> str:
-        active_slots = [slots for slots in available_by_day.values() if slots > 0]
-        if limit is not None and active_slots and all(slots >= limit for slots in active_slots):
-            return f"{len(active_slots)} 个可排教学日 × 每日最多 {limit} 节 = {capacity} 节"
-        contributions = [min(slots, limit) if limit is not None else slots for slots in active_slots]
+    def capacity_formula(limit: int | None, capacity: int, saturday_limit: int | None = None) -> str:
+        active_days = [(weekday, slots) for weekday, slots in available_by_day.items() if slots > 0]
+        contributions = [
+            min(slots, day_limit) if (day_limit := daily_limit(weekday, limit, saturday_limit)) is not None else slots
+            for weekday, slots in active_days
+        ]
+        if saturday_limit is None and limit is not None and active_days and all(slots >= limit for _, slots in active_days):
+            return f"{len(active_days)} 个可排教学日 × 每日最多 {limit} 节 = {capacity} 节"
         return f"各可排教学日容量 {' + '.join(map(str, contributions)) or '0'} = {capacity} 节"
 
     def minimum_daily_limit(requested: int) -> int | None:
@@ -381,8 +413,12 @@ def validate_schedule_requirements(
                 return limit
         return None
 
-    class_formula = capacity_formula(max_class_lessons_per_day, class_capacity)
-    teacher_formula = capacity_formula(max_teacher_lessons_per_day, teacher_capacity)
+    class_formula = capacity_formula(
+        max_class_lessons_per_day, class_capacity, max_class_lessons_on_saturday,
+    )
+    teacher_formula = capacity_formula(
+        max_teacher_lessons_per_day, teacher_capacity, max_teacher_lessons_on_saturday,
+    )
     subject_formula = capacity_formula(max_same_subject_per_day, subject_capacity)
     rules = (
         ScheduleRuleExplanation(
@@ -414,21 +450,19 @@ def validate_schedule_requirements(
             description="同一班级的同一学科受每日上限约束后的周容量。",
         ),
     )
-    class_loads: dict[int, int] = {}
-    teacher_loads: dict[int, int] = {}
-    teacher_classes: dict[int, set[int]] = {}
-    subject_loads: dict[tuple[int, int], int] = {}
+    class_loads: dict[int, float] = {}
+    teacher_loads: dict[int, float] = {}
+    subject_loads: dict[tuple[int, int], float] = {}
     for item in rows:
-        required = max(0, int(item.get("weekly_periods", 0)))
+        required = max(0.0, float(item.get("weekly_periods", 0) or 0))
         class_id = int(item["class_id"])
         subject_id = int(item["subject_id"])
         class_loads[class_id] = class_loads.get(class_id, 0) + required
         subject_key = (class_id, subject_id)
         subject_loads[subject_key] = subject_loads.get(subject_key, 0) + required
-        if item.get("teacher_id") is not None:
+        if item.get("teacher_id") is not None and item.get("counts_toward_teacher_load", True):
             teacher_id = int(item["teacher_id"])
             teacher_loads[teacher_id] = teacher_loads.get(teacher_id, 0) + required
-            teacher_classes.setdefault(teacher_id, set()).add(class_id)
 
     issues: list[ScheduleValidationIssue] = []
     for class_id, requested in sorted(class_loads.items()):
@@ -483,26 +517,6 @@ def validate_schedule_requirements(
                 suggestions=(class_suggestion,),
             ))
     for teacher_id, requested in sorted(teacher_loads.items()):
-        if max_classes_per_teacher is not None and len(teacher_classes.get(teacher_id, set())) > max_classes_per_teacher:
-            class_count = len(teacher_classes[teacher_id])
-            issues.append(ScheduleValidationIssue(
-                code="teacher_class_count_exceeded",
-                message=f"教师 {teacher_id} 当前承担 {class_count} 个班，超过最多 {max_classes_per_teacher} 个班的限制",
-                entity_type="teacher",
-                entity_id=teacher_id,
-                requested=class_count,
-                capacity=max_classes_per_teacher,
-                rule_code="max_classes_per_teacher",
-                formula=f"{class_count} 个班 > {max_classes_per_teacher} 个班上限",
-                suggestions=(ScheduleValidationSuggestion(
-                    code="add_subject_teacher",
-                    label=f"补充或重新分配教师，保证每名教师最多 {max_classes_per_teacher} 个班",
-                    field="max_classes_per_teacher",
-                    recommended_value=max_classes_per_teacher,
-                    reason="当前任教关系超过单教师班级上限，继续排课会造成教师负荷失真。",
-                    tradeoff="需要新增教师或将现有班级重新分配给其他同学科教师。",
-                ),),
-            ))
         if requested > teacher_capacity:
             recommended_limit = minimum_daily_limit(requested)
             teacher_suggestion = (
@@ -589,7 +603,7 @@ def validate_schedule_requirements(
         valid=not issues,
         issues=issues,
         assignment_count=len(rows),
-        requested_lessons=sum(max(0, int(item.get("weekly_periods", 0))) for item in rows),
+        requested_lessons=sum(max(0.0, float(item.get("weekly_periods", 0) or 0)) for item in rows),
         available_slots=sum(available_by_day.values()),
         rules=rules,
     )
@@ -660,15 +674,45 @@ def _can_place_schedule_item(
     )
 
 
-def _class_gap_count(items: Iterable[ScheduleItem]) -> int:
+def _class_gap_count(
+    items: Iterable[ScheduleItem],
+    forbidden_slots: set[tuple[int, int]] | None = None,
+) -> int:
+    forbidden = forbidden_slots or set()
     periods_by_class_day: dict[tuple[int, int], set[int]] = {}
     for item in items:
         periods_by_class_day.setdefault((item.class_id, item.weekday), set()).add(item.period)
     return sum(
-        max(periods) - min(periods) + 1 - len(periods)
-        for periods in periods_by_class_day.values()
+        sum(
+            period not in periods and (weekday, period) not in forbidden
+            for period in range(1, max(periods))
+        )
+        for (class_id, weekday), periods in periods_by_class_day.items()
         if periods
     )
+
+
+def _assignment_placement_groups(
+    assignment: Mapping[str, Any],
+    *,
+    days: int,
+) -> list[tuple[tuple[int, ...], float]]:
+    """Split course hours into weekday and Saturday placement pools when configured."""
+    has_split = "weekday_periods" in assignment or "saturday_periods" in assignment
+    if not has_split:
+        return [(tuple(range(1, days + 1)), float(assignment.get("weekly_periods", 0) or 0))]
+
+    saturday_periods = float(assignment.get("saturday_periods", 0) or 0)
+    weekday_periods = assignment.get("weekday_periods")
+    if weekday_periods is None:
+        weekday_periods = float(assignment.get("weekly_periods", 0) or 0) - saturday_periods
+    groups: list[tuple[tuple[int, ...], float]] = [(
+        tuple(range(1, min(days, 5) + 1)),
+        float(weekday_periods or 0),
+    )]
+    if saturday_periods:
+        groups.append(((6,), saturday_periods) if days >= 6 else ((), saturday_periods))
+    return [(allowed, count) for allowed, count in groups if count > 0]
 
 
 def diagnose_staffing_gaps(items: Iterable[ScheduleItem]) -> list[dict[str, int]]:
@@ -732,7 +776,7 @@ def repair_class_gaps(
     forbidden = forbidden_slots or set()
     candidate_checks = 0
     for _ in range(max_moves):
-        before = _class_gap_count(result)
+        before = _class_gap_count(result, forbidden)
         if before == 0:
             break
         periods_by_class_day: dict[tuple[int, int], set[int]] = {}
@@ -740,7 +784,10 @@ def repair_class_gaps(
             periods_by_class_day.setdefault((item.class_id, item.weekday), set()).add(item.period)
         repaired = False
         for (class_id, weekday), periods in sorted(periods_by_class_day.items()):
-            gaps = [period for period in range(min(periods), max(periods)) if period not in periods]
+            gaps = [
+                period for period in range(1, max(periods))
+                if period not in periods and (weekday, period) not in forbidden
+            ]
             for gap in gaps:
                 source_indexes = sorted(
                     (
@@ -811,7 +858,7 @@ def repair_class_gaps(
                                 break
                             if candidate_result is not None:
                                 break
-                    if candidate_result is not None and _class_gap_count(candidate_result) < before:
+                    if candidate_result is not None and _class_gap_count(candidate_result, forbidden) < before:
                         result = candidate_result
                         repaired = True
                         break
@@ -824,9 +871,71 @@ def repair_class_gaps(
     return result
 
 
+def compact_class_gaps(
+    items: list[ScheduleItem],
+    *,
+    days: int = 5,
+    periods_per_day: int = 8,
+    forbidden_slots: set[tuple[int, int]] | None = None,
+    max_class_lessons_per_day: int | None = None,
+    max_teacher_lessons_per_day: int | None = None,
+    max_same_subject_per_day: int | None = None,
+) -> list[ScheduleItem]:
+    """快速前移不冲突课程，让每个班每天的空白只出现在最后。"""
+    result = list(items)
+    forbidden = forbidden_slots or set()
+    periods_by_class_day: dict[tuple[int, int], set[int]] = {}
+    for item in result:
+        periods_by_class_day.setdefault((item.class_id, item.weekday), set()).add(item.period)
+
+    for (class_id, weekday), periods in sorted(periods_by_class_day.items()):
+        while True:
+            gaps = [
+                period for period in range(1, max(periods))
+                if period not in periods and (weekday, period) not in forbidden
+            ]
+            if not gaps:
+                break
+            gap = gaps[0]
+            source_indexes = sorted(
+                (
+                    index for index, item in enumerate(result)
+                    if item.class_id == class_id
+                    and item.weekday == weekday
+                    and item.period > gap
+                ),
+                key=lambda index: result[index].period,
+            )
+            for source_index in source_indexes:
+                source_period = result[source_index].period
+                target = replace(result[source_index], period=gap)
+                if not _can_place_schedule_item(
+                    target,
+                    result,
+                    days=days,
+                    periods_per_day=periods_per_day,
+                    forbidden_slots=forbidden,
+                    max_class_lessons_per_day=max_class_lessons_per_day,
+                    max_teacher_lessons_per_day=max_teacher_lessons_per_day,
+                    max_same_subject_per_day=max_same_subject_per_day,
+                    # 压紧优先级高于“避免教师连上”这一软约束。
+                    avoid_consecutive_teacher_lessons=False,
+                    ignored_index=source_index,
+                ):
+                    continue
+                result[source_index] = target
+                periods.remove(source_period)
+                periods.add(gap)
+                break
+            else:
+                # 最早空位被教师硬冲突挡住时，避免反复尝试同一个空位。
+                break
+    return result
+
+
 def _repair_unplaced_lessons(
     items: list[ScheduleItem],
-    unplaced: list[dict[str, int]],
+    unplaced: list[dict[str, Any]],
     assignments: dict[int, dict[str, Any]],
     *,
     days: int,
@@ -836,11 +945,12 @@ def _repair_unplaced_lessons(
     max_teacher_lessons_per_day: int | None,
     max_same_subject_per_day: int | None,
     avoid_consecutive_teacher_lessons: bool = False,
-) -> tuple[list[ScheduleItem], list[dict[str, int]]]:
+) -> tuple[list[ScheduleItem], list[dict[str, Any]]]:
     """通过移动一个阻塞课程，尝试修复贪心初排留下的课程。"""
-    remaining: list[dict[str, int]] = []
+    remaining: list[dict[str, Any]] = []
     for entry in unplaced:
         assignment = assignments[entry["assignment_id"]]
+        target_days = tuple(entry.get("allowed_weekdays") or range(1, days + 1))
         repaired = 0
         for _ in range(entry["count"]):
             target_template = ScheduleItem(
@@ -853,7 +963,7 @@ def _repair_unplaced_lessons(
                 room=assignment.get("room"),
             )
             placed = False
-            for target_day in range(1, days + 1):
+            for target_day in target_days:
                 for target_period in range(1, periods_per_day + 1):
                     target = replace(target_template, weekday=target_day, period=target_period)
                     blockers = [
@@ -913,8 +1023,215 @@ def _repair_unplaced_lessons(
             if not placed:
                 break
         if repaired < entry["count"]:
-            remaining.append({"assignment_id": entry["assignment_id"], "count": entry["count"] - repaired})
+            remaining.append({
+                "assignment_id": entry["assignment_id"],
+                "count": entry["count"] - repaired,
+                "allowed_weekdays": target_days,
+            })
     return items, remaining
+
+
+def _place_half_week_lessons(
+    items: list[ScheduleItem],
+    assignments: list[dict[str, Any]],
+    *,
+    days: int,
+    periods_per_day: int,
+    forbidden_slots: set[tuple[int, int]],
+) -> list[dict[str, int | float]]:
+    """Place each residual half-period in an odd/even leg of the same timetable slot.
+
+    The source assignment list has no elective-group dimension, so halves are paired in
+    stable assignment order within a class.  A later half is allowed to reuse the
+    first half's slot only when the parity legs differ.
+    """
+    next_parity: dict[tuple[int, tuple[int, ...]], WeekParity] = {}
+    unplaced: list[dict[str, int | float | tuple[int, ...]]] = []
+    for assignment in assignments:
+        class_id = int(assignment["class_id"])
+        teacher_id = int(assignment["teacher_id"]) if assignment.get("teacher_id") is not None else None
+        for allowed_weekdays, weekly in _assignment_placement_groups(assignment, days=days):
+            if weekly - int(weekly) < 0.49:
+                continue
+            parity_key = (class_id, allowed_weekdays)
+            configured_parity = assignment.get("week_parity")
+            parity = (
+                WeekParity(configured_parity)
+                if configured_parity and configured_parity != WeekParity.all
+                else next_parity.get(parity_key, WeekParity.odd)
+            )
+            placed = False
+            for weekday in allowed_weekdays:
+                for period in range(1, periods_per_day + 1):
+                    if (weekday, period) in forbidden_slots:
+                        continue
+                    if any(
+                        item.weekday == weekday and item.period == period
+                        and parity_conflicts(item.week_parity, parity)
+                        and (item.class_id == class_id or (teacher_id is not None and item.teacher_id == teacher_id))
+                        for item in items
+                    ):
+                        continue
+                    items.append(ScheduleItem(
+                        assignment_id=int(assignment["id"]), class_id=class_id,
+                        subject_id=int(assignment["subject_id"]), teacher_id=teacher_id,
+                        weekday=weekday, period=period, room=assignment.get("room"), week_parity=parity,
+                    ))
+                    next_parity[parity_key] = WeekParity.even if parity is WeekParity.odd else WeekParity.odd
+                    placed = True
+                    break
+                if placed:
+                    break
+            if not placed:
+                unplaced.append({
+                    "assignment_id": int(assignment["id"]),
+                    "count": 0.5,
+                    "allowed_weekdays": allowed_weekdays,
+                })
+    return unplaced
+
+
+def build_evening_study_items(
+    assignments: Iterable[dict[str, Any]],
+    *,
+    class_ids: Iterable[int],
+    first_evening_period: int,
+    evening_daily_periods_odd: list[int],
+    evening_daily_periods_even: list[int],
+    activity_subject_id: int | None = None,
+    allowed_subject_ids: set[int] | None = None,
+    allowed_subject_ids_odd: set[int] | None = None,
+    allowed_subject_ids_even: set[int] | None = None,
+    allowed_subject_ids_by_class_odd: dict[int, set[int]] | None = None,
+    allowed_subject_ids_by_class_even: dict[int, set[int]] | None = None,
+) -> list[ScheduleItem]:
+    """Build evening lessons from course-hour plans and teaching relations.
+
+    The daily evening profile only defines available slots.  Subject, lesson
+    count, teacher, and room come from the matching course-hour assignment.
+    Any remaining capacity is rendered as standalone self-study when an
+    activity subject is supplied.
+    """
+    assignment_rows = [dict(assignment) for assignment in assignments]
+
+    # Compatibility for callers that explicitly supplied the old subject-pool
+    # arguments. New generation never uses this branch; it uses course-hour
+    # evening counts and keeps the related teacher on the item.
+    if any(value is not None for value in (
+        allowed_subject_ids, allowed_subject_ids_odd, allowed_subject_ids_even,
+        allowed_subject_ids_by_class_odd, allowed_subject_ids_by_class_even,
+    )):
+        legacy_subject_ids = allowed_subject_ids or set()
+        pools = {
+            WeekParity.odd: allowed_subject_ids_odd if allowed_subject_ids_odd is not None else legacy_subject_ids,
+            WeekParity.even: allowed_subject_ids_even if allowed_subject_ids_even is not None else legacy_subject_ids,
+        }
+        class_pools = {
+            WeekParity.odd: allowed_subject_ids_by_class_odd,
+            WeekParity.even: allowed_subject_ids_by_class_even,
+        }
+        legacy_items: list[ScheduleItem] = []
+        for class_id in sorted(set(class_ids)):
+            for parity, daily_periods in (
+                (WeekParity.odd, evening_daily_periods_odd),
+                (WeekParity.even, evening_daily_periods_even),
+            ):
+                subject_pool = class_pools[parity].get(class_id, pools[parity]) if class_pools[parity] is not None else pools[parity]
+                candidates = [
+                    assignment for assignment in assignment_rows
+                    if int(assignment["class_id"]) == class_id and int(assignment["subject_id"]) in subject_pool
+                ]
+                candidates.sort(key=lambda item: (int(item["subject_id"]), int(item.get("id") or 0)))
+                if not candidates:
+                    continue
+                cursor = 0
+                for weekday, count in enumerate(daily_periods, start=1):
+                    for offset in range(count):
+                        assignment = candidates[cursor % len(candidates)]
+                        legacy_items.append(ScheduleItem(
+                            assignment_id=int(assignment.get("id") or 0),
+                            class_id=class_id,
+                            subject_id=int(assignment["subject_id"]),
+                            teacher_id=None,
+                            weekday=weekday,
+                            period=first_evening_period + offset,
+                            room=assignment.get("room"),
+                            week_parity=parity,
+                        ))
+                        cursor += 1
+        return legacy_items
+
+    items: list[ScheduleItem] = []
+    occupied_teacher_slots: set[tuple[int, int, int, WeekParity]] = set()
+
+    def evening_count(assignment: dict[str, Any], parity: WeekParity) -> int:
+        plan_parity = assignment.get("week_parity", WeekParity.all.value)
+        plan_parity = plan_parity.value if isinstance(plan_parity, WeekParity) else str(plan_parity)
+        if plan_parity not in (WeekParity.all.value, parity.value):
+            return 0
+        field = "evening_periods_odd" if parity is WeekParity.odd else "evening_periods_even"
+        return max(0, int(assignment.get(field) or 0))
+
+    for class_id in sorted(set(class_ids)):
+        for parity, daily_periods in (
+            (WeekParity.odd, evening_daily_periods_odd),
+            (WeekParity.even, evening_daily_periods_even),
+        ):
+            slots = [
+                (weekday, first_evening_period + offset)
+                for weekday, count in enumerate(daily_periods, start=1)
+                for offset in range(count)
+            ]
+            course_slots: list[dict[str, Any]] = []
+            for assignment in assignment_rows:
+                if int(assignment["class_id"]) != class_id:
+                    continue
+                course_slots.extend([assignment] * evening_count(assignment, parity))
+            course_slots.sort(key=lambda item: (int(item["subject_id"]), int(item.get("id") or 0)))
+
+            slot_index = 0
+            for assignment in course_slots:
+                teacher_id = assignment.get("teacher_id")
+                selected_slot = None
+                for candidate_index in range(slot_index, len(slots)):
+                    weekday, period = slots[candidate_index]
+                    teacher_slot = (int(teacher_id), weekday, period, parity) if teacher_id is not None else None
+                    if teacher_slot is None or teacher_slot not in occupied_teacher_slots:
+                        selected_slot = (candidate_index, weekday, period)
+                        break
+                if selected_slot is None:
+                    continue
+                slot_index, weekday, period = selected_slot
+                occupied_teacher_slots.add((int(teacher_id), weekday, period, parity)) if teacher_id is not None else None
+                items.append(ScheduleItem(
+                    assignment_id=int(assignment.get("id") or 0),
+                    class_id=class_id,
+                    subject_id=int(assignment["subject_id"]),
+                    teacher_id=int(teacher_id) if teacher_id is not None else None,
+                    weekday=weekday,
+                    period=period,
+                    room=assignment.get("room"),
+                    week_parity=parity,
+                ))
+                slot_index += 1
+
+            if activity_subject_id is None:
+                continue
+            scheduled_slots = {(item.weekday, item.period, item.week_parity) for item in items if item.class_id == class_id}
+            for weekday, period in slots:
+                if (weekday, period, parity) in scheduled_slots:
+                    continue
+                items.append(ScheduleItem(
+                    assignment_id=0,
+                    class_id=class_id,
+                    subject_id=activity_subject_id,
+                    teacher_id=None,
+                    weekday=weekday,
+                    period=period,
+                    room=None,
+                    week_parity=parity,
+                ))
+    return items
 
 
 def generate_schedule(
@@ -925,6 +1242,8 @@ def generate_schedule(
     forbidden_slots: set[tuple[int, int]] | None = None,
     max_class_lessons_per_day: int | None = None,
     max_teacher_lessons_per_day: int | None = None,
+    max_class_lessons_on_saturday: int | None = None,
+    max_teacher_lessons_on_saturday: int | None = None,
     max_same_subject_per_day: int | None = None,
     strategy_codes: list[str] | None = None,
     random_seed: int | None = None,
@@ -946,9 +1265,6 @@ def generate_schedule(
         max_teacher_lessons_per_day = max(
             max_teacher_lessons_per_day or 0, periods_per_day,
         )
-        max_same_subject_per_day = max(
-            max_same_subject_per_day or 0, 2,
-        )
     rng = random.Random(0 if random_seed is None else random_seed)
 
     normalized = sorted(
@@ -965,137 +1281,127 @@ def generate_schedule(
     class_subject_period_days: dict[tuple[int, int, int], set[int]] = {}
     class_day_periods: dict[tuple[int, int], set[int]] = {}
     teacher_day_periods: dict[tuple[int, int], set[int]] = {}
-    unplaced: list[dict[str, int]] = []
+    unplaced: list[dict[str, Any]] = []
 
     for assignment in normalized:
-        required = max(0, int(assignment.get("weekly_periods", 0)))
         class_id = int(assignment["class_id"])
         subject_id = int(assignment["subject_id"])
         raw_teacher_id = assignment.get("teacher_id")
         teacher_id = int(raw_teacher_id) if raw_teacher_id is not None else None
-        placed = 0
-        for _ in range(required):
-            candidates: list[tuple[tuple[int, ...], int, int]] = []
-            for weekday in range(1, days + 1):
-                for period in range(1, periods_per_day + 1):
-                    if (weekday, period) in forbidden:
-                        continue
-                    class_slot = (class_id, weekday, period)
-                    teacher_slot = (teacher_id, weekday, period) if teacher_id is not None else None
-                    if class_slot in occupied_classes or (teacher_slot and teacher_slot in occupied_teachers):
-                        continue
-                    if avoid_consecutive_teacher_lessons and teacher_id is not None and any(
-                        item.teacher_id == teacher_id
-                        and item.weekday == weekday
-                        and abs(item.period - period) == 1
-                        for item in items
-                    ):
-                        continue
-                    same_subject_today = class_subject_day_loads.get((class_id, subject_id, weekday), 0)
-                    same_period_days = class_subject_period_days.get((class_id, subject_id, period), set())
-                    same_subject_periods_today = {
-                        item.period for item in items
-                        if item.class_id == class_id
-                        and item.subject_id == subject_id
-                        and item.weekday == weekday
-                    }
-                    # 高一默认启用“班级紧凑”时，同一学科允许早晚分布，
-                    # 但不允许相邻节次连排；这不是限制整个班每天只能上三节。
-                    if "class_compact" in strategy.codes and any(
-                        abs(existing_period - period) == 1
-                        for existing_period in same_subject_periods_today
-                    ):
-                        continue
-                    adjacent_subject_loads = [
-                        class_subject_day_loads.get((class_id, subject_id, adjacent_day), 0)
-                        for adjacent_day in (weekday - 1, weekday + 1)
-                        if 1 <= adjacent_day <= days
-                    ]
-                    if same_subject_today >= 2 and any(load >= 3 for load in adjacent_subject_loads):
-                        continue
-                    adjacent_day_same_period_count = sum(
-                        adjacent_day in same_period_days
-                        for adjacent_day in (weekday - 1, weekday + 1)
-                    )
-                    class_day_load = class_day_loads.get((class_id, weekday), 0)
-                    teacher_day_load = teacher_day_loads.get((teacher_id, weekday), 0) if teacher_id is not None else 0
-                    if max_class_lessons_per_day is not None and class_day_load >= max_class_lessons_per_day:
-                        continue
-                    teacher_daily_limit = (
-                        teacher_daily_limits.get(teacher_id, max_teacher_lessons_per_day)
-                        if teacher_daily_limits is not None and teacher_id is not None
-                        else max_teacher_lessons_per_day
-                    )
-                    if teacher_daily_limit is not None and teacher_day_load >= teacher_daily_limit:
-                        continue
-                    if (
-                        max_teacher_weekly_periods is not None
-                        and teacher_id is not None
-                        and teacher_week_loads.get(teacher_id, 0) >= max_teacher_weekly_periods
-                    ):
-                        continue
-                    if max_same_subject_per_day is not None and same_subject_today >= max_same_subject_per_day:
-                        continue
-                    class_periods = class_day_periods.get((class_id, weekday), set())
-                    projected_class_periods = class_periods | {period}
-                    class_gap_penalty = (
-                        max(projected_class_periods) - min(projected_class_periods) + 1
-                        - len(projected_class_periods)
-                    )
-                    teacher_periods = teacher_day_periods.get((teacher_id, weekday), set()) if teacher_id is not None else set()
-                    projected_teacher_periods = teacher_periods | {period}
-                    teacher_gap_penalty = (
-                        max(projected_teacher_periods) - min(projected_teacher_periods) + 1
-                        - len(projected_teacher_periods)
-                    )
-                    teacher_adjacent_count = sum(
-                        adjacent in teacher_periods
-                        for adjacent in (period - 1, period + 1)
-                    )
-                    score = strategy.score(CandidateContext(
-                        same_subject_today=same_subject_today,
-                        adjacent_day_same_period_count=adjacent_day_same_period_count,
-                        same_subject_same_period_days=len(same_period_days),
-                        class_day_load=class_day_load,
-                        teacher_day_load=teacher_day_load,
-                        period=period,
-                        class_gap_penalty=class_gap_penalty,
-                        teacher_gap_penalty=teacher_gap_penalty,
-                        teacher_adjacent_count=teacher_adjacent_count,
-                        random_tiebreak=rng.randrange(1_000_000),
-                    ))
-                    candidates.append((score, weekday, period))
+        for allowed_weekdays, group_weekly in _assignment_placement_groups(assignment, days=days):
+            required = max(0, int(group_weekly))
+            placed = 0
+            for _ in range(required):
+                candidates: list[tuple[tuple[int, ...], int, int]] = []
+                for weekday in allowed_weekdays:
+                    for period in range(1, periods_per_day + 1):
+                        if (weekday, period) in forbidden:
+                            continue
+                        class_slot = (class_id, weekday, period)
+                        teacher_slot = (teacher_id, weekday, period) if teacher_id is not None else None
+                        if class_slot in occupied_classes or (teacher_slot and teacher_slot in occupied_teachers):
+                            continue
+                        if avoid_consecutive_teacher_lessons and teacher_id is not None and any(
+                            item.teacher_id == teacher_id
+                            and item.weekday == weekday
+                            and abs(item.period - period) == 1
+                            for item in items
+                        ):
+                            continue
+                        same_subject_today = class_subject_day_loads.get((class_id, subject_id, weekday), 0)
+                        same_period_days = class_subject_period_days.get((class_id, subject_id, period), set())
+                        adjacent_day_same_period_count = sum(
+                            adjacent_day in same_period_days
+                            for adjacent_day in (weekday - 1, weekday + 1)
+                        )
+                        class_day_load = class_day_loads.get((class_id, weekday), 0)
+                        teacher_day_load = teacher_day_loads.get((teacher_id, weekday), 0) if teacher_id is not None else 0
+                        class_daily_limit = (
+                            max_class_lessons_on_saturday
+                            if weekday == 6 and max_class_lessons_on_saturday is not None
+                            else max_class_lessons_per_day
+                        )
+                        if class_daily_limit is not None and class_day_load >= class_daily_limit:
+                            continue
+                        teacher_daily_limit = (
+                            teacher_daily_limits.get(teacher_id, max_teacher_lessons_per_day)
+                            if teacher_daily_limits is not None and teacher_id is not None
+                            else max_teacher_lessons_per_day
+                        )
+                        if weekday == 6 and max_teacher_lessons_on_saturday is not None:
+                            teacher_daily_limit = max_teacher_lessons_on_saturday
+                        if teacher_daily_limit is not None and teacher_day_load >= teacher_daily_limit:
+                            continue
+                        if (
+                            max_teacher_weekly_periods is not None
+                            and teacher_id is not None
+                            and teacher_week_loads.get(teacher_id, 0) >= max_teacher_weekly_periods
+                        ):
+                            continue
+                        class_periods = class_day_periods.get((class_id, weekday), set())
+                        projected_class_periods = class_periods | {period}
+                        class_gap_penalty = (
+                            max(projected_class_periods) - min(projected_class_periods) + 1
+                            - len(projected_class_periods)
+                        )
+                        teacher_periods = teacher_day_periods.get((teacher_id, weekday), set()) if teacher_id is not None else set()
+                        projected_teacher_periods = teacher_periods | {period}
+                        teacher_gap_penalty = (
+                            max(projected_teacher_periods) - min(projected_teacher_periods) + 1
+                            - len(projected_teacher_periods)
+                        )
+                        teacher_adjacent_count = sum(
+                            adjacent in teacher_periods
+                            for adjacent in (period - 1, period + 1)
+                        )
+                        score = strategy.score(CandidateContext(
+                            same_subject_today=same_subject_today,
+                            adjacent_day_same_period_count=adjacent_day_same_period_count,
+                            same_subject_same_period_days=len(same_period_days),
+                            class_day_load=class_day_load,
+                            teacher_day_load=teacher_day_load,
+                            period=period,
+                            class_gap_penalty=class_gap_penalty,
+                            teacher_gap_penalty=teacher_gap_penalty,
+                            teacher_adjacent_count=teacher_adjacent_count,
+                            random_tiebreak=rng.randrange(1_000_000),
+                        ))
+                        candidates.append((score, weekday, period))
 
-            if not candidates:
-                break
-            _, weekday, period = min(candidates, key=lambda candidate: candidate[0])
-            item = ScheduleItem(
-                assignment_id=int(assignment["id"]),
-                class_id=class_id,
-                subject_id=subject_id,
-                teacher_id=teacher_id,
-                weekday=weekday,
-                period=period,
-                room=assignment.get("room"),
-            )
-            items.append(item)
-            occupied_classes.add((item.class_id, weekday, period))
-            class_day_key = (item.class_id, weekday)
-            class_subject_day_key = (item.class_id, item.subject_id, weekday)
-            class_day_loads[class_day_key] = class_day_loads.get(class_day_key, 0) + 1
-            class_subject_day_loads[class_subject_day_key] = class_subject_day_loads.get(class_subject_day_key, 0) + 1
-            class_subject_period_days.setdefault((item.class_id, item.subject_id, period), set()).add(weekday)
-            class_day_periods.setdefault(class_day_key, set()).add(period)
-            if item.teacher_id is not None:
-                occupied_teachers.add((item.teacher_id, weekday, period))
-                teacher_day_key = (item.teacher_id, weekday)
-                teacher_day_loads[teacher_day_key] = teacher_day_loads.get(teacher_day_key, 0) + 1
-                teacher_day_periods.setdefault(teacher_day_key, set()).add(period)
-                teacher_week_loads[item.teacher_id] = teacher_week_loads.get(item.teacher_id, 0) + 1
-            placed += 1
+                if not candidates:
+                    break
+                _, weekday, period = min(candidates, key=lambda candidate: candidate[0])
+                item = ScheduleItem(
+                    assignment_id=int(assignment["id"]),
+                    class_id=class_id,
+                    subject_id=subject_id,
+                    teacher_id=teacher_id,
+                    weekday=weekday,
+                    period=period,
+                    room=assignment.get("room"),
+                )
+                items.append(item)
+                occupied_classes.add((item.class_id, weekday, period))
+                class_day_key = (item.class_id, weekday)
+                class_subject_day_key = (item.class_id, item.subject_id, weekday)
+                class_day_loads[class_day_key] = class_day_loads.get(class_day_key, 0) + 1
+                class_subject_day_loads[class_subject_day_key] = class_subject_day_loads.get(class_subject_day_key, 0) + 1
+                class_subject_period_days.setdefault((item.class_id, item.subject_id, period), set()).add(weekday)
+                class_day_periods.setdefault(class_day_key, set()).add(period)
+                if item.teacher_id is not None:
+                    occupied_teachers.add((item.teacher_id, weekday, period))
+                    teacher_day_key = (item.teacher_id, weekday)
+                    teacher_day_loads[teacher_day_key] = teacher_day_loads.get(teacher_day_key, 0) + 1
+                    teacher_day_periods.setdefault(teacher_day_key, set()).add(period)
+                    teacher_week_loads[item.teacher_id] = teacher_week_loads.get(item.teacher_id, 0) + 1
+                placed += 1
 
-        if placed < required:
-            unplaced.append({"assignment_id": int(assignment["id"]), "count": required - placed})
+            if placed < required:
+                unplaced.append({
+                    "assignment_id": int(assignment["id"]),
+                    "count": required - placed,
+                    "allowed_weekdays": allowed_weekdays,
+                })
 
     if unplaced:
         items, unplaced = _repair_unplaced_lessons(
@@ -1138,6 +1444,38 @@ def generate_schedule(
             avoid_consecutive_teacher_lessons=avoid_consecutive_teacher_lessons,
         ),
     )
+    unplaced.extend(_place_half_week_lessons(
+        items,
+        normalized,
+        days=days,
+        periods_per_day=periods_per_day,
+        forbidden_slots=forbidden,
+    ))
+    # 半节单双周课程在策略修复后追加，追加本身也可能制造首节前或中间空堂；
+    # 所有策略都先做轻量前移，避免普通模板也出现班级内部空堂。
+    items = compact_class_gaps(
+        items,
+        days=days,
+        periods_per_day=periods_per_day,
+        forbidden_slots=forbidden,
+        max_class_lessons_per_day=max_class_lessons_per_day,
+        max_teacher_lessons_per_day=max_teacher_lessons_per_day,
+        max_same_subject_per_day=max_same_subject_per_day,
+    )
+    # 只有确实存在教师挡位时，才使用跨班换位修复这一较重的搜索。
+    if "cross_class_gap_repair" in strategy.codes:
+        items = repair_class_gaps(
+            items,
+            days=days,
+            periods_per_day=periods_per_day,
+            forbidden_slots=forbidden,
+            max_class_lessons_per_day=max_class_lessons_per_day,
+            max_teacher_lessons_per_day=max_teacher_lessons_per_day,
+            max_same_subject_per_day=max_same_subject_per_day,
+            avoid_consecutive_teacher_lessons=avoid_consecutive_teacher_lessons,
+            max_moves=max(30, len(items) * 2),
+            max_candidate_checks=max(200, len(items) * 10),
+        )
 
     return ScheduleResult(
         items=sorted(items, key=lambda item: (item.class_id, item.weekday, item.period)),
@@ -1146,13 +1484,31 @@ def generate_schedule(
     )
 
 
-def expand_schedule(items: Iterable[ScheduleItem], week_start: date) -> list[DatedScheduleItem]:
-    """将周课表映射为从指定周一开始的日期课表。"""
+def expand_schedule(
+    items: Iterable[ScheduleItem],
+    week_start: date,
+    *,
+    term_start_monday: date | None = None,
+    first_week_parity: WeekParity | str = WeekParity.odd,
+) -> list[DatedScheduleItem]:
+    """将周课表映射为日期课表，并按单双周过滤。
+
+    ``term_start_monday`` 未配置时，传入周视作开学第一周，以保持旧接口的行为。
+    """
     if week_start.weekday() != 0:
         raise ValueError("日期课表的开始日期必须是周一")
+    anchor = term_start_monday or week_start
+    if anchor.weekday() != 0:
+        raise ValueError("学期锚点日期必须是周一")
+    first = WeekParity(first_week_parity)
+    week_offset = (week_start - anchor).days // 7
+    active = first if week_offset % 2 == 0 else (
+        WeekParity.even if first is WeekParity.odd else WeekParity.odd
+    )
     return [
         DatedScheduleItem(**item.__dict__, lesson_date=week_start + timedelta(days=item.weekday - 1))
         for item in items
+        if item.week_parity in {WeekParity.all, active}
     ]
 
 

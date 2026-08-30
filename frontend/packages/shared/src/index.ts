@@ -89,11 +89,12 @@ export interface TeacherInfo {
 export interface SubjectInfo {
   id: number
   name: string
+  course_type?: 'subject' | 'activity'
 }
 
 export interface TeachingAssignment {
   id: number
-  teacher_id: number
+  teacher_id: number | null
   teacher_name?: string
   subject_id: number
   subject_name?: string

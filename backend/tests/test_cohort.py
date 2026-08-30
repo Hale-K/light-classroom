@@ -1,4 +1,4 @@
-from app.services.cohort import expected_cohort_label, normalize_cohort_label
+from app.services.cohort import cohort_labels_match, expected_cohort_label, normalize_cohort_label
 
 
 def test_expected_cohort_label_uses_entry_year_semantics():
@@ -9,3 +9,7 @@ def test_expected_cohort_label_uses_entry_year_semantics():
 
 def test_normalize_cohort_label_accepts_display_suffix():
     assert normalize_cohort_label("2026届") == "2026"
+
+
+def test_cohort_label_matching_accepts_the_display_suffix_used_by_existing_data():
+    assert cohort_labels_match("2026届", "2026") is True

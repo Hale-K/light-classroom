@@ -164,16 +164,12 @@ export const orgApi = {
       return { ...grade, name: grade.campus_name ? `${grade.campus_name} · ${plainName}` : plainName }
     })
   },
-  createGrade: (data: { name: string; level: number }) =>
+  createGrade: (data: { name: string; level: number; campus_id?: number | null }) =>
     unwrap<Grade>(http.post('/org/grades', data)),
   classes: (params?: { grade_id?: number }) =>
     unwrap<ClassInfo[]>(http.get('/org/classes', { params })),
   assignHeadTeacher: (classId: number, data: { teacher_id: number; academic_year: string; term: string }) =>
     unwrap<ClassInfo>(http.patch(`/org/classes/${classId}/head-teacher`, data)),
-  headTeacherPolicy: () =>
-    unwrap<{ max_lead_classes: number }>(http.get('/org/head-teacher-policy')),
-  saveHeadTeacherPolicy: (maxLeadClasses: number) =>
-    unwrap<{ max_lead_classes: number }>(http.put('/org/head-teacher-policy', { max_lead_classes: maxLeadClasses })),
   createClass: (data: { grade_id: number; name: string; home_room_id?: number; class_type?: string; planned_student_count?: number; head_teacher_id?: number }) =>
     unwrap<ClassInfo>(http.post('/org/classes', data)),
   updateClassResourcePlan: (id: number, data: { home_room_id: number | null; class_type: string }) =>
@@ -237,10 +233,11 @@ export const organizationApi = {
     parent_id?: number
     academic_year?: string
     cohort_label?: string
+    grade_id?: number | null
     sort_order?: number
   }) => unwrap<OrganizationUnit>(http.post('/organization/units', data)),
   updateUnit: (id: number, data: Partial<Pick<OrganizationUnit,
-    'name' | 'parent_id' | 'academic_year' | 'cohort_label' | 'sort_order' | 'status'
+    'name' | 'parent_id' | 'academic_year' | 'cohort_label' | 'grade_id' | 'sort_order' | 'status'
   >>) => unwrap<OrganizationUnit>(http.patch(`/organization/units/${id}`, data)),
   gradeCenter: () =>
     unwrap<{ unit_id: number | null; unit_name: string | null }>(http.get('/organization/grade-center')),
@@ -381,13 +378,35 @@ export const facilityApi = {
 
 export const schedulingApi = {
   resources: () => unwrap<SchedulingResources>(http.get('/scheduling/resources')),
+  subjects: () => unwrap<import('@/types').SubjectInfo[]>(http.get('/scheduling/subjects')),
+  courseHours: (params: { academic_year: string; term: string; class_id?: number }) =>
+    unwrap<import('@/types').CourseHourPlanInfo[]>(http.get('/scheduling/course-hours', { params })),
+  saveCourseHour: (data: {
+      id?: number
+      class_id: number
+      subject_id: number
+      academic_year: string
+      term: string
+      weekday_periods: number
+      saturday_periods: number
+      weekly_periods: number
+      week_parity: import('@/types').WeekParity
+      evening_periods_odd: number
+      evening_periods_even: number
+  }) => unwrap<import('@/types').CourseHourPlanInfo>(http.post('/scheduling/course-hours', data)),
+  deleteCourseHour: (id: number) => unwrap<null>(http.delete(`/scheduling/course-hours/${id}`)),
+  gridConfig: (params: { academic_year: string; term: string }) =>
+    unwrap<import('@/types').SchedulingGridConfig>(http.get('/scheduling/grid-config', { params })),
+  saveGridConfig: (data: import('@/types').SchedulingGridConfig & { academic_year: string; term: string }) =>
+    unwrap<import('@/types').SchedulingGridConfig>(http.put('/scheduling/grid-config', data)),
   strategies: () => unwrap<ScheduleStrategyOption[]>(http.get('/scheduling/strategies')),
   createTeacher: (data: { name: string; phone: string; password: string }) =>
     unwrap(http.post('/scheduling/teachers', data)),
-  createSubject: (name: string) => unwrap(http.post('/scheduling/subjects', { name })),
+  createSubject: (name: string, eveningStudyAllowed = false, courseType: 'subject' | 'activity' = 'subject') => unwrap<import('@/types').SubjectInfo>(http.post('/scheduling/subjects', { name, course_type: courseType, evening_study_allowed: eveningStudyAllowed })),
+  updateSubject: (id: number, data: { name: string; course_type: 'subject' | 'activity'; evening_study_allowed: boolean }) => unwrap<import('@/types').SubjectInfo>(http.put(`/scheduling/subjects/${id}`, data)),
   saveAssignment: (data: {
-    teacher_id: number
-    subject_id: number
+    teacher_id?: number
+    subject_id?: number
     class_id: number
     academic_year: string
     term: string
@@ -399,7 +418,7 @@ export const schedulingApi = {
     unwrap<import('@/types').TeacherScopeRule[]>(http.get('/scheduling/teacher-scope-rules', { params })),
   saveScopeRules: (data: { academic_year: string; term: string; rules: import('@/types').TeacherScopeRule[] }) =>
     unwrap<import('@/types').TeacherScopeRule[]>(http.put('/scheduling/teacher-scope-rules', data)),
-  autoTeaching: (data: { academic_year: string; term: string; class_ids?: number[]; subject_id?: number; weekly_periods: number; max_weekly_periods: number; max_classes_per_teacher?: number; subject_period_rules?: Array<{ subject_id: number; weekly_periods: number }>; subject_teacher_limits?: Array<{ subject_id: number; max_weekly_periods: number }>; execute?: boolean; days?: number; periods_per_day?: number; forbidden_slots?: Array<[number, number]>; max_class_lessons_per_day?: number; max_teacher_lessons_per_day?: number; max_same_subject_per_day?: number }) =>
+  autoTeaching: (data: { academic_year: string; term: string; class_ids?: number[]; subject_id?: number; weekly_periods: number; max_weekly_periods: number; subject_period_rules?: Array<{ subject_id: number; weekly_periods: number }>; subject_teacher_limits?: Array<{ subject_id: number; max_weekly_periods: number }>; execute?: boolean; days?: number; periods_per_day?: number; forbidden_slots?: Array<[number, number]>; max_class_lessons_per_day?: number; max_teacher_lessons_per_day?: number; max_same_subject_per_day?: number }) =>
     unwrap<{ created: Array<{ teacher_id: number; subject_id: number; class_id: number; weekly_periods: number; student_count?: number; suggested_weekly_periods?: number }>; skipped: Array<{ class_id: number; subject_id: number; reason: string }>; created_count: number; skipped_count: number; updated_count: number; executed: boolean; workload_summary: Array<{ teacher_id: number; teacher_name?: string; weekly_periods: number; max_weekly_periods: number; sufficient: boolean }>; plan: Array<{ teacher_id?: number; subject_id: number; class_id: number; weekly_periods?: number; student_count?: number; suggested_weekly_periods?: number; teacher_name?: string; subject_name?: string; class_name?: string; reason?: string; status: 'success' | 'skipped' }>; time_structure: { days: number; periods_per_day: number; forbidden_slots: Array<[number, number]>; max_class_lessons_per_day?: number; max_teacher_lessons_per_day?: number; max_same_subject_per_day?: number; weekly_lesson_cap: number; same_subject_weekly_cap?: number; teacher_weekly_cap?: number } }>(http.post('/scheduling/auto-teaching', data)),
   generate: (data: {
     academic_year: string
@@ -410,10 +429,17 @@ export const schedulingApi = {
     forbidden_slots?: Array<[number, number]>
     max_class_lessons_per_day?: number
     max_teacher_lessons_per_day?: number
+    max_class_lessons_on_saturday?: number
+    max_teacher_lessons_on_saturday?: number
+    max_pe_teacher_lessons_per_day?: number
+    enable_evening?: boolean
+    evening_start_period?: number | null
+    evening_daily_periods_odd?: number[]
+    evening_daily_periods_even?: number[]
+    evening_subject_ids?: number[]
     max_teacher_weekly_periods?: number
     max_same_subject_per_day?: number
     require_full_week?: boolean
-    max_classes_per_teacher?: number
     avoid_consecutive_teacher_lessons?: boolean
     strategy_codes?: string[]
   }) =>
@@ -450,10 +476,17 @@ export const schedulingApi = {
     forbidden_slots?: Array<[number, number]>
     max_class_lessons_per_day?: number
     max_teacher_lessons_per_day?: number
+    max_class_lessons_on_saturday?: number
+    max_teacher_lessons_on_saturday?: number
+    max_pe_teacher_lessons_per_day?: number
+    enable_evening?: boolean
+    evening_start_period?: number | null
+    evening_daily_periods_odd?: number[]
+    evening_daily_periods_even?: number[]
+    evening_subject_ids?: number[]
     max_teacher_weekly_periods?: number
     max_same_subject_per_day?: number
     require_full_week?: boolean
-    max_classes_per_teacher?: number
     avoid_consecutive_teacher_lessons?: boolean
     strategy_codes?: string[]
   }) => unwrap<ScheduleValidationResult>(http.post('/scheduling/validate', data)),

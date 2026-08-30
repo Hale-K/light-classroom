@@ -73,7 +73,6 @@ def build_auto_assignments(
     rules: Iterable[TeacherScopeRule],
     weekly_periods: int = 4,
     max_weekly_periods: int = 32,
-    max_classes_per_teacher: int = 2,
     subject_ids: Iterable[int] | None = None,
     subject_weekly_periods: Mapping[int, int] | None = None,
     subject_max_weekly_periods: Mapping[int, int] | None = None,
@@ -85,7 +84,6 @@ def build_auto_assignments(
     max_class_lessons_per_day: int | None = None,
     forbidden_slots: Iterable[tuple[int, int]] = (),
     teacher_subject_fallback: Mapping[int, Iterable[int]] | None = None,
-    teacher_max_classes: Mapping[int, int] | None = None,
     eligible_teacher_ids: Iterable[int] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Fill missing class/subject relations while honoring teacher scope rules.
@@ -99,12 +97,12 @@ def build_auto_assignments(
     eligible_ids = {int(item) for item in eligible_teacher_ids} if eligible_teacher_ids is not None else None
     rows = [
         item for item in assignments
-        if eligible_ids is None or int(item["teacher_id"]) in eligible_ids
+        if item.get("teacher_id") is not None
+        and (eligible_ids is None or int(item["teacher_id"]) in eligible_ids)
     ]
     teacher_subjects: dict[int, set[int]] = defaultdict(set)
     teacher_load: dict[int, int] = defaultdict(int)
     existing = {(int(item["class_id"]), int(item["subject_id"])) for item in rows}
-    teacher_class_count: dict[int, int] = defaultdict(int)
     # 时间结构推导的周上限：同科每日上限 × 教学日 = 单学科周课时上限
     same_subject_weekly_cap = max_same_subject_per_day * days if max_same_subject_per_day else None
     teacher_weekly_cap = max_teacher_lessons_per_day * days if max_teacher_lessons_per_day else None
@@ -117,13 +115,6 @@ def build_auto_assignments(
         teacher_load[teacher_id] += int(item.get("weekly_periods") or weekly_periods)
     for item in rows:
         class_load[int(item["class_id"])] += int(item.get("weekly_periods") or weekly_periods)
-    # 班级数按 class_id 去重统计：同一教师在同一班级的多条学科关系只算 1 个班
-    for item in rows:
-        teacher_id = int(item["teacher_id"])
-        teacher_class_count[teacher_id] = len({
-            int(row["class_id"]) for row in rows if int(row["teacher_id"]) == teacher_id
-        })
-
     deny_pairs: set[tuple[int, int]] = set()
     deny_subject_pairs: set[tuple[int, int, int]] = set()
     pin_rules: list[TeacherScopeRule] = []
@@ -174,9 +165,6 @@ def build_auto_assignments(
             limit = min(limit, teacher_weekly_cap)
         return limit
 
-    def _teacher_class_limit(teacher_id: int) -> int:
-        return int((teacher_max_classes or {}).get(teacher_id, max_classes_per_teacher))
-
     # 固定任教(allow)规则优先落位：保证「必须带」的班级先占位，再进行常规匹配
     scoped = set(int(cid) for cid in class_ids)
     for rule in pin_rules:
@@ -205,8 +193,6 @@ def build_auto_assignments(
                 periods = same_subject_weekly_cap
             if teacher_load[rule.teacher_id] + periods > _teacher_limit(sid):
                 continue
-            if teacher_class_count[rule.teacher_id] >= _teacher_class_limit(rule.teacher_id):
-                continue
             if class_weekly_cap is not None and class_load[rule.class_id] + periods > class_weekly_cap:
                 continue
             created.append({
@@ -219,7 +205,6 @@ def build_auto_assignments(
             })
             existing.add((rule.class_id, sid))
             teacher_load[rule.teacher_id] += periods
-            teacher_class_count[rule.teacher_id] += 1
             class_load[rule.class_id] += periods
             placed = True
             break
@@ -227,7 +212,7 @@ def build_auto_assignments(
             skipped.append({
                 "class_id": rule.class_id,
                 "subject_id": rule.subject_id if rule.subject_id is not None else (pin_subjects[0] if pin_subjects else 0),
-                "reason": "固定任教规则无法满足（教师无资质、课时/带班上限或班级容量不足）",
+                "reason": "固定任教规则无法满足（教师无资质、课时上限或班级容量不足）",
             })
 
     for class_id in class_ids:
@@ -253,8 +238,6 @@ def build_auto_assignments(
                     teacher_weekly_limit = min(teacher_weekly_limit, teacher_weekly_cap)
                 if teacher_load[teacher_id] + periods > teacher_weekly_limit:
                     continue
-                if teacher_class_count[teacher_id] >= _teacher_class_limit(teacher_id):
-                    continue
                 # 时间结构：同科每周上限（同科每日上限 × 教学日）与班级周容量
                 if same_subject_weekly_cap is not None and periods > same_subject_weekly_cap:
                     periods = same_subject_weekly_cap
@@ -266,11 +249,8 @@ def build_auto_assignments(
                 ):
                     # 禁排时段按（班级, 节次）记录：仅作提示，不阻断编排
                     pass
-                # 排序：负荷低优先 → 带班少优先 → 学生数适配（人少的班优先交给负荷低的教师）
-                # 先填满已使用教师，再启用下一位教师。这样 38 个班不会被平均
-                # 摊成 38 名教师各带 1 班，而是按「班主任最多 2 班、其他教师最多
-                # 3 班」紧凑分配；课时上限仍由上面的过滤条件硬约束。
-                candidates.append((-teacher_class_count[teacher_id], teacher_load[teacher_id], teacher_id, periods, student_count))
+                # 只按当前周课时负荷分配；教师可承担多个班，班级数量不设硬上限。
+                candidates.append((teacher_load[teacher_id], teacher_id, periods, student_count))
             if not candidates:
                 reasons = []
                 if capacity_blocked:
@@ -284,7 +264,7 @@ def build_auto_assignments(
                     reasons.append("没有符合授课范围或课时上限的教师")
                 skipped.append({"class_id": class_id, "subject_id": subject_id, "reason": "；".join(reasons)})
                 continue
-            _, _, teacher_id, periods, _ = min(candidates)
+            _, teacher_id, periods, _ = min(candidates)
             row = {
                 "teacher_id": teacher_id,
                 "subject_id": subject_id,
@@ -296,6 +276,5 @@ def build_auto_assignments(
             created.append(row)
             existing.add((class_id, subject_id))
             teacher_load[teacher_id] += periods
-            teacher_class_count[teacher_id] += 1
             class_load[class_id] += periods
     return created, skipped

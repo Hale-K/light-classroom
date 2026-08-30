@@ -38,3 +38,8 @@ def normalize_cohort_label(value: str | None) -> str | None:
         return None
     cleaned = value.strip().removesuffix("届").strip()
     return cleaned or None
+
+
+def cohort_labels_match(value: str | None, expected: str | None) -> bool:
+    """Compare cohort labels in their canonical form, accepting display text such as ``2026届``."""
+    return normalize_cohort_label(value) == normalize_cohort_label(expected)

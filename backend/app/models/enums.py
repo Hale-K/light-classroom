@@ -210,3 +210,10 @@ class PredictionItemStatus(str, Enum):
     pending = "pending"           # 待审核
     adopted = "adopted"           # 已采纳
     rejected = "rejected"         # 已驳回
+
+
+class WeekParity(str, Enum):
+    """课表项周次归属：普通模式恒为 all；单双周模式用 odd/even。"""
+    all = "all"      # 每周都上
+    odd = "odd"      # 单周
+    even = "even"    # 双周

@@ -4,7 +4,7 @@ from math import ceil
 import random
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -19,7 +19,7 @@ from app.models.org import Class, Grade, OrganizationUnit, Student, User
 from app.services.resource_allocation import room_matches_rule
 from app.services.staff_roles import get_staff_role_codes
 from app.services.naming import normalize_entity_name
-from app.services.cohort import current_academic_year, expected_cohort_label
+from app.services.cohort import current_academic_year, expected_cohort_label, normalize_cohort_label
 
 router = APIRouter(tags=["校区场室与会议"])
 
@@ -56,7 +56,7 @@ class RoomIn(BaseModel):
 
 class ResourceAllocationRuleIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
-    cohort_label: str = Field(pattern=r"^\d{4}届$")
+    cohort_label: str = Field(pattern=r"^\d{4}$")
     academic_year: str = Field(default="2026-2027", min_length=9, max_length=20)
     term: str = Field(default="1", pattern=r"^(1|2)$")
     campus_id: int
@@ -72,6 +72,11 @@ class ResourceAllocationRuleIn(BaseModel):
     required_feature: str | None = Field(default=None, max_length=50)
     allocation_mode: str = Field(default="shared", pattern=r"^(exclusive|shared)$")
     room_ids: list[int] | None = Field(default=None, min_length=1)
+
+    @field_validator("cohort_label", mode="before")
+    @classmethod
+    def normalize_cohort(cls, value: str) -> str:
+        return normalize_cohort_label(value) or ""
 
     @model_validator(mode="after")
     def validate_floor_range(self):

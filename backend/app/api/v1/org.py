@@ -13,13 +13,13 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.db.session import get_session
 from app.api.deps import get_current_user, get_current_tenant
 from app.models.facility import Campus, Room, RoomCohortAllocation
-from app.models.org import Grade, Class, OrganizationUnit, Student, StudentGradeMembership, Subject, TeachingAssignment, TenantConfig, User
+from app.models.org import Grade, Class, OrganizationUnit, Student, StudentGradeMembership, Subject, TeachingAssignment, User
 from app.models.scan import Submission
 from app.models.enums import Gender, StudentStatus, UserStatus
 from app.models.rbac import Role, UserRole
 from app.services.head_teacher_assignments import summarize_head_teacher_assignment
 from app.services.naming import normalize_entity_name
-from app.services.cohort import current_academic_year, expected_cohort_label, normalize_cohort_label
+from app.services.cohort import cohort_labels_match, current_academic_year, expected_cohort_label, normalize_cohort_label
 from app.services.student_grade_membership import sync_student_grade_membership
 
 router = APIRouter(prefix="/org", tags=["组织学籍"])
@@ -38,7 +38,7 @@ class ClassIn(BaseModel):
     campus_id: int | None = None
     home_room_id: int | None = None
     class_type: str = Field(default="regular", min_length=1, max_length=30)
-    planned_student_count: int | None = Field(default=None, ge=1, le=45)
+    planned_student_count: int | None = Field(default=None, ge=1, le=5000)
     head_teacher_id: int | None = None
     deputy_head_teacher_id: int | None = None
     cohort_label: str | None = Field(default=None, max_length=30, description="届(毕业年);缺省按当前学年+年级自动推导")
@@ -114,7 +114,9 @@ async def create_grade(body: GradeIn, session: AsyncSession = Depends(get_sessio
     ))).scalar()
     if duplicate:
         raise HTTPException(status_code=422, detail=f"年级「{name}」已存在")
-    grade = Grade(**body.model_dump(), tenant_id=tenant_id, name=name)
+    grade_data = body.model_dump()
+    grade_data["name"] = name
+    grade = Grade(**grade_data, tenant_id=tenant_id)
     session.add(grade)
     await session.commit()
     await session.refresh(grade)
@@ -142,12 +144,18 @@ async def list_classes(grade_id: int | None = None,
                 academic_year or await current_academic_year(session, tenant_id),
                 grade.level,
             )
-            stmt = stmt.where(Class.cohort_label == active_cohort)
+            # Older records may retain the display suffix (for example, "2026届").
+            # Filter after loading so both canonical and display labels remain visible.
+            classes = list((await session.execute(stmt)).scalars().all())
+            classes = [item for item in classes if cohort_labels_match(item.cohort_label, active_cohort)]
+        else:
+            classes = list((await session.execute(stmt)).scalars().all())
     elif academic_year:
         # 未指定具体年级时，按当前学年筛掉其它届别；不同年级的目标届别
         # 可能不同，因此在结果组装后再按各年级 level 过滤。
         pass
-    classes = list((await session.execute(stmt)).scalars().all())
+    if grade_id is None:
+        classes = list((await session.execute(stmt)).scalars().all())
     if grade_id is None and academic_year:
         grade_ids = {item.grade_id for item in classes}
         grades = list((await session.execute(select(Grade).where(
@@ -312,24 +320,6 @@ async def assign_head_teacher(
         if head_teacher_role_id is None:
             raise HTTPException(status_code=500, detail="班主任角色未配置")
         session.add(UserRole(user_id=teacher.id, role_id=head_teacher_role_id))
-    # 班主任领班数上限（系统设置可配,默认 1 个班）：同一教师担任班主任的班级数不能超过
-    policy_row = (await session.execute(select(TenantConfig).where(
-        TenantConfig.tenant_id == tenant_id,
-        TenantConfig.config_key == "head_teacher_policy",
-    ))).scalars().first()
-    max_lead = int((policy_row.config_value or {}).get("max_lead_classes", 1)) if policy_row and isinstance(policy_row.config_value, dict) else 1
-    led_count = len([item for item in (
-        await session.execute(select(Class.id).where(
-            Class.tenant_id == tenant_id,
-            Class.head_teacher_id == teacher.id,
-            Class.id != cls.id,
-        ))
-    ).scalars().all()])
-    if led_count >= max_lead:
-        raise HTTPException(
-            status_code=422,
-            detail=f"{teacher.name} 已担任 {led_count} 个班的班主任，超过班主任领班数上限 {max_lead} 个班",
-        )
     cls.head_teacher_id = teacher.id
     await session.commit()
     await session.refresh(cls)
@@ -340,45 +330,6 @@ async def assign_head_teacher(
         "head_teacher_taught_class_count": summary["taught_class_count"],
         "head_teacher_teaches_own_class": bool(summary["teaches_own_class"]),
     }}
-
-
-@router.get("/head-teacher-policy", summary="班主任领班数上限配置")
-async def get_head_teacher_policy(
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
-):
-    row = (await session.execute(select(TenantConfig).where(
-        TenantConfig.tenant_id == tenant_id,
-        TenantConfig.config_key == "head_teacher_policy",
-    ))).scalars().first()
-    value = row.config_value if row and isinstance(row.config_value, dict) else {}
-    return {"code": 0, "message": "ok", "data": {"max_lead_classes": int(value.get("max_lead_classes", 1))}}
-
-
-class HeadTeacherPolicyIn(BaseModel):
-    max_lead_classes: int = Field(ge=1, le=5, description="一位教师最多担任几个班的班主任")
-
-
-@router.put("/head-teacher-policy", summary="保存班主任领班数上限配置")
-async def save_head_teacher_policy(
-    body: HeadTeacherPolicyIn,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
-):
-    row = (await session.execute(select(TenantConfig).where(
-        TenantConfig.tenant_id == tenant_id,
-        TenantConfig.config_key == "head_teacher_policy",
-    ))).scalars().first()
-    if row is None:
-        row = TenantConfig(tenant_id=tenant_id, config_key="head_teacher_policy", config_value={"max_lead_classes": body.max_lead_classes}, updated_by=user.id)
-        session.add(row)
-    else:
-        row.config_value = {"max_lead_classes": body.max_lead_classes}
-        row.updated_by = user.id
-    await session.commit()
-    return {"code": 0, "message": "ok", "data": {"max_lead_classes": body.max_lead_classes}}
 
 
 def add_existing_class_counts(class_rows: dict[int, dict], students: list[Student]) -> None:

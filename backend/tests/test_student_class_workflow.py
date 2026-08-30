@@ -1,7 +1,14 @@
 import pytest
 from pydantic import ValidationError
 
-from app.api.v1.org import ClassAssignmentIn, StudentIn, add_existing_class_counts, count_students
+from app.api.v1.org import (
+    ClassAssignmentIn,
+    GradeIn,
+    StudentIn,
+    add_existing_class_counts,
+    count_students,
+    create_grade,
+)
 
 
 def test_auto_assignment_preview_includes_existing_class_counts():
@@ -67,3 +74,37 @@ async def test_student_count_is_scoped_to_current_school():
     compiled = session.statement.compile()
 
     assert 3 in compiled.params.values()
+
+
+@pytest.mark.asyncio
+async def test_create_grade_normalizes_name_without_duplicate_constructor_kwargs():
+    class Result:
+        @staticmethod
+        def scalar():
+            return None
+
+    class RecordingSession:
+        added = None
+
+        async def execute(self, statement):
+            return Result()
+
+        def add(self, value):
+            self.added = value
+
+        async def commit(self):
+            pass
+
+        async def refresh(self, value):
+            pass
+
+    session = RecordingSession()
+    result = await create_grade(
+        GradeIn(name="  高二年级  ", level=1, campus_id=3),
+        session=session,
+        user=object(),
+        tenant_id=7,
+    )
+
+    assert session.added.name == "高二年级"
+    assert result["data"]["name"] == "高二年级"

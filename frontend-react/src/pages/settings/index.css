@@ -2,3 +2,49 @@
 .stg-page-v2 {
   width: 100%;
 }
+
+.stg-grade-panel {
+  margin-top: 24px;
+  padding: 24px;
+  border: 1px solid #e7edf5;
+  border-radius: 16px;
+  background: #fff;
+}
+
+.stg-grade-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.stg-grade-panel__header h2 {
+  margin: 0;
+  color: #162033;
+  font-size: 20px;
+}
+
+.stg-grade-panel__header p {
+  margin: 6px 0 0;
+  color: #7c889b;
+}
+
+.stg-grade-panel__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+@media (max-width: 860px) {
+  .stg-grade-panel__header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .stg-grade-panel__actions {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+}

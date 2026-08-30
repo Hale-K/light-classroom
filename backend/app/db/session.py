@@ -58,10 +58,11 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             for desc in execute_state.statement.column_descriptions:
                 entity = desc.get("entity")
                 if entity is not None and hasattr(entity, "__table__") and "tenant_id" in entity.__table__.columns:
+                    criterion = lambda cls: cls.tenant_id == tid
                     options.append(
                         with_loader_criteria(
                             entity,
-                            lambda cls: cls.tenant_id == tid,
+                            criterion,
                             include_aliases=True,
                         )
                     )

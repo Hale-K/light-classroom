@@ -1,6 +1,6 @@
 """Persisted school organization and scoped staff appointments."""
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as postgres_insert
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -8,9 +8,10 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
-from app.models.org import Grade, OrganizationUnit, StaffAppointment, StudentGradeMembership, Tenant, TenantConfig, User
+from app.models.org import Grade, OrganizationUnit, StaffAppointment, StudentGradeMembership, Subject, Tenant, TenantConfig, User
 from app.models.enums import UserStatus
 from app.services.organization import build_organization_tree
+from app.services.cohort import normalize_cohort_label
 
 router = APIRouter(prefix="/organization", tags=["组织机构"])
 
@@ -18,24 +19,59 @@ UNIT_TYPES = {"department", "grade_group", "subject_group", "admin_class"}
 POSITION_CODES = {"principal", "academic_director", "grade_director", "head_teacher", "deputy_head_teacher", "member"}
 
 
+def validate_grade_group_binding(unit_type: str, grade_id: int | None) -> None:
+    """Keep the grade-group/grade relationship explicit and consistent."""
+    if unit_type == "grade_group" and grade_id is None:
+        raise ValueError("年级部必须绑定对应年级")
+    if unit_type != "grade_group" and grade_id is not None:
+        raise ValueError("只有年级部可以绑定对应年级")
+
+
+def validate_subject_group_binding(unit_type: str, subject_id: int | None) -> None:
+    """A subject group must point to an explicit subject; names are not a relation."""
+    if unit_type == "subject_group" and subject_id is None:
+        raise ValueError("学科组必须关联科目")
+    if unit_type != "subject_group" and subject_id is not None:
+        raise ValueError("只有学科组可以关联科目")
+
+
+async def _tenant_subject(session: AsyncSession, tenant_id: int, subject_id: int) -> Subject:
+    subject = await session.get(Subject, subject_id)
+    if subject is None or subject.tenant_id != tenant_id:
+        raise HTTPException(status_code=422, detail="关联科目不存在或不属于当前租户")
+    return subject
+
+
 class UnitIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     unit_type: str = Field(default="department")
+    subject_id: int | None = None
     parent_id: int | None = None
     academic_year: str | None = Field(default=None, max_length=20)
     cohort_label: str | None = Field(default=None, max_length=30)
     grade_id: int | None = None
     sort_order: int = 0
 
+    @field_validator("cohort_label", mode="before")
+    @classmethod
+    def normalize_cohort(cls, value: str | None) -> str | None:
+        return normalize_cohort_label(value)
+
 
 class UnitUpdateIn(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=100)
     parent_id: int | None = None
+    subject_id: int | None = None
     academic_year: str | None = Field(default=None, max_length=20)
     cohort_label: str | None = Field(default=None, max_length=30)
     grade_id: int | None = None
     sort_order: int | None = None
     status: str | None = Field(default=None, pattern=r"^(active|archived)$")
+
+    @field_validator("cohort_label", mode="before")
+    @classmethod
+    def normalize_cohort(cls, value: str | None) -> str | None:
+        return normalize_cohort_label(value)
 
 
 class AppointmentIn(BaseModel):
@@ -178,12 +214,17 @@ async def create_unit(
     _require_principal(user)
     if body.unit_type not in UNIT_TYPES:
         raise HTTPException(status_code=422, detail="不支持的组织类型")
+    try:
+        validate_grade_group_binding(body.unit_type, body.grade_id)
+        validate_subject_group_binding(body.unit_type, body.subject_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if body.grade_id is not None:
-        if body.unit_type != "grade_group":
-            raise HTTPException(status_code=422, detail="只有年级部可以绑定对应年级")
         grade = await session.get(Grade, body.grade_id)
         if grade is None or grade.tenant_id != tenant_id:
             raise HTTPException(status_code=422, detail="对应年级不存在")
+    if body.subject_id is not None:
+        await _tenant_subject(session, tenant_id, body.subject_id)
     if body.parent_id is not None:
         await _tenant_unit(session, tenant_id, body.parent_id)
     await _ensure_single_grade_center_name(session, tenant_id, body.name)
@@ -205,13 +246,19 @@ async def update_unit(
     _require_principal(user)
     unit = await _tenant_unit(session, tenant_id, unit_id)
     values = body.model_dump(exclude_unset=True)
-    if "grade_id" in values:
-        if unit.unit_type != "grade_group" and values["grade_id"] is not None:
-            raise HTTPException(status_code=422, detail="只有年级部可以绑定对应年级")
-        if values["grade_id"] is not None:
-            grade = await session.get(Grade, values["grade_id"])
-            if grade is None or grade.tenant_id != tenant_id:
-                raise HTTPException(status_code=422, detail="对应年级不存在")
+    effective_grade_id = values.get("grade_id", unit.grade_id)
+    effective_subject_id = values.get("subject_id", unit.subject_id)
+    try:
+        validate_grade_group_binding(unit.unit_type, effective_grade_id)
+        validate_subject_group_binding(unit.unit_type, effective_subject_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if "grade_id" in values and values["grade_id"] is not None:
+        grade = await session.get(Grade, values["grade_id"])
+        if grade is None or grade.tenant_id != tenant_id:
+            raise HTTPException(status_code=422, detail="对应年级不存在")
+    if "subject_id" in values and values["subject_id"] is not None:
+        await _tenant_subject(session, tenant_id, values["subject_id"])
     if values.get("parent_id") == unit_id:
         raise HTTPException(status_code=422, detail="组织节点不能成为自己的上级")
     if values.get("parent_id") is not None:

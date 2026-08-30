@@ -15,6 +15,7 @@ import type {
   ScheduleRuleConfig,
   ScheduleRuleTemplate,
   ScheduleStrategyOption,
+  SchedulingGridConfig,
   SchedulingResources,
   ScheduleValidationIssue,
   ScheduleValidationResult,
@@ -23,6 +24,7 @@ import type {
   TeachingAssignment,
 } from '@/types'
 import RuleDesigner from './RuleDesigner'
+import CourseHoursPanel from './course-hours'
 import './index.css'
 
 /** 初始时间基线：学年 / 学期 / 本周一（与 Vue 版一致） */
@@ -39,6 +41,7 @@ const localDateValue = (value: Date) => [
   String(value.getDate()).padStart(2, '0'),
 ].join('-')
 const SUBJECT_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理', '体育']
+const WEEKDAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 const GEN_STEPS = [
   { code: 'validating', label: '校验资源' },
@@ -48,10 +51,8 @@ const GEN_STEPS = [
 ] as const
 type GenStage = 'idle' | (typeof GEN_STEPS)[number]['code'] | 'blocked' | 'error'
 
-/** 自动任教关系编排结果中的单条计划行 */
-type AutoTeachingPlanRow = Awaited<ReturnType<typeof schedulingApi.autoTeaching>>['plan'][number]
-
 interface AssignmentForm {
+  mode?: 'subject' | 'activity'
   teacher_id?: number
   subject_id?: number
   class_id?: number
@@ -91,7 +92,7 @@ export default function SchedulingView() {
   const [scheduleVersions, setScheduleVersions] = useState<ScheduleVersionSummary[]>([])
   const [versionsLoading, setVersionsLoading] = useState(false)
 
-  const [activeTab, setActiveTab] = useState<'rules' | 'assignments' | 'schedule'>('rules')
+  const [activeTab, setActiveTab] = useState<'hours' | 'rules' | 'assignments' | 'schedule'>('hours')
   const [resources, setResources] = useState<SchedulingResources>({
     teachers: [],
     subjects: [],
@@ -109,6 +110,15 @@ export default function SchedulingView() {
   const [academicYear, setAcademicYear] = useState(`${SCHOOL_YEAR}-${SCHOOL_YEAR + 1}`)
   const [term, setTerm] = useState(NOW.getMonth() >= 1 && NOW.getMonth() < 7 ? '2' : '1')
   const [weekStart, setWeekStart] = useState<string>(localDateValue(MONDAY))
+  const [gridConfigVisible, setGridConfigVisible] = useState(false)
+  const [gridConfig, setGridConfig] = useState<SchedulingGridConfig>({
+    days: 5, periods_per_day: 7, enable_saturday: false, enable_evening: false,
+    daily_periods: [7, 7, 7, 7, 7, 0, 0], evening_start_period: null,
+    evening_daily_periods_odd: [0, 0, 0, 0, 0, 0, 0],
+    evening_daily_periods_even: [0, 0, 0, 0, 0, 0, 0],
+    evening_subject_ids: [], evening_subject_ids_odd: [], evening_subject_ids_even: [],
+    term_start_monday: null, first_week_parity: 'odd',
+  })
 
   // 弹窗
   const [assignmentVisible, setAssignmentVisible] = useState(false)
@@ -124,19 +134,12 @@ export default function SchedulingView() {
   const [substituteOptions, setSubstituteOptions] = useState<SubstituteOption[]>([])
   const [adjustmentTab, setAdjustmentTab] = useState<'move' | 'substitute'>('move')
   const [scopeRuleVisible, setScopeRuleVisible] = useState(false)
-  const [autoTeachingVisible, setAutoTeachingVisible] = useState(false)
   const [scopeRules, setScopeRules] = useState<TeacherScopeRule[]>([])
   const [scopeRuleForm, setScopeRuleForm] = useState<Partial<TeacherScopeRule>>({ mode: 'allow', weekly_periods: 4 })
   const [scopeRuleFilter, setScopeRuleFilter] = useState<Partial<TeacherScopeRule>>({})
   const [scopeRuleFormVisible, setScopeRuleFormVisible] = useState(false)
   const [editingScopeRuleKey, setEditingScopeRuleKey] = useState<string | undefined>()
-  const [autoTeachingResult, setAutoTeachingResult] = useState<Awaited<ReturnType<typeof schedulingApi.autoTeaching>>>()
-  const [autoTeachingLogsVisible, setAutoTeachingLogsVisible] = useState(false)
-  const [autoTeachingLoading, setAutoTeachingLoading] = useState(false)
   const autoWeeklyPeriods = 4
-  const [autoTeachingPlan, setAutoTeachingPlan] = useState<string | undefined>()
-  const [autoSubjectRules, setAutoSubjectRules] = useState<Array<{ subject_id: number; weekly_periods: number }>>([])
-  const [autoSubjectTeacherLimits, setAutoSubjectTeacherLimits] = useState<Array<{ subject_id: number; max_weekly_periods: number }>>([])
   const [grades, setGrades] = useState<Grade[]>([])
   const [autoGradeIds, setAutoGradeIds] = useState<number[]>([])
   // 课时方案：内置标准方案 + 本地自定义方案，一键填充学科课时规则
@@ -146,7 +149,7 @@ export default function SchedulingView() {
   ]
   const [periodPlans, setPeriodPlans] = useState<Array<{ name: string; rules: Record<string, number> }>>([])
   const allPeriodPlans = useMemo(() => [...BUILTIN_PERIOD_PLANS, ...periodPlans], [periodPlans])
-  // 模版生成：选课时方案直接生成任教关系
+  // 自动生成：按课时方案直接生成任教关系
   const [templateGenVisible, setTemplateGenVisible] = useState(false)
   const [templateGenPlan, setTemplateGenPlan] = useState('标准方案')
   const [templateGenLoading, setTemplateGenLoading] = useState(false)
@@ -164,7 +167,6 @@ export default function SchedulingView() {
       max_teacher_weekly_periods: 30,
       max_same_subject_per_day: 2,
     require_full_week: true,
-    max_classes_per_teacher: 3,
     avoid_consecutive_teacher_lessons: true,
     forbidden_slots: [] as string[],
     strategy_codes: ['cross_day_variety', 'class_compact', 'daily_balance', 'cross_class_gap_repair', 'random_tiebreak'],
@@ -187,15 +189,28 @@ export default function SchedulingView() {
   // ---------- 规则模板（建立规则 Tab） ----------
   const DEFAULT_RULE_TEMPLATE_KEY = 'scheduling.default_rule_template_id'
   const RULE_TEMPLATES_KEY = 'scheduling.rule_templates.v1'
+  const RULE_CONFIG_REVISION_KEY = 'scheduling.rule_config_revision'
+  const RULE_CONFIG_REVISION = '2026-08-29-course-hours-v4'
   const DEFAULT_RULE_CONFIG: ScheduleRuleConfig = {
     days: 5,
-    periods_per_day: 6,
-    max_class_lessons_per_day: 6,
+    periods_per_day: 8,
+    saturday_periods: 7,
+    enable_evening: false,
+    evening_start_period: null,
+    evening_daily_periods_odd: [0, 0, 0, 0, 0, 0, 0],
+    evening_daily_periods_even: [0, 0, 0, 0, 0, 0, 0],
+    evening_subject_ids: [],
+    evening_subject_ids_odd: [],
+    evening_subject_ids_even: [],
+    max_class_lessons_per_day: 8,
     max_teacher_lessons_per_day: 6,
+    max_class_lessons_on_saturday: 7,
+    max_teacher_lessons_on_saturday: 7,
+    max_pe_teacher_lessons_per_day: 4,
     max_teacher_weekly_periods: 30,
+    pe_weekly_periods: 2,
     max_same_subject_per_day: 2,
-    require_full_week: true,
-    max_classes_per_teacher: 3,
+    require_full_week: false,
     avoid_consecutive_teacher_lessons: true,
     forbidden_slots: [],
     strategy_codes: ['cross_day_variety', 'class_compact', 'daily_balance', 'cross_class_gap_repair', 'random_tiebreak'],
@@ -204,7 +219,7 @@ export default function SchedulingView() {
     {
       id: 'builtin-balanced',
       name: '常规均衡排课',
-      desc: '每日最多 6 节 / 同科最多 2 节 / 教师跨班不超过 3 个 / 避免连堂',
+      desc: '课时足额 / 同科分散 / 禁排时段',
       enabled: true,
       config: DEFAULT_RULE_CONFIG,
       created_at: new Date().toISOString(),
@@ -213,7 +228,7 @@ export default function SchedulingView() {
     {
       id: 'builtin-intensive',
       name: '集中紧凑排课',
-      desc: '同科 2 节尽量集中、班级尽量紧凑、用于半天学科日',
+      desc: '班级课表紧凑；同科课时仍由算法按全周自动分散',
       enabled: true,
       config: {
         ...DEFAULT_RULE_CONFIG,
@@ -230,8 +245,32 @@ export default function SchedulingView() {
       if (!raw) return buildInTemplates()
       const parsed = JSON.parse(raw) as ScheduleRuleTemplate[]
       const list = Array.isArray(parsed) && parsed.length ? parsed : buildInTemplates()
+      const applyRecommendedConfig = localStorage.getItem(RULE_CONFIG_REVISION_KEY) !== RULE_CONFIG_REVISION
       // 兼容旧数据：无 enabled 字段视为启用
-      return list.map((t) => ({ ...t, enabled: t.enabled !== false }))
+      const normalized = list.map((t) => ({
+        ...t,
+        enabled: t.enabled !== false,
+        config: {
+          ...DEFAULT_RULE_CONFIG,
+          ...(applyRecommendedConfig && t.id === 'builtin-balanced' ? {} : t.config),
+          saturday_parity: 'all' as const,
+          enable_evening: applyRecommendedConfig ? false : (t.config.enable_evening ?? false),
+          evening_start_period: applyRecommendedConfig ? null : (t.config.evening_start_period ?? null),
+          evening_daily_periods_odd: applyRecommendedConfig ? [0, 0, 0, 0, 0, 0, 0] : (t.config.evening_daily_periods_odd ?? [0, 0, 0, 0, 0, 0, 0]),
+          evening_daily_periods_even: applyRecommendedConfig ? [0, 0, 0, 0, 0, 0, 0] : (t.config.evening_daily_periods_even ?? [0, 0, 0, 0, 0, 0, 0]),
+          evening_subject_ids_odd: Array.isArray(t.config.evening_subject_ids_odd) ? t.config.evening_subject_ids_odd : (t.config.evening_subject_ids ?? []),
+          evening_subject_ids_even: Array.isArray(t.config.evening_subject_ids_even) ? t.config.evening_subject_ids_even : (t.config.evening_subject_ids ?? []),
+          evening_subject_ids: [...new Set([
+            ...(Array.isArray(t.config.evening_subject_ids_odd) ? t.config.evening_subject_ids_odd : (t.config.evening_subject_ids ?? [])),
+            ...(Array.isArray(t.config.evening_subject_ids_even) ? t.config.evening_subject_ids_even : (t.config.evening_subject_ids ?? [])),
+          ])],
+        },
+      }))
+      if (applyRecommendedConfig) {
+        localStorage.setItem(RULE_CONFIG_REVISION_KEY, RULE_CONFIG_REVISION)
+        localStorage.setItem(RULE_TEMPLATES_KEY, JSON.stringify(normalized))
+      }
+      return normalized
     } catch {
       return buildInTemplates()
     }
@@ -432,23 +471,69 @@ export default function SchedulingView() {
     return index >= 0 ? index : failedStageIndex
   }, [genStage, failedStageIndex])
 
-  const generationPayload = (config: ScheduleRuleConfig = conditions) => ({
-    academic_year: academicYear,
-    term,
-    days: config.days,
-    periods_per_day: config.periods_per_day,
-    max_class_lessons_per_day: config.max_class_lessons_per_day,
-    max_teacher_lessons_per_day: config.max_teacher_lessons_per_day,
-    max_teacher_weekly_periods: config.max_teacher_weekly_periods,
-    max_same_subject_per_day: config.max_same_subject_per_day,
-    require_full_week: config.require_full_week,
-    max_classes_per_teacher: config.max_classes_per_teacher,
-    avoid_consecutive_teacher_lessons: config.avoid_consecutive_teacher_lessons,
-    forbidden_slots: config.forbidden_slots.map(
-      (slot) => slot.split('-').map(Number) as [number, number],
-    ),
-    strategy_codes: config.strategy_codes,
-  })
+  const ruleGridConfig = (config: ScheduleRuleConfig): SchedulingGridConfig => {
+    // 时段结构由“周格设置”唯一维护，规则模板只提供排课约束与策略。
+    const dailyPeriods = Array.from({ length: 7 }, (_, index) => gridConfig.daily_periods[index] ?? 0)
+    const activeDays = dailyPeriods.reduce((lastDay, periods, index) => periods > 0 ? index + 1 : lastDay, 0)
+    const formalPeriods = Math.max(...dailyPeriods, 0)
+    // 晚自习的起始节次和每日容量也由“周格设置”维护，不跟随排课规则模板切换。
+    const eveningDailyPeriodsOdd = gridConfig.evening_daily_periods_odd ?? [0, 0, 0, 0, 0, 0, 0]
+    const eveningDailyPeriodsEven = gridConfig.evening_daily_periods_even ?? [0, 0, 0, 0, 0, 0, 0]
+    const eveningEnabled = Boolean(gridConfig.enable_evening)
+    const legacyEveningSubjects = gridConfig.evening_subject_ids ?? []
+    return {
+      ...gridConfig,
+      days: activeDays,
+      periods_per_day: formalPeriods,
+      daily_periods: dailyPeriods,
+      enable_saturday: dailyPeriods[5] > 0,
+      enable_evening: eveningEnabled,
+      // 晚自习是独立时段，始终自动接在当天正式课之后，不再由用户填写第几节。
+      evening_start_period: eveningEnabled ? formalPeriods + 1 : null,
+      evening_daily_periods_odd: eveningDailyPeriodsOdd,
+      evening_daily_periods_even: eveningDailyPeriodsEven,
+      evening_subject_ids: [...new Set([
+        ...(config.evening_subject_ids_odd ?? legacyEveningSubjects),
+        ...(config.evening_subject_ids_even ?? legacyEveningSubjects),
+      ])],
+      evening_subject_ids_odd: config.evening_subject_ids_odd ?? legacyEveningSubjects,
+      evening_subject_ids_even: config.evening_subject_ids_even ?? legacyEveningSubjects,
+    }
+  }
+
+  const generationPayload = (config: ScheduleRuleConfig = conditions) => {
+    const ruleGrid = ruleGridConfig(config)
+    const strategyCodes = [
+      'daily_balance',
+      ...config.strategy_codes.filter((code) => code !== 'daily_balance'),
+    ]
+    const structuralForbidden: Array<[number, number]> = []
+    ruleGrid.daily_periods.slice(0, ruleGrid.days).forEach((available, dayIndex) => {
+      for (let period = available + 1; period <= ruleGrid.periods_per_day; period += 1) {
+        structuralForbidden.push([dayIndex + 1, period])
+      }
+    })
+    const forbidden = new Map<string, [number, number]>()
+    ;[
+      ...config.forbidden_slots.map((slot) => slot.split('-').map(Number) as [number, number]),
+      ...structuralForbidden,
+    ].forEach((slot) => forbidden.set(`${slot[0]}-${slot[1]}`, slot))
+    return {
+      academic_year: academicYear,
+      term,
+      days: ruleGrid.days,
+      periods_per_day: ruleGrid.periods_per_day,
+      enable_evening: ruleGrid.enable_evening,
+      evening_start_period: ruleGrid.evening_start_period,
+      evening_daily_periods_odd: ruleGrid.evening_daily_periods_odd,
+      evening_daily_periods_even: ruleGrid.evening_daily_periods_even,
+      evening_subject_ids: ruleGrid.evening_subject_ids,
+      evening_subject_ids_odd: ruleGrid.evening_subject_ids_odd,
+      evening_subject_ids_even: ruleGrid.evening_subject_ids_even,
+      forbidden_slots: [...forbidden.values()],
+      strategy_codes: strategyCodes,
+    }
+  }
 
   const payloadSignature = () => JSON.stringify(generationPayload())
   const validationIsCurrent = Boolean(validation?.valid && validatedSignature === payloadSignature())
@@ -464,9 +549,6 @@ export default function SchedulingView() {
       const name =
         resources.teachers.find((item) => item.id === issue.entity_id)?.name ||
         `教师 ${issue.entity_id}`
-      if (issue.code === 'teacher_class_count_exceeded') {
-        return `${name}承担 ${issue.requested} 个班，当前上限 ${issue.capacity} 个班`
-      }
       return `${name}承担 ${issue.requested} 节，当前条件最多可排 ${issue.capacity} 节`
     }
     const className =
@@ -602,57 +684,12 @@ export default function SchedulingView() {
     (scopeRuleFilter.mode === undefined || rule.mode === scopeRuleFilter.mode)
   )), [scopeRules, scopeRuleFilter])
 
-  const addAutoSubjectRule = () => {
-    const candidate = resources.subjects.find((item) => (
-      !resources.teaching_track_subject_ids?.includes(item.id) &&
-      !autoSubjectRules.some((rule) => rule.subject_id === item.id)
-    ))
-    if (!candidate) {
-      message.warning('没有可添加的学科')
-      return
-    }
-    setAutoSubjectRules((current) => [...current, { subject_id: candidate.id, weekly_periods: autoWeeklyPeriods }])
-    setAutoSubjectTeacherLimits((current) => [...current, { subject_id: candidate.id, max_weekly_periods: autoMaxWeeklyPeriods }])
-    setAutoTeachingResult(undefined)
-  }
-
-  const updateAutoRuleSubject = (prevSubjectId: number, subjectId: number) => {
-    setAutoSubjectRules((current) => current.map((item) => (item.subject_id === prevSubjectId ? { ...item, subject_id: subjectId } : item)))
-    setAutoSubjectTeacherLimits((current) => current.map((item) => (item.subject_id === prevSubjectId ? { ...item, subject_id: subjectId } : item)))
-    setAutoTeachingResult(undefined)
-  }
-
-  const updateAutoRulePeriods = (subjectId: number, weeklyPeriods: number) => {
-    setAutoSubjectRules((current) => current.map((item) => (item.subject_id === subjectId ? { ...item, weekly_periods: weeklyPeriods } : item)))
-    setAutoTeachingResult(undefined)
-  }
-
-  const updateAutoRuleLimit = (subjectId: number, maxWeeklyPeriods: number) => {
-    setAutoSubjectTeacherLimits((current) => current.map((item) => (item.subject_id === subjectId ? { ...item, max_weekly_periods: maxWeeklyPeriods } : item)))
-    setAutoTeachingResult(undefined)
-  }
-
-  // 体育学科：规则设计器「体育课节数」配置在打开弹框时同步为一条规则行
-  const peSubject = resources.subjects.find((item) => item.name.includes('体育') && !resources.teaching_track_subject_ids?.includes(item.id))
-
   const periodPlanEntries = (plan: { name: string; rules: Record<string, number> }) => Object.entries(plan.rules)
     .map(([subjectName, weeklyPeriods]) => {
       const subject = resources.subjects.find((item) => item.name === subjectName && !resources.teaching_track_subject_ids?.includes(item.id))
       return subject ? { subject_id: subject.id, weekly_periods: weeklyPeriods } : null
     })
     .filter((item): item is { subject_id: number; weekly_periods: number } => item !== null)
-
-  const applyPeriodPlan = (plan: { name: string; rules: Record<string, number> }) => {
-    const entries = periodPlanEntries(plan)
-    if (!entries.length) {
-      message.warning('方案中没有可用学科')
-      return
-    }
-    setAutoSubjectRules(entries)
-    setAutoSubjectTeacherLimits(entries.map((item) => ({ subject_id: item.subject_id, max_weekly_periods: autoMaxWeeklyPeriods })))
-    setAutoTeachingPlan(plan.name)
-    setAutoTeachingResult(undefined)
-  }
 
   const runTemplateGenerate = async () => {
     const plan = allPeriodPlans.find((item) => item.name === templateGenPlan)
@@ -665,6 +702,7 @@ export default function SchedulingView() {
     setTemplateGenLoading(true)
     setTemplateGenIssues([])
     try {
+      const currentGrid = ruleGridConfig(conditions)
       const classIds = autoGradeIds.length > 0
         ? resources.classes.filter((item) => autoGradeIds.includes(item.grade_id)).map((item) => item.id)
         : undefined
@@ -676,8 +714,8 @@ export default function SchedulingView() {
         max_weekly_periods: autoMaxWeeklyPeriods,
         subject_period_rules: entries,
         subject_teacher_limits: entries.map((item) => ({ subject_id: item.subject_id, max_weekly_periods: autoMaxWeeklyPeriods })),
-        days: conditions.days,
-        periods_per_day: conditions.periods_per_day,
+        days: currentGrid.days,
+        periods_per_day: currentGrid.periods_per_day,
         forbidden_slots: conditions.forbidden_slots.map((slot) => slot.split('-').map(Number) as [number, number]),
         max_class_lessons_per_day: conditions.max_class_lessons_per_day,
         max_teacher_lessons_per_day: conditions.max_teacher_lessons_per_day,
@@ -697,76 +735,9 @@ export default function SchedulingView() {
       setTemplateGenVisible(false)
       await loadResources()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '模版生成失败')
+      message.error(error instanceof Error ? error.message : '自动生成失败')
     } finally {
       setTemplateGenLoading(false)
-    }
-  }
-
-  const saveCurrentPeriodPlan = () => {
-    if (!autoSubjectRules.length) {
-      message.warning('请先添加课时规则再保存方案')
-      return
-    }
-    const name = window.prompt('方案名称', `方案 ${periodPlans.length + 1}`)
-    if (!name) return
-    const rules: Record<string, number> = {}
-    for (const rule of autoSubjectRules) {
-      const subject = resources.subjects.find((item) => item.id === rule.subject_id)
-      if (subject) rules[subject.name] = rule.weekly_periods
-    }
-    const next = [...periodPlans.filter((item) => item.name !== name), { name, rules }]
-    setPeriodPlans(next)
-    try {
-      localStorage.setItem(PERIOD_PLANS_KEY, JSON.stringify(next))
-    } catch {
-      // 本地存储不可用时方案仅本次会话有效
-    }
-    message.success(`方案「${name}」已保存`)
-  }
-
-  const runAutoTeaching = async (execute: boolean) => {
-    if (autoSubjectRules.length === 0) {
-      message.warning('未配置课时方案:10 科默认每周 4 节共 40 节,会超出班级周容量(每日上限 × 天数)。请先在「课时方案」选择或用 + 添加规则')
-      return
-    }
-    setAutoTeachingLoading(true)
-    setAutoTeachingLogsVisible(false)
-    try {
-      await schedulingApi.saveScopeRules({ academic_year: academicYear, term, rules: scopeRules })
-      const classIds = autoGradeIds.length > 0
-        ? resources.classes.filter((item) => autoGradeIds.includes(item.grade_id)).map((item) => item.id)
-        : undefined
-      const result = await schedulingApi.autoTeaching({
-        academic_year: academicYear,
-        term,
-        class_ids: classIds,
-        weekly_periods: autoWeeklyPeriods,
-        max_weekly_periods: autoMaxWeeklyPeriods,
-        subject_period_rules: autoSubjectRules,
-        subject_teacher_limits: autoSubjectTeacherLimits,
-        execute,
-        days: conditions.days,
-        periods_per_day: conditions.periods_per_day,
-        forbidden_slots: conditions.forbidden_slots.map(
-          (slot) => slot.split('-').map(Number) as [number, number],
-        ),
-        max_class_lessons_per_day: conditions.max_class_lessons_per_day,
-        max_teacher_lessons_per_day: conditions.max_teacher_lessons_per_day,
-        max_same_subject_per_day: conditions.max_same_subject_per_day,
-      })
-      setAutoTeachingResult(result)
-      if (execute) {
-        setValidation(null)
-        setValidatedSignature('')
-        await loadResources()
-        message.success(`已${result.created_count ? `生成 ${result.created_count} 条` : '完成'}自动任教关系`)
-        setAutoTeachingVisible(false)
-      }
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '自动生成任教关系失败')
-    } finally {
-      setAutoTeachingLoading(false)
     }
   }
 
@@ -774,11 +745,10 @@ export default function SchedulingView() {
     if (!selectedClassId) return
     if (!generating) setLoading(true)
     try {
-      const c = await schedulingApi.calendar({
+      const c = await schedulingApi.weekly({
         class_id: selectedClassId,
         academic_year: academicYear,
         term,
-        week_start: weekStart,
       })
       setCalendar(c)
     } catch (e) {
@@ -796,7 +766,7 @@ export default function SchedulingView() {
     setAdjustmentTab('move')
     setAdjustmentLoading(true)
     try {
-      const rule = activeRuleTemplate?.config || conditions
+      const rule = ruleGridConfig(activeRuleTemplate?.config || conditions)
       const [options, substitutes] = await Promise.all([
         schedulingApi.adjustmentOptions({
           schedule_id: entry.id,
@@ -841,7 +811,7 @@ export default function SchedulingView() {
     if (!adjustmentEntry || !option.available) return
     setMovingSchedule(true)
     try {
-      const rule = activeRuleTemplate?.config || conditions
+      const rule = ruleGridConfig(activeRuleTemplate?.config || conditions)
       await schedulingApi.moveSchedule({
         schedule_id: adjustmentEntry.id,
         target_weekday: option.weekday,
@@ -858,6 +828,17 @@ export default function SchedulingView() {
       message.error(error instanceof Error ? error.message : '调课失败')
     } finally {
       setMovingSchedule(false)
+    }
+  }
+
+  const saveGridConfig = async () => {
+    try {
+      const saved = await schedulingApi.saveGridConfig({ ...gridConfig, academic_year: academicYear, term })
+      setGridConfig(saved)
+      setGridConfigVisible(false)
+      message.success('排课周格已保存')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '排课周格保存失败')
     }
   }
 
@@ -885,12 +866,19 @@ export default function SchedulingView() {
   }, [selectedClassId, academicYear, term, weekStart])
 
   useEffect(() => {
+    void schedulingApi.gridConfig({ academic_year: academicYear, term })
+      .then(setGridConfig)
+      .catch(() => undefined)
+  }, [academicYear, term])
+
+  useEffect(() => {
     if (activeTab === 'schedule') void loadVersions()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab])
 
   const updateConditions = (next: ScheduleRuleConfig) => {
     setConditions(next)
+    setGridConfig(ruleGridConfig(next))
     setValidation(null)
     setValidatedSignature('')
     setIssues([])
@@ -905,6 +893,12 @@ export default function SchedulingView() {
     setIssues([])
     try {
       const signature = payloadSignature()
+      const savedGrid = await schedulingApi.saveGridConfig({
+        ...ruleGridConfig(conditions),
+        academic_year: academicYear,
+        term,
+      })
+      setGridConfig(savedGrid)
       const result = await schedulingApi.validate(generationPayload())
       setValidation(result)
       setValidatedSignature(signature)
@@ -995,14 +989,27 @@ export default function SchedulingView() {
 
 
   const saveAssignment = async () => {
-    if (!assignmentForm.teacher_id || !assignmentForm.subject_id || !assignmentForm.class_id) {
-      message.warning('请选择教师、学科和班级')
+    const isActivity = assignmentForm.mode === 'activity'
+    if (!assignmentForm.class_id) {
+      message.warning('请选择班级')
+      return
+    }
+    if (isActivity && !assignmentForm.subject_id) {
+      message.warning('请选择活动类型')
+      return
+    }
+    if (!isActivity && !assignmentForm.teacher_id) {
+      message.warning('请选择教师')
+      return
+    }
+    if (!isActivity && !assignmentForm.subject_id) {
+      message.warning('当前教师无法自动确定学科，请先在人员管理中关联唯一学科组')
       return
     }
     setSavingAssignment(true)
     try {
       await schedulingApi.saveAssignment({
-        teacher_id: assignmentForm.teacher_id,
+        teacher_id: isActivity ? undefined : assignmentForm.teacher_id,
         subject_id: assignmentForm.subject_id,
         class_id: assignmentForm.class_id,
         academic_year: academicYear,
@@ -1044,7 +1051,7 @@ export default function SchedulingView() {
   const openAssignmentModal = () => {
     setEditingAssignment(undefined)
     setAssignmentModalTitle('新建任教关系')
-    setAssignmentForm({ weekly_periods: 4, room: '' })
+    setAssignmentForm({ mode: 'subject', weekly_periods: 4, room: '' })
     setAssignmentVisible(true)
   }
 
@@ -1052,7 +1059,8 @@ export default function SchedulingView() {
     setEditingAssignment(item)
     setAssignmentModalTitle(`编辑任教关系 · ${item.subject_name || ''}`)
     setAssignmentForm({
-      teacher_id: item.teacher_id,
+      mode: resources.subjects.find((subject) => subject.id === item.subject_id)?.course_type === 'activity' ? 'activity' : 'subject',
+      teacher_id: item.teacher_id ?? undefined,
       subject_id: item.subject_id,
       class_id: item.class_id,
       weekly_periods: item.weekly_periods,
@@ -1074,11 +1082,26 @@ export default function SchedulingView() {
     }
   }
 
+  const assignmentTeacherSubjectIds = assignmentForm.teacher_id
+    ? resources.teacher_subject_ids?.[String(assignmentForm.teacher_id)] ?? []
+    : []
+  const assignmentSubjectName = assignmentForm.subject_id
+    ? resources.subjects.find((item) => item.id === assignmentForm.subject_id)?.name
+    : undefined
+  const assignmentIsActivity = assignmentForm.mode === 'activity'
+  const activitySubjects = resources.subjects.filter((subject) => subject.course_type === 'activity')
+
   const assignmentColumns: TableProps<TeachingAssignment>['columns'] = [
     { title: '班级', dataIndex: 'class_name', key: 'class_name', width: 200, ellipsis: true },
     { title: '学科', dataIndex: 'subject_name', key: 'subject_name', width: 90, ellipsis: true },
-    { title: '教师', dataIndex: 'teacher_name', key: 'teacher_name', width: 230, ellipsis: true },
-    { title: '每周课时', dataIndex: 'weekly_periods', key: 'weekly_periods', width: 100, align: 'center' },
+    { title: '教师', dataIndex: 'teacher_name', key: 'teacher_name', width: 230, ellipsis: true, render: (value?: string) => value || '活动安排' },
+    {
+      title: '课时方案',
+      key: 'weekly_periods',
+      width: 150,
+      align: 'center',
+      render: () => <Tag color="blue">课时管理维护</Tag>,
+    },
     { title: '教室', dataIndex: 'room', key: 'room', width: 190, ellipsis: true, render: (v?: string) => v || '—' },
     {
       title: '操作',
@@ -1140,7 +1163,7 @@ export default function SchedulingView() {
           ) : undefined
         }
       />
-      <p className="zh-page-desc">先建立排课规则模板，再选择模板生成任教关系与日课表；所有模板保留历史版本可复用。</p>
+      <p className="zh-page-desc">先配置班级课时，再确定任教关系和排课规则，最后生成日课表；每一步都可以独立调整。</p>
 
       {genStage !== 'idle' && (
         <section
@@ -1247,8 +1270,21 @@ export default function SchedulingView() {
       <Tabs
         className="sk-tabs"
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'rules' | 'assignments' | 'schedule')}
+        onChange={(key) => setActiveTab(key as 'hours' | 'rules' | 'assignments' | 'schedule')}
         items={[
+          {
+            key: 'hours',
+            label: '课时管理',
+            children: (
+              <CourseHoursPanel
+                classes={resources.classes}
+                subjects={resources.subjects}
+                academicYear={academicYear}
+                term={term}
+                classId={selectedClassId}
+              />
+            ),
+          },
           {
             key: 'rules',
             label: '建立规则',
@@ -1258,7 +1294,7 @@ export default function SchedulingView() {
                   <div className="zh-table-head">
                     <div className="zh-table-head-title">
                       <h2>排课规则模板</h2>
-                      <p>配置每日节数、同科每日上限、教师跨班数、禁排时段与策略组合；模板可多条，生成课表时选一条即可。</p>
+                      <p>课时在“课时管理”按班级维护，排课时段在“周格设置”统一维护；这里仅配置负载上限、教师约束、禁排时段与策略组合。</p>
                     </div>
                     <div className="zh-table-head-right">
                       <div className="zh-info-chip">
@@ -1300,27 +1336,6 @@ export default function SchedulingView() {
                         ),
                       },
                       {
-                        title: '每日节数',
-                        width: 112,
-                        render: (_, r) => (
-                          <Tag>
-                            {r.config.days} 天 × {r.config.periods_per_day} 节
-                          </Tag>
-                        ),
-                      },
-                      {
-                        title: '同科每日',
-                        dataIndex: ['config', 'max_same_subject_per_day'],
-                        width: 108,
-                        render: (v) => `≤ ${v} 节`,
-                      },
-                      {
-                        title: '教师跨班',
-                        dataIndex: ['config', 'max_classes_per_teacher'],
-                        width: 112,
-                        render: (v) => `≤ ${v} 个班`,
-                      },
-                      {
                         title: '避免教师连堂',
                         dataIndex: ['config', 'avoid_consecutive_teacher_lessons'],
                         width: 124,
@@ -1354,7 +1369,7 @@ export default function SchedulingView() {
                         dataIndex: 'desc',
                         ellipsis: true,
                         render: (v, r) => {
-                          const dims = `班级每日≤${r.config.max_class_lessons_per_day} · 教师每日≤${r.config.max_teacher_lessons_per_day} · 教师每周≤${r.config.max_teacher_weekly_periods ?? 30}${r.config.pe_weekly_periods ? ` · 体育${r.config.pe_weekly_periods}节` : ''} · 禁排${r.config.forbidden_slots.length}时段`
+                          const dims = `课时足额安排 · 同科自动分散 · 禁排${r.config.forbidden_slots.length}时段`
                           return v ? `${v}（${dims}）` : dims
                         },
                       },
@@ -1437,20 +1452,6 @@ export default function SchedulingView() {
                     <span className="zh-filter-count">当前 {filteredAssignments.length} 条</span>
                   </div>
                   <div className="sk-assign-actions">
-                    <Button onClick={() => {
-                      setAutoTeachingResult(undefined)
-                      // 模版生成默认带上标准课时方案,避免空规则导致 10 科按默认 4 节爆班级容量
-                      const entries = periodPlanEntries(BUILTIN_PERIOD_PLANS[0])
-                      setAutoSubjectRules(entries)
-                      setAutoSubjectTeacherLimits(entries.map((item) => ({ subject_id: item.subject_id, max_weekly_periods: autoMaxWeeklyPeriods })))
-                      const pePeriods = conditions.pe_weekly_periods
-                      if (pePeriods && peSubject) {
-                        setAutoSubjectRules((current) => [...current.filter((item) => item.subject_id !== peSubject.id), { subject_id: peSubject.id, weekly_periods: pePeriods }])
-                        setAutoSubjectTeacherLimits((current) => [...current.filter((item) => item.subject_id !== peSubject.id), { subject_id: peSubject.id, max_weekly_periods: autoMaxWeeklyPeriods }])
-                      }
-                      void loadScopeRules()
-                      void loadAutoGrades().then(() => setAutoTeachingVisible(true))
-                    }}>模版生成</Button>
                     <Button type="primary" onClick={() => {
                       setTemplateGenIssues([])
                       void loadAutoGrades()
@@ -1489,7 +1490,7 @@ export default function SchedulingView() {
             key: 'schedule',
             label: '日课表',
             children: (
-              <section className="sk-surface">
+              <section className="sk-surface sk-schedule-surface">
                 <div className="sk-surface-head">
                   <div>
                     <div className="sk-surface-head-row">
@@ -1561,10 +1562,25 @@ export default function SchedulingView() {
                     >
                       {generating ? '正在生成' : '生成课表'}
                     </Button>
+                    <Button onClick={() => setGridConfigVisible(true)}>周格设置</Button>
                     <Button onClick={() => window.print()}>
                       <Icon name="printer" size={14} />
                       打印
                     </Button>
+                  </div>
+                </div>
+                <div className="sk-schedule-overview">
+                  <div className="sk-schedule-overview-copy">
+                    <span className="sk-schedule-overview-label">WEEKLY RHYTHM</span>
+                    <strong>本周课程节奏</strong>
+                    <span>按教学日查看课程分布，颜色仅用于快速识别学科类别。</span>
+                  </div>
+                  <div className="sk-schedule-legend" aria-label="学科颜色图例">
+                    <span><i className="sk-legend-swatch language" />语言</span>
+                    <span><i className="sk-legend-swatch math" />数学</span>
+                    <span><i className="sk-legend-swatch science" />理科</span>
+                    <span><i className="sk-legend-swatch humanities" />文科</span>
+                    <span><i className="sk-legend-swatch activity" />活动</span>
                   </div>
                 </div>
                 {loading ? (
@@ -1573,7 +1589,17 @@ export default function SchedulingView() {
                   </div>
                 ) : (
                   calendar.length ? (
-                    <ScheduleGrid entries={calendar} dateMode weekStart={weekStart} onLessonContextMenu={openAdjustment} />
+                    <ScheduleGrid
+                      entries={calendar}
+                      periods={gridConfig.periods_per_day}
+                      days={gridConfig.days}
+                      dailyPeriods={gridConfig.daily_periods}
+                      showEvening
+                      eveningStartPeriod={gridConfig.evening_start_period}
+                      dateMode
+                      weekStart={weekStart}
+                      onLessonContextMenu={openAdjustment}
+                    />
                   ) : (
                     <EmptyState
                       icon="calendar"
@@ -1586,8 +1612,61 @@ export default function SchedulingView() {
               </section>
             ),
           },
-        ]}
+        ].sort((left, right) => {
+          const order = ['hours', 'assignments', 'rules', 'schedule']
+          return order.indexOf(left.key) - order.indexOf(right.key)
+        })}
       />
+
+      <Modal title="公共周格设置" open={gridConfigVisible} onCancel={() => setGridConfigVisible(false)} onOk={() => void saveGridConfig()} width={760}>
+        <Form layout="vertical">
+          <p style={{ color: '#667085', marginTop: 0 }}>逐日设置正式课节数。未启用的日期填 0；自动排课会把超过当日节数的时段视为禁排。</p>
+          <div className="sk-weekday-period-grid">
+            {WEEKDAY_NAMES.map((name, index) => (
+              <div key={name} className="sk-weekday-period-cell">
+                <strong>{name}</strong>
+                <InputNumber min={0} max={12} value={gridConfig.daily_periods[index]} addonAfter="节" onChange={(v) => setGridConfig((current) => {
+                  const dailyPeriods = [...current.daily_periods]
+                  dailyPeriods[index] = v ?? 0
+                  const active = dailyPeriods.map((count, day) => count > 0 ? day + 1 : 0)
+                  return { ...current, daily_periods: dailyPeriods, days: Math.max(...active), periods_per_day: Math.max(...dailyPeriods) }
+                })} />
+              </div>
+            ))}
+          </div>
+          <Space size="large">
+            <Form.Item label="启用晚自习"><Switch checked={gridConfig.enable_evening} onChange={(v) => setGridConfig((x) => ({
+              ...x,
+              enable_evening: v,
+              evening_start_period: null,
+              evening_daily_periods_odd: v ? x.evening_daily_periods_odd : [0, 0, 0, 0, 0, 0, 0],
+              evening_daily_periods_even: v ? x.evening_daily_periods_even : [0, 0, 0, 0, 0, 0, 0],
+            }))} /></Form.Item>
+            <Form.Item label="首周"><Select value={gridConfig.first_week_parity} style={{ width: 100 }} options={[{ value: 'odd', label: '单周' }, { value: 'even', label: '双周' }]} onChange={(v) => setGridConfig((x) => ({ ...x, first_week_parity: v }))} /></Form.Item>
+          </Space>
+          {gridConfig.enable_evening && <div className="sk-grid-help sk-evening-time-note">晚自习作为独立时段，自动接在当天最后一节正式课之后；这里仅配置每周各日可安排的晚课节数。</div>}
+          {gridConfig.enable_evening && <Form.Item label="单周 / 双周每天晚自习节数">
+            <div className="sk-evening-profile">
+              {([
+                ['单周', 'evening_daily_periods_odd'],
+                ['双周', 'evening_daily_periods_even'],
+              ] as const).map(([label, field]) => <div className="sk-evening-profile-row" key={field}>
+                <strong>{label}</strong>
+                {WEEKDAY_NAMES.slice(0, gridConfig.days).map((day, index) => <InputNumber key={day} aria-label={`${label}${day}晚自习节数`} min={0} max={1} value={gridConfig[field][index]} onChange={(v) => setGridConfig((current) => {
+                  const profile = [...current[field]]
+                  profile[index] = v ?? 0
+                  return { ...current, [field]: profile }
+                })} />)}
+                <strong>{gridConfig[field].reduce((sum, count) => sum + count, 0)} 节</strong>
+              </div>)}
+            </div>
+          </Form.Item>}
+          {gridConfig.enable_evening && <div className="sk-grid-help sk-evening-business-note">
+            晚自习每天只有 1 节。请在“课时管理”中填写晚课 0、0.5 或 1：0.5 再选择单周或双周；生成课表时会自动带出对应任教关系中的坐班老师。未配置晚课的剩余格显示为自主学习。
+          </div>}
+          <Form.Item label="学期首周周一"><DatePicker value={gridConfig.term_start_monday ? dayjs(gridConfig.term_start_monday) : null} onChange={(v) => setGridConfig((x) => ({ ...x, term_start_monday: v?.format('YYYY-MM-DD') ?? null }))} /></Form.Item>
+        </Form>
+      </Modal>
 
       {/* 配置任教关系 */}
       <Modal
@@ -1601,6 +1680,13 @@ export default function SchedulingView() {
         width={500}
       >
         <Form layout="vertical" className="sk-form-grid">
+          <Form.Item label="安排类型" required>
+            <Select
+              value={assignmentForm.mode || 'subject'}
+              onChange={(value: 'subject' | 'activity') => setAssignmentForm((prev) => ({ ...prev, mode: value, teacher_id: undefined, subject_id: undefined }))}
+              options={[{ value: 'subject', label: '学科课（绑定任课教师）' }, { value: 'activity', label: '活动课（可不绑定教师）' }]}
+            />
+          </Form.Item>
           <Form.Item label="班级" required>
             <Select
               value={assignmentForm.class_id}
@@ -1608,31 +1694,43 @@ export default function SchedulingView() {
               options={resources.classes.map(classOption)}
             />
           </Form.Item>
-          <Form.Item label="学科" required>
+          {assignmentIsActivity ? <Form.Item label="活动类型" required>
             <Select
               value={assignmentForm.subject_id}
               onChange={(v) => setAssignmentForm((prev) => ({ ...prev, subject_id: v }))}
-              options={resources.subjects
-                .filter((item) => !resources.teaching_track_subject_ids?.includes(item.id))
-                .map((item) => ({ label: item.name, value: item.id }))}
+              options={activitySubjects.map((item) => ({ label: item.name, value: item.id }))}
             />
-          </Form.Item>
-          <Form.Item label="教师" required>
+          </Form.Item> : <Form.Item label="教师" required>
             <Select
               value={assignmentForm.teacher_id}
-              onChange={(v) => setAssignmentForm((prev) => ({ ...prev, teacher_id: v }))}
-              options={resources.teachers.map((item) => ({ label: item.name, value: item.id }))}
+              onChange={(v) => setAssignmentForm((prev) => {
+                const subjectIds = v ? resources.teacher_subject_ids?.[String(v)] ?? [] : []
+                return { ...prev, teacher_id: v, subject_id: subjectIds.length === 1 ? subjectIds[0] : undefined }
+              })}
+              options={resources.teachers.map((item) => {
+                  const subjectNames = (resources.teacher_subject_ids?.[String(item.id)] ?? [])
+                    .map((id) => resources.subjects.find((subject) => subject.id === id)?.name)
+                    .filter(Boolean)
+                  return { label: subjectNames.length ? `${item.name}（${subjectNames.join('、')}）` : `${item.name}（未关联学科组）`, value: item.id }
+                })}
             />
-          </Form.Item>
-          <Form.Item label="每周课时">
-            <InputNumber
-              value={assignmentForm.weekly_periods}
-              onChange={(v) => setAssignmentForm((prev) => ({ ...prev, weekly_periods: v ?? 4 }))}
-              min={1}
-              max={20}
-              style={{ width: '100%' }}
-            />
-          </Form.Item>
+          </Form.Item>}
+          <div className="sk-assignment-hours-note">
+            <strong>{assignmentIsActivity ? '活动安排规则' : '学科由组织关系自动确定'}</strong>
+            <span>{assignmentIsActivity
+              ? assignmentSubjectName === '班会' ? '班会自动绑定本班班主任，不计入班主任的学科课时。' : '活动课可以不绑定教师，不计入教师学科课量。'
+              : assignmentSubjectName
+              ? `已识别学科：${assignmentSubjectName}`
+              : assignmentForm.teacher_id && assignmentTeacherSubjectIds.length > 1
+                ? '该教师关联多个学科组，请先在人员管理中明确唯一学科组。'
+                : assignmentForm.teacher_id
+                  ? '该教师尚未关联学科组，请先在人员管理中维护。'
+                  : '选择教师后，系统根据其所属学科组自动带出学科。'}</span>
+          </div>
+          <div className="sk-assignment-hours-note">
+            <strong>课时由「课时管理」维护</strong>
+            <span>先保存任教关系，再到课时管理设置每周课时；单双周课程也在那里配置。</span>
+          </div>
         </Form>
         <Form layout="vertical">
           <Form.Item label="固定教室（可选）">
@@ -1836,135 +1934,7 @@ export default function SchedulingView() {
         </div>
       </Modal>
 
-      <Modal
-        title={`模版生成任教关系 · ${academicYear} · 第${term}学期`}
-        open={autoTeachingVisible}
-        onCancel={() => setAutoTeachingVisible(false)}
-        width={960}
-        footer={<Space>
-          <Button onClick={() => void runAutoTeaching(false)} loading={autoTeachingLoading}>智能编排</Button>
-          <Button
-            onClick={() => void runAutoTeaching(true)}
-            type="primary"
-            loading={autoTeachingLoading}
-            disabled={!autoTeachingResult || autoTeachingResult.skipped_count > 0 || autoTeachingResult.workload_summary.some((item) => !item.sufficient)}
-          >
-            确认生成
-          </Button>
-        </Space>}
-      >
-        <div className="sk-auto-teaching-options">
-          <label>生成范围
-            <Select
-              mode="multiple"
-              allowClear
-              value={autoGradeIds}
-              onChange={(value: number[]) => { setAutoGradeIds(value); setAutoTeachingResult(undefined) }}
-              options={grades.map((item) => ({ label: item.name, value: item.id }))}
-              placeholder="全部年级（不选 = 全校所有班级）"
-              style={{ minWidth: 220 }}
-            />
-          </label>
-          <label>课时方案
-            <Select
-              value={autoTeachingPlan}
-              placeholder="一键填充课时规则"
-              style={{ minWidth: 210 }}
-              onChange={(name) => {
-                const plan = allPeriodPlans.find((item) => item.name === name)
-                if (plan) applyPeriodPlan(plan)
-              }}
-              options={allPeriodPlans.map((item) => ({
-                label: `${item.name}（${Object.values(item.rules).reduce((sum, periods) => sum + periods, 0)} 节）`,
-                value: item.name,
-              }))}
-            />
-          </label>
-          <Button size="small" onClick={saveCurrentPeriodPlan}>存为方案</Button>
-          <Button shape="circle" type="primary" aria-label="添加课时规则" onClick={addAutoSubjectRule}>+</Button>
-        </div>
-        <Table
-          rowKey="subject_id"
-          size="small"
-          pagination={false}
-          dataSource={autoSubjectRules}
-          columns={[
-            {
-              title: '学科',
-              render: (_: unknown, record: { subject_id: number }) => (
-                <Select
-                  value={record.subject_id}
-                  onChange={(value: number) => updateAutoRuleSubject(record.subject_id, value)}
-                  showSearch
-                  optionFilterProp="label"
-                  placeholder="选择学科"
-                  style={{ minWidth: 160 }}
-                  options={resources.subjects
-                    .filter((item) => !resources.teaching_track_subject_ids?.includes(item.id))
-                    .filter((item) => item.id === record.subject_id || !autoSubjectRules.some((rule) => rule.subject_id === item.id))
-                    .map((item) => ({ label: item.name, value: item.id }))}
-                />
-              ),
-            },
-            {
-              title: '每周课时',
-              render: (_: unknown, record: { subject_id: number; weekly_periods: number }) => (
-                <InputNumber min={1} max={20} value={record.weekly_periods} onChange={(value) => updateAutoRulePeriods(record.subject_id, value ?? autoWeeklyPeriods)} />
-              ),
-            },
-            {
-              title: '教师周上限',
-              render: (_: unknown, record: { subject_id: number }) => (
-                <InputNumber min={1} max={60} value={autoSubjectTeacherLimits.find((item) => item.subject_id === record.subject_id)?.max_weekly_periods ?? autoMaxWeeklyPeriods} onChange={(value) => updateAutoRuleLimit(record.subject_id, value ?? autoMaxWeeklyPeriods)} />
-              ),
-            },
-            { title: '操作', render: (_: unknown, record: { subject_id: number }) => <Button type="link" danger onClick={() => { setAutoSubjectRules((current) => current.filter((item) => item.subject_id !== record.subject_id)); setAutoSubjectTeacherLimits((current) => current.filter((item) => item.subject_id !== record.subject_id)) }}>删除</Button> },
-          ]}
-          locale={{ emptyText: '暂未添加课时规则，请先点击 + 添加规则' }}
-        />
-        <p className="zh-page-desc">可用「课时方案」一键填充学科课时规则，或点击 + 逐条添加并在表格中调整学科、每周课时与教师周上限，再点击“智能编排”。系统会结合学生人数、师资负荷与排课时间结构（{conditions.days} 天 × 每日 {conditions.periods_per_day} 节 · 同科每日≤{conditions.max_same_subject_per_day} · 班级每日≤{conditions.max_class_lessons_per_day} · 教师每日≤{conditions.max_teacher_lessons_per_day} · 教师每周≤{autoMaxWeeklyPeriods} · 禁排 {conditions.forbidden_slots.length} 时段）自动计算每周课时并匹配教师；未添加规则的学科默认每周 {autoWeeklyPeriods} 节、教师上限 {autoMaxWeeklyPeriods} 节。可在“排课条件”的负荷上限中调整教师每周上限。</p>
-        {autoTeachingResult && (() => {
-          const passed = autoTeachingResult.skipped_count === 0 && autoTeachingResult.workload_summary.every((item) => item.sufficient)
-          const plan = autoTeachingResult.plan || []
-          return <div className={`sk-auto-teaching-result ${passed ? 'is-passed' : 'is-failed'}`} role="status">
-            <div className="sk-auto-teaching-head">
-              <strong>{passed ? '校验通过' : '校验未通过'}</strong>
-              <span>{passed ? `已匹配 ${autoTeachingResult.created_count} 条任教关系` : `仍有 ${autoTeachingResult.skipped_count} 条任教关系无法匹配`}</span>
-            </div>
-            {!passed && <>
-              <small>请检查教师授课范围、每周课时上限和最多带班数。</small>
-              <Button type="link" size="small" onClick={() => setAutoTeachingLogsVisible((visible) => !visible)}>
-                {autoTeachingLogsVisible ? '收起日志' : '查看日志'}
-              </Button>
-            </>}
-            <Table<AutoTeachingPlanRow>
-              rowKey={(record) => `${record.class_id}-${record.subject_id}-${record.status}`}
-              size="small"
-              pagination={{
-                pageSize: 10,
-                showSizeChanger: false,
-                showTotal: (total) => `共 ${total} 条任教关系`,
-                hideOnSinglePage: true,
-              }}
-              dataSource={plan}
-              locale={{ emptyText: '暂无编排结果' }}
-              columns={[
-                { title: '班级', dataIndex: 'class_name', render: (v: string, r) => v || `班级 ${r.class_id}` },
-                { title: '学科', dataIndex: 'subject_name', render: (v: string, r) => v || `学科 ${r.subject_id}` },
-                { title: '学生数', dataIndex: 'student_count', width: 80, render: (v?: number) => v != null ? `${v} 人` : '—' },
-                { title: '每周课时', dataIndex: 'weekly_periods', width: 90, render: (v?: number, r?: { suggested_weekly_periods?: number }) => {
-                    if (v != null) return `${v} 节`
-                    if (r?.suggested_weekly_periods != null) return `建议 ${r.suggested_weekly_periods} 节`
-                    return '—'
-                  } },
-                { title: '教师', dataIndex: 'teacher_name', render: (v: string, r) => v || (r.status === 'skipped' ? '—' : '') },
-                { title: '状态', dataIndex: 'status', width: 110, render: (v: string) => v === 'success' ? <Tag color="green">匹配成功</Tag> : <Tag color="red">未匹配</Tag> },
-                { title: '说明', dataIndex: 'reason', ellipsis: true, render: (v?: string) => v || '' },
-              ]}
-            />
-          </div>
-        })()}
-      </Modal>
+      {/* “模版生成任教关系”已移除；任教关系统一通过课时管理后的自动生成入口处理。 */}
 
       {/* 自动生成：按课时方案一键生成任教关系 */}
       <Modal
@@ -2045,11 +2015,15 @@ export default function SchedulingView() {
               onChange={(e) => setRuleTemplateForm(prev => ({ ...prev, desc: e.target.value }))}
             />
           </Form.Item>
-          <div className="sk-template-editor-card">
+            <div className="sk-template-editor-card">
+            <div className="sk-template-source-note">
+              <strong>科目课时已确定</strong>
+              <span>课时统一来自“课时管理”，排课时段统一来自“周格设置”；这里集中维护排课约束。</span>
+            </div>
             <div className="sk-template-editor-head">
               <div>
                 <h3>模板规则内容</h3>
-                <p>包含：每日节数 / 同科每日上限 / 教师跨班数 / 禁排时段 / 策略组合等维度</p>
+                <p>模板只配置负载、完整度、教师约束、禁排与策略；科目课时和排课时段分别由“课时管理”“周格设置”维护。</p>
               </div>
               <Space>
                 <Button
@@ -2077,21 +2051,16 @@ export default function SchedulingView() {
               </Space>
             </div>
             <dl className="sk-template-dim">
-              <div><dt>上课日 / 每日节数</dt><dd>{ruleTemplateForm.config.days} 天 × {ruleTemplateForm.config.periods_per_day} 节</dd></div>
-              <div><dt>班级每日节数上限</dt><dd>{ruleTemplateForm.config.max_class_lessons_per_day} 节</dd></div>
-              <div><dt>教师每日节数上限</dt><dd>{ruleTemplateForm.config.max_teacher_lessons_per_day} 节</dd></div>
-              <div><dt>教师每周节数上限</dt><dd>{ruleTemplateForm.config.max_teacher_weekly_periods ?? 30} 节</dd></div>
-              <div><dt>体育课每周节数</dt><dd>{ruleTemplateForm.config.pe_weekly_periods ? `${ruleTemplateForm.config.pe_weekly_periods} 节` : '默认'}</dd></div>
-              <div><dt>同科每日节数上限</dt><dd>{ruleTemplateForm.config.max_same_subject_per_day} 节</dd></div>
-              <div><dt>教师跨班数上限</dt><dd>{ruleTemplateForm.config.max_classes_per_teacher} 个班</dd></div>
-              <div><dt>避免教师连堂</dt><dd>{ruleTemplateForm.config.avoid_consecutive_teacher_lessons ? '是' : '否'}</dd></div>
-              <div><dt>填满整周</dt><dd>{ruleTemplateForm.config.require_full_week ? '启用' : '不启用'}</dd></div>
+              <div><dt>晚自习时间容量</dt><dd>{ruleTemplateForm.config.enable_evening ? `单周 ${(ruleTemplateForm.config.evening_daily_periods_odd ?? []).reduce((sum, count) => sum + count, 0)} 节 / 双周 ${(ruleTemplateForm.config.evening_daily_periods_even ?? []).reduce((sum, count) => sum + count, 0)} 节` : '不启用'}</dd></div>
+              <div><dt>课时安排</dt><dd>按课时管理足额排课</dd></div>
+              <div><dt>同科分布</dt><dd>算法自动分散</dd></div>
+              <div><dt>任教关系</dt><dd>按已配置关系校验</dd></div>
               <div><dt>禁排时段</dt><dd>{ruleTemplateForm.config.forbidden_slots.length} 个</dd></div>
               <div><dt>启用策略</dt><dd>{ruleTemplateForm.config.strategy_codes.length} 项</dd></div>
             </dl>
           </div>
           <div className="sk-help">
-            <strong>使用流程：</strong>先点「在规则设计器中编辑」设置维度并保存校验 → 再「同步当前规则到模板」→ 最后「保存规则」写入模板。
+            <strong>使用流程：</strong>先在「周格设置」维护排课时段，再点「在规则设计器中编辑」设置约束并校验 → 「同步当前规则到模板」→ 「保存规则」。
           </div>
         </Form>
       </Modal>
@@ -2106,6 +2075,7 @@ export default function SchedulingView() {
         onChange={updateConditions}
         onValidate={validateRules}
         onClose={() => setConditionVisible(false)}
+        gridConfig={gridConfig}
       />
 
       <RuleDesigner
@@ -2118,6 +2088,7 @@ export default function SchedulingView() {
         onChange={() => undefined}
         onValidate={() => undefined}
         onClose={() => setGenerationRuleVisible(false)}
+        gridConfig={gridConfig}
         readOnly
         onConfirm={() => {
           setGenerationRuleVisible(false)

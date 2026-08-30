@@ -68,11 +68,12 @@ MENU_CATALOG: list[_MenuCat] = [
     _MenuCat("practice",   "巩固训练",       "book",       None, enabled=False),
     _MenuCat("ai",         "AI 押题",        "sparkles",   None, enabled=False),
     _MenuCat("settings",   "系统设置",       "settings",   "/settings", roles=["director"]),
+    _MenuCat("subjects",   "科目管理",       "book",       "/subjects", roles=["director", "academic_director"]),
 ]
 
 MENU_GROUPS = (
     ("overview", "工作台", ("dashboard",)),
-    ("school", "学校管理", ("settings",)),
+    ("school", "学校管理", ("settings", "subjects")),
     ("staffing", "人员配置", ("staff-accounts", "roles", "permissions")),
     ("resources", "资源管理", ("facilities",)),
     ("enrollment", "学籍管理", ("students", "teacher-profiles", "classes")),
@@ -108,6 +109,7 @@ MENU_PERMISSIONS: dict[str, set[str]] = {
     "classes": {"classes:view"},
     "organization": {"organization:view"},
     "facilities": {"facilities:view"},
+    "subjects": {"scheduling:assign"},
     "staff-accounts": {"staff:view"},
     "roles": {"rbac:manage"},
     "permissions": {"rbac:manage"},

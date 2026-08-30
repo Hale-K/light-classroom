@@ -79,3 +79,4 @@ def test_shared_mode_is_an_explicit_supported_allocation_mode():
     )
 
     assert rule.allocation_mode == "shared"
+    assert rule.cohort_label == "2028"
