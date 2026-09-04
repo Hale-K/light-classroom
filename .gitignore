@@ -34,3 +34,5 @@ docs/chrome-check-profile/
 # ===== 含学生/口令的库导出，禁止进公开仓库 =====
 db/*.sql
 !db/README-sql.md
+!db/schema/
+!db/schema/*.sql

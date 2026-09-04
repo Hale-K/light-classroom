@@ -11,9 +11,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_tenant, get_current_user
 from app.api.v1.scheduling import _load_grid_config
 from app.db.session import get_session
-from app.models.enums import BaseUserRole, UserStatus, WeekParity
+from app.models.enums import BaseUserRole, EveningParity, UserStatus, WeekParity
 from app.models.org import (
     Class,
+    CourseHourPlan,
     OrganizationUnit,
     Schedule,
     StaffAppointment,
@@ -27,11 +28,29 @@ router = APIRouter(prefix="/teacher-profiles", tags=["教师档案"])
 
 
 def _grid_slots_per_class(grid: dict[str, Any]) -> float:
-    """一套课位结构下一周、一个班应有的课位数（单双周各记 0.5）。"""
+    """一套课位结构下一周、一个班应有的课位数（单双周各记 0.5）。无课时方案时作回退。"""
     daytime = sum(int(x or 0) for x in (grid.get("daily_periods") or [])[:7])
     odd = sum(int(x or 0) for x in (grid.get("evening_daily_periods_odd") or [])[:7])
     even = sum(int(x or 0) for x in (grid.get("evening_daily_periods_even") or [])[:7])
     return float(daytime) + (odd + even) / 2.0
+
+
+def _plan_equivalent_weekly(plan: CourseHourPlan) -> float:
+    """课时方案折合周课时：白天（含周六）按录入节数；晚自习单/双周各 0.5，每周都上记 1。"""
+    daytime = float(plan.weekday_periods or 0) + float(plan.saturday_periods or 0)
+    if daytime <= 0:
+        daytime = float(plan.weekly_periods or 0)
+    odd = int(plan.evening_periods_odd or 0)
+    even = int(plan.evening_periods_even or 0)
+    mode = plan.evening_parity
+    mode_val = mode.value if isinstance(mode, EveningParity) else str(mode or EveningParity.all.value)
+    if mode_val == EveningParity.either.value and odd and even:
+        evening = 0.5
+    elif odd and even:
+        evening = float(max(odd, even))
+    else:
+        evening = (0.5 if odd else 0.0) + (0.5 if even else 0.0)
+    return daytime + evening
 
 
 _SCHEDULE_UNIT = func.sum(
@@ -350,7 +369,16 @@ async def list_teacher_profiles(
                 fallback_counts[tid] = float(cnt or 0)
         for tid in teacher_ids:
             scheduled_counts[tid] = exact_counts.get(tid, 0) or fallback_counts.get(tid, 0)
-    # 同样，当 weekly_total 为 0 时，也从全部任教关系取（如果上面回退后仍有）
+
+    plan_stmt = select(CourseHourPlan).where(CourseHourPlan.tenant_id == tenant_id)
+    if academic_year:
+        plan_stmt = plan_stmt.where(CourseHourPlan.academic_year == academic_year)
+    if term:
+        plan_stmt = plan_stmt.where(CourseHourPlan.term == term)
+    hour_plans = list((await session.execute(plan_stmt)).scalars().all())
+    plan_hours_by_scope: dict[tuple[int, int], float] = defaultdict(float)
+    for plan in hour_plans:
+        plan_hours_by_scope[(plan.class_id, plan.subject_id)] += _plan_equivalent_weekly(plan)
 
     # 6) 组织并应用筛选
     rows: list[dict[str, Any]] = []
@@ -401,15 +429,20 @@ async def list_teacher_profiles(
 
         # 任教班级汇总
         teaching_classes = []
-        weekly_total = 0
+        weekly_total = 0.0
         for ta, cls, subj in tas[t.id]:
-            weekly_total += ta.weekly_periods or 0
+            scope = (ta.class_id, ta.subject_id)
+            if scope in plan_hours_by_scope:
+                periods = plan_hours_by_scope[scope]
+            else:
+                periods = float(ta.weekly_periods or 0)
+            weekly_total += periods
             teaching_classes.append({
                 "class_id": cls.id,
                 "class_name": cls.name,
                 "subject_id": subj.id,
                 "subject_name": subj.name,
-                "weekly_periods": ta.weekly_periods or 0,
+                "weekly_periods": periods,
             })
         scheduled = round(float(scheduled_counts.get(t.id, 0)), 1)
         ratio = 0.0
@@ -423,7 +456,7 @@ async def list_teacher_profiles(
             "head_teacher_classes": [class_map[cid].name for cid in sorted(class_map.keys()) if class_map[cid].head_teacher_id == t.id],
             "position_tags": position_tags,
             "teaching_classes": teaching_classes,
-            "total_weekly_periods": weekly_total,
+            "total_weekly_periods": round(weekly_total, 1),
             "scheduled_lessons_count": scheduled,
             "schedule_ratio": ratio,
         })
@@ -432,8 +465,8 @@ async def list_teacher_profiles(
     rows.sort(key=lambda r: (0 if r["is_head_teacher"] else 1, -r["total_weekly_periods"], r["name"]))
 
     # ------------------------------------------------------------------
-    # 班级视角汇总：目标 = 课位结构（含周六、晚自习）× 班级数
-    # 已排 = Schedule 折合周课时（单/双周各 0.5），不再把格子条数当节数
+    # 班级视角汇总：目标 = 课时管理 CourseHourPlan 折合周课时之和
+    # 已排 = Schedule 折合周课时（单/双周各 0.5）
     # ------------------------------------------------------------------
     all_classes = list(class_map.values())
     # 1a) grade_id 过滤
@@ -465,9 +498,13 @@ async def list_teacher_profiles(
 
     filtered_class_ids: set[int] = {c.id for c in all_classes}
     class_count = len(filtered_class_ids)
-    grid = await _load_grid_config(session, tenant_id, academic_year or "", term)
-    slots_each = _grid_slots_per_class(grid)
-    class_weekly_target = round(class_count * slots_each, 1) if slots_each else class_count * 30
+    scoped_plans = [p for p in hour_plans if p.class_id in filtered_class_ids]
+    if scoped_plans:
+        class_weekly_target = round(sum(_plan_equivalent_weekly(p) for p in scoped_plans), 1)
+    else:
+        grid = await _load_grid_config(session, tenant_id, academic_year or "", term)
+        slots_each = _grid_slots_per_class(grid)
+        class_weekly_target = round(class_count * slots_each, 1) if slots_each else class_count * 30
 
     class_scheduled_count = 0.0
     if filtered_class_ids:

@@ -1,6 +1,7 @@
 /** 路由 -> 页面标题（面包屑 / 顶栏使用，与 Vue 版 route.meta.title 对齐） */
 const TITLE_MAP: Record<string, string> = {
   '/dashboard': '工作台',
+  '/ai-providers': '服务商管理',
   '/exams': '试卷库',
   '/scans': '扫描进卷',
   '/scheduling': '排课管理',

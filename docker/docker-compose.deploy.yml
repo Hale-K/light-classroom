@@ -1,11 +1,13 @@
 # 智衡后端 部署环境编排（Deploy 面板使用；文件位于 docker/ 子目录，路径相对本文件）
 # 与开发版 docker-compose.yml 的区别：
 #   - 去掉 Kafka + Zookeeper（代码中尚无任何生产/消费者，纯占位基础设施，省 ~1.5G 内存）
-#   - 新增 migrate（Alembic 建表/升级，生产必须走迁移）与 db-seed（首部署导入南思兔咪学校数据）
-#   - api 去掉 --reload 与源码挂载（用镜像内代码，生产语义）
-#   - postgres/redis/rabbitmq 不对宿主机暴露端口（仅容器网络互访，更安全）
-#   - MinIO 保留 9010/9011 对外（前端/浏览器取文件用）
+#   - schema-init：把 db/schema/*.sql 灌进 Postgres（可重复执行，含 ai_provider）
+#   - db-seed：首部署导入学校业务数据（默认注释）
+#   - api 去掉 --reload 与源码挂载（用镜像内代码）
+#   - postgres/redis 不对宿主机暴露端口；RabbitMQ 管理台、MinIO 对外
 # 启动：docker compose -f docker/docker-compose.deploy.yml up -d --build
+# 当前 APP_ENV=dev：api 首启还会 create_all + 菜单种子；schema-init 在 api 健康后再灌 SQL，补齐服务商表/菜单
+name: light-classroom-api
 
 services:
   postgres:
@@ -43,7 +45,6 @@ services:
       timeout: 5s
       retries: 8
 
-  # 文件中心对象存储（对外 9010/9011，避开常见 9000/9001）
   minio:
     image: minio/minio:RELEASE.2024-05-28T17-19-04Z
     command: server /data --console-address ":9001"
@@ -61,21 +62,36 @@ services:
       retries: 8
       start_period: 10s
 
-  # 一次性：Alembic 建表/升级（生产必须走迁移；api/worker 等它跑完才启动）
-  migrate:
-    build:
-      context: ../backend
-    env_file: ../backend/.env
+  # 等 API 把基础表建好后，再灌 db/schema（服务商表 + 菜单权限）
+  schema-init:
+    image: postgres:16-alpine
     depends_on:
       postgres: {condition: service_healthy}
-    command: alembic upgrade head
+      api: {condition: service_healthy}
+    environment:
+      PGHOST: postgres
+      PGUSER: zhiheng
+      PGPASSWORD: zhiheng
+      PGDATABASE: zhiheng
+    volumes:
+      - ../db/schema:/schema:ro
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        for f in /schema/*.sql; do
+          echo "apply $$f"
+          psql -v ON_ERROR_STOP=1 -f "$$f"
+        done
+        echo "schema-init done"
     restart: "no"
 
-  # 学校业务数据导入：待重新导出 db/nstmy_tumi.sql 后再启用本服务（去掉下面注释即可）
+  # 学校业务数据导入：有 db/nstmy_tumi.sql 后再打开
   # db-seed:
   #   image: postgres:16-alpine
   #   depends_on:
-  #     migrate: {condition: service_completed_successfully}
+  #     schema-init: {condition: service_completed_successfully}
   #   environment:
   #     PGHOST: postgres
   #     PGUSER: zhiheng
@@ -93,11 +109,11 @@ services:
     build:
       context: ../backend
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       minio: {condition: service_healthy}
-    env_file: ../backend/.env
+    env_file: ../.env
     ports: ["8000:8000"]
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
@@ -111,10 +127,10 @@ services:
     build:
       context: ../backend
     depends_on:
-      migrate: {condition: service_completed_successfully}
+      postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
-    env_file: ../backend/.env
+    env_file: ../.env
     command: celery -A app.workers.celery_app worker -Q scheduling,academic --concurrency=2 --loglevel=info
 
 volumes:

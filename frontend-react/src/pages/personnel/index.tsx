@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Key } from 'react'
-import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag } from 'antd'
+import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
 import type { TableProps } from 'antd'
 import { orgApi, organizationApi, schedulingApi, staffApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
@@ -11,6 +11,14 @@ import { flattenOrganizationUnits, organizationExpandedKeys } from '@/pages/orga
 import PersonnelTree, { type PersonnelTreeKey } from './personnel-tree'
 
 interface AccountForm { name: string; phone: string; password: string; roles?: StaffRoleCode[]; teacher_level?: string }
+interface PersonEditForm {
+  name: string
+  phone: string
+  roles?: StaffRoleCode[]
+  teacher_level?: string
+  unit_ids?: number[]
+  position_code?: StaffAppointment['position_code']
+}
 interface UnitForm { name: string; unit_type: OrganizationUnitType; parent_id?: number; academic_year?: string; cohort_label?: string; grade_id?: number; subject_id?: number }
 const TYPE_OPTIONS = [
   { label: '职能部门', value: 'department' }, { label: '年级部', value: 'grade_group' },
@@ -45,7 +53,7 @@ export default function PersonnelView() {
   const [editingPerson, setEditingPerson] = useState<StaffAccount>()
   const [editingUnit, setEditingUnit] = useState<OrganizationUnit>()
   const [accountForm] = Form.useForm<AccountForm>()
-  const [personEditForm] = Form.useForm<AccountForm>()
+  const [personEditForm] = Form.useForm<PersonEditForm>()
   const [unitForm] = Form.useForm<UnitForm>()
 
   const load = async () => {
@@ -72,6 +80,15 @@ export default function PersonnelView() {
   }
   useEffect(() => { void load() }, [])
 
+  const unitTreeData = useMemo(() => {
+    const toNodes = (items: OrganizationUnit[]): { title: string; value: number; children?: ReturnType<typeof toNodes> }[] =>
+      items.filter((item) => item.status === 'active').map((item) => ({
+        title: item.name,
+        value: item.id,
+        children: item.children?.length ? toNodes(item.children) : undefined,
+      }))
+    return toNodes(org?.units || [])
+  }, [org])
   const units = useMemo(() => flattenOrganizationUnits(org?.units || []), [org])
   const selectedUnit = typeof selectedKey === 'number' ? units.find((item) => item.id === selectedKey) : undefined
   const yearOptions = useMemo(
@@ -147,6 +164,8 @@ export default function PersonnelView() {
       phone: account.phone,
       roles: account.roles.filter((role): role is StaffRoleCode => role !== 'school_admin'),
       teacher_level: account.teacher_level || undefined,
+      unit_ids: appointments.filter((item) => item.staff_id === account.id).map((item) => item.organization_unit_id),
+      position_code: 'member',
     })
     setPersonEditOpen(true)
     setEditingPerson(account)
@@ -156,9 +175,22 @@ export default function PersonnelView() {
     const values = await personEditForm.validateFields().catch(() => null); if (!values) return
     setSaving(true)
     try {
-      await staffApi.update(editingPerson.id, { ...values, roles: values.roles || [], teacher_level: values.teacher_level || null })
+      await staffApi.update(editingPerson.id, { name: values.name, phone: values.phone, roles: values.roles || [], teacher_level: values.teacher_level || null })
+      const current = appointments.filter((item) => item.staff_id === editingPerson.id)
+      const nextIds = new Set(values.unit_ids || [])
+      const currentIds = new Set(current.map((item) => item.organization_unit_id))
+      await Promise.all(current.filter((item) => !nextIds.has(item.organization_unit_id)).map((item) => organizationApi.deleteAppointment(item.id)))
+      const position = values.position_code || 'member'
+      await Promise.all([...nextIds].filter((id) => !currentIds.has(id)).map((organization_unit_id) =>
+        organizationApi.createAppointment({
+          organization_unit_id,
+          staff_id: editingPerson.id,
+          position_code: position,
+          replace_grade_assignment: true,
+        }),
+      ))
       setPersonEditOpen(false)
-      message.success('人员信息已更新')
+      message.success('人员与组织归属已更新')
       await load()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '人员信息保存失败')
@@ -294,7 +326,7 @@ export default function PersonnelView() {
             showSizeChanger: true,
             showTotal: (total) => `共 ${total} 条`,
           }}
-          locale={{ emptyText: <EmptyState icon="users" title="该范围暂无人员" desc="新增人员后，可在“岗位与权限”中分配到当前组织。" height={220} /> }}
+          locale={{ emptyText: <EmptyState icon="users" title="该范围暂无人员" desc="点「编辑」可把人员挂到左侧组织树上。" height={220} /> }}
         />
       </section>
     </div>
@@ -321,6 +353,21 @@ export default function PersonnelView() {
         <Form.Item name="phone" label="登录手机号" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="roles" label="职位角色"><Select mode="multiple" placeholder="选择职位角色" options={[{ value: 'academic_director', label: '教导主任' }, { value: 'head_teacher', label: '班主任' }, { value: 'subject_teacher', label: '任教老师' }]} /></Form.Item>
         <Form.Item name="teacher_level" label="教师职级"><Select allowClear placeholder="非教师可留空" options={['特级教师', '正高级教师', '高级教师', '一级教师', '二级教师', '普通教师'].map((label) => ({ value: label, label }))} /></Form.Item>
+        <Form.Item name="unit_ids" label="所属组织">
+          <TreeSelect
+            treeData={unitTreeData}
+            allowClear
+            multiple
+            placeholder="选择教务处、年级部、教研组等，可多选"
+            treeDefaultExpandAll
+            showSearch
+            treeNodeFilterProp="title"
+            style={{ width: '100%' }}
+          />
+        </Form.Item>
+        <Form.Item name="position_code" label="新加入组织时的岗位" extra="已有组织会保留原来的岗位；勾选新组织时用这里的岗位。">
+          <Select options={Object.entries(POSITION_LABEL).map(([value, label]) => ({ value, label }))} />
+        </Form.Item>
       </Form>
     </Modal>
     <Modal title={editingUnit ? '编辑组织' : '新建组织'} open={unitOpen} onCancel={() => setUnitOpen(false)} onOk={() => void saveUnit()} confirmLoading={saving} okText="保存" forceRender>

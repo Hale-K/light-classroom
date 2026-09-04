@@ -45,6 +45,8 @@ PERMISSION_SEED: list[tuple[str, str, str]] = [
     ("人员与权限", "管理角色与权限", "rbac:manage"),
     ("会议管理", "查看会议", "meetings:view"),
     ("会议管理", "新建/编辑会议", "meetings:manage"),
+    ("服务商管理", "查看大模型服务商", "ai_provider:view"),
+    ("服务商管理", "配置大模型服务商", "ai_provider:manage"),
 ]
 
 # 菜单项种子：key, name, path, icon, sort, enabled, roles, capability, group_key, group_title, group_icon, group_sort
@@ -54,6 +56,9 @@ MENU_SEED: list[dict] = [
      "enabled": True, "roles": [], "required_capability": None,
      "group_key": "overview", "group_title": "工作台", "group_icon": "dashboard", "group_sort": 10},
     {"key": "settings", "name": "系统设置", "path": "/settings", "icon": "settings", "sort": 10,
+     "enabled": True, "roles": ["director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "ai-providers", "name": "服务商管理", "path": "/ai-providers", "icon": "cloud", "sort": 15,
      "enabled": True, "roles": ["director"], "required_capability": None,
      "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
     {"key": "subjects", "name": "科目管理", "path": "/subjects", "icon": "book", "sort": 20,
@@ -132,6 +137,7 @@ MENU_PERMISSION_SEED: dict[str, set[str]] = {
     "organization": {"organization:view"},
     "facilities": {"facilities:view"},
     "subjects": {"scheduling:assign"},
+    "ai-providers": {"ai_provider:view", "ai_provider:manage"},
     "staff-accounts": {"staff:view"},
     "rbac": {"rbac:manage"},
     "meetings": {"meetings:view"},

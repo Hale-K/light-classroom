@@ -21,6 +21,8 @@ dependencies = [
     "celery>=5.3.0",
     "amqp>=5.2.0",
     "redis>=5.0.0",
+    # 排课求解器（CP-SAT）
+    "ortools>=9.0",
     # 消息队列（Kafka 事件总线）
     "confluent-kafka>=2.3.0",
     # 对象存储（腾讯云 COS / MinIO）

@@ -330,7 +330,7 @@ export default function TeacherProfilesView() {
   )
 
   const summary = useMemo(() => {
-    // 目标 / 已排均按课位结构折合周课时（含周六晚自习、单双周 0.5）
+    // 目标 / 已排均按课时管理折合周课时（含周六晚自习、单双周 0.5）
     let totalWeekly: number
     let totalSched: number
     let ratio: number

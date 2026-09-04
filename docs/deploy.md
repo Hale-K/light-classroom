@@ -100,11 +100,19 @@ pnpm build
 - **Nginx**：静态资源 + `/api/v1` 反代；SSE / 长请求关闭缓冲，例如 `proxy_buffering off;`、`X-Accel-Buffering: no`（开发代理已按此处理）。
 - **监控（可选）**：`monitoring/docker-compose.yml`。把 `prometheus.yml` 里的 `host.docker.internal:8001` 改成生产 API 地址；改 Grafana 密码。
 
-数据库迁移（API 启动前执行一次）：
+数据库：当前 Docker 部署用 `docker/docker-compose.deploy.yml`。`APP_ENV=dev` 时 API 启动会建表；随后 `schema-init` 容器执行 `db/schema/*.sql`（含 `ai_provider`）。
+
+本机不经过 Compose 时：
 
 ```bash
 cd backend
 alembic upgrade head
+```
+
+或：
+
+```bash
+psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema/ai_provider.sql
 ```
 
 内置角色与菜单权限：开发环境在 `lifespan` 里自动 `ensure_builtin_roles` / `ensure_menu_permissions`。生产需在首次部署后用同等脚本或一次性管理命令跑一遍（当前只挂在 `APP_ENV=dev`），否则空库没有菜单权限目录。

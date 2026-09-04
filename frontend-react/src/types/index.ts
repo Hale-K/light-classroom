@@ -971,7 +971,7 @@ export interface TeacherProfileFiltersMeta {
 export interface TeacherProfileClassSummary {
   /** 筛选条件覆盖的行政班总数 */
   class_count: number;
-  /** 周目标：当前课位结构下一班一周的格子 × 班级数（含周六、晚自习；单双周折合） */
+  /** 周目标：课时管理方案折合周课时之和（含周六、晚自习；无方案时回退课位×班级数） */
   weekly_target: number;
   /** 已排折合周课时（单/双周各 0.5） */
   scheduled_lessons: number;

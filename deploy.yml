@@ -17,6 +17,7 @@ services:
     # 绕开 tsc 类型检查直接打包（src/pages/scheduling/RuleGroupWorkbench.tsx 尚有 TS 错误待修）
     build: pnpm exec vite build
     out: dist
+    port: 80
     proxy:
       /api/v1: 8000
 

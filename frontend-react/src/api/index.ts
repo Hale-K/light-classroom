@@ -1039,5 +1039,56 @@ export const teacherProfilesApi = {
     ),
 }
 
+export type AiProvider = {
+  id: number
+  name: string
+  provider_type: string
+  base_url: string
+  has_api_key: boolean
+  chat_model?: string | null
+  vision_model?: string | null
+  image_model?: string | null
+  video_model?: string | null
+  audio_model?: string | null
+  timeout_seconds: number
+  is_default: boolean
+  status: number
+  sort: number
+  remark?: string | null
+  last_test_status?: number | null
+  last_test_at?: string | null
+}
+
+export type AiProviderForm = {
+  name: string
+  provider_type: string
+  base_url: string
+  api_key?: string
+  chat_model?: string | null
+  vision_model?: string | null
+  image_model?: string | null
+  video_model?: string | null
+  audio_model?: string | null
+  timeout_seconds?: number
+  is_default?: boolean
+  status?: number
+  sort?: number
+  remark?: string | null
+}
+
+export const aiProviderApi = {
+  list: (params?: { keyword?: string; status?: number }) =>
+    unwrap<AiProvider[]>(http.get('/ai-providers', { params })),
+  create: (data: AiProviderForm) => unwrap<AiProvider>(http.post('/ai-providers', data)),
+  update: (id: number, data: AiProviderForm) => unwrap<boolean>(http.put(`/ai-providers/${id}`, data)),
+  updateStatus: (id: number, status: number) =>
+    unwrap<boolean>(http.put(`/ai-providers/${id}/status`, null, { params: { status } })),
+  setDefault: (id: number) => unwrap<boolean>(http.put(`/ai-providers/${id}/default`)),
+  remove: (id: number) => unwrap<boolean>(http.delete(`/ai-providers/${id}`)),
+  test: (id: number) => unwrap<boolean>(http.post(`/ai-providers/${id}/test`)),
+  loadModels: (data: { provider_type?: string; base_url: string; api_key?: string }) =>
+    unwrap<string[]>(http.post('/ai-providers/load-models', data)),
+}
+
 export { setAuthResolver }
 export type { AuthResolver } from './http'

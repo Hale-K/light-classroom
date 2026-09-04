@@ -36,6 +36,7 @@ import GradingWorkbench from '@/pages/grading'
 import StatsView from '@/pages/stats'
 import TeacherProfilesView from '@/pages/teacher-profiles'
 import FileCenterView from '@/pages/file-center'
+import AiProvidersView from '@/pages/ai-providers'
 
 /** 根路由：挂载 API 鉴权 resolver（token / 学校代码 / 401 跳转） */
 function Root() {
@@ -98,6 +99,7 @@ export const router = createBrowserRouter([
           { path: 'scans', element: <ScanManage /> },
           { path: 'scheduling', element: <SchedulingView /> },
           { path: 'file-center', element: <FileCenterView /> },
+          { path: 'ai-providers', element: <AiProvidersView /> },
           { path: 'students', element: <StudentsView /> },
           { path: 'classes', element: <ClassesView /> },
           { path: 'organization', element: <Navigate to="/staff?tab=organization" replace /> },

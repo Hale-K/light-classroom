@@ -149,6 +149,60 @@ async def ensure_file_center_menu(session: AsyncSession) -> None:
     await session.flush()
 
 
+async def ensure_ai_provider_menu(session: AsyncSession) -> None:
+    """已有库补齐「服务商管理」菜单与权限。"""
+    from app.services.rbac.catalog import ensure_permissions
+
+    await ensure_permissions(session)
+    codes = [
+        ("ai_provider:view", "查看大模型服务商"),
+        ("ai_provider:manage", "配置大模型服务商"),
+    ]
+    perm_ids: list[int] = []
+    for code, name in codes:
+        perm = (
+            await session.execute(select(Permission).where(Permission.code == code))
+        ).scalar_one_or_none()
+        if perm is None:
+            perm = Permission(code=code, name=name, module="服务商管理", sort=90)
+            session.add(perm)
+            await session.flush()
+        perm_ids.append(perm.id)
+    existing = (
+        await session.execute(select(Menu).where(Menu.key == "ai-providers"))
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(
+            Menu(
+                key="ai-providers",
+                name="服务商管理",
+                path="/ai-providers",
+                icon="cloud",
+                sort=15,
+                enabled=True,
+                roles_csv="director",
+                required_capability=None,
+                group_key="school-affairs",
+                group_title="学籍教务",
+                group_icon="file-text",
+                group_sort=20,
+            )
+        )
+        await session.flush()
+    for pid in perm_ids:
+        linked = (
+            await session.execute(
+                select(MenuPermission).where(
+                    MenuPermission.menu_key == "ai-providers",
+                    MenuPermission.permission_id == pid,
+                )
+            )
+        ).scalar_one_or_none()
+        if linked is None:
+            session.add(MenuPermission(menu_key="ai-providers", permission_id=pid))
+    await session.flush()
+
+
 async def ensure_menu_permissions(session: AsyncSession) -> None:
     """权限点 + 菜单结构 + 默认菜单权限映射（按 menu_key 仅补缺）。"""
     from app.services.rbac.catalog import ensure_permissions
@@ -157,6 +211,7 @@ async def ensure_menu_permissions(session: AsyncSession) -> None:
     await ensure_menus(session)
     await sync_menu_groups(session)
     await ensure_file_center_menu(session)
+    await ensure_ai_provider_menu(session)
     existing_keys = set(
         (await session.execute(select(MenuPermission.menu_key).distinct())).scalars().all()
     )
