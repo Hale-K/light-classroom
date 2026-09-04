@@ -15,8 +15,7 @@ const queryClient = new QueryClient({
   },
 })
 
-// 设计 DNA：暖色单色极简（继承 mall-admin / minimalist-ui）
-// Canvas #FBFBFA / Surface #FFFFFF / Ink #111111 / Text #2F3437 / Border #EAEAEA
+// 正文近黑，辅文仍分层，避免整页发灰
 const themeConfig = {
   token: {
     colorPrimary: '#111111',
@@ -30,10 +29,11 @@ const themeConfig = {
     colorBgElevated: '#FFFFFF',
     colorBorder: '#EAEAEA',
     colorBorderSecondary: '#F0F0EF',
-    colorTextBase: '#2F3437',
-    colorText: '#2F3437',
-    colorTextSecondary: '#787774',
-    colorTextTertiary: '#A5A29D',
+    colorTextBase: '#111111',
+    colorText: '#111111',
+    colorTextSecondary: '#3f3f46',
+    colorTextTertiary: '#71717a',
+    colorTextHeading: '#0a0a0a',
     borderRadius: 8,
     fontFamily:
       "'Geist','Helvetica Neue','Noto Sans SC','PingFang SC','Microsoft YaHei',sans-serif",
@@ -55,19 +55,19 @@ const themeConfig = {
     },
     Menu: {
       itemBg: 'transparent',
-      itemColor: '#2F3437',
+      itemColor: '#171717',
       itemHoverBg: '#F0F0EF',
-      itemHoverColor: '#111111',
+      itemHoverColor: '#0a0a0a',
       itemSelectedBg: '#E9E9E7',
-      itemSelectedColor: '#111111',
-      groupTitleColor: '#A5A29D',
+      itemSelectedColor: '#0a0a0a',
+      groupTitleColor: '#52525b',
       itemBorderRadius: 8,
       itemMarginInline: 8,
       itemHeight: 40,
     },
     Table: {
       headerBg: '#F7F6F3',
-      headerColor: '#787774',
+      headerColor: '#3f3f46',
       headerSplitColor: 'transparent',
       headerBorderRadius: 8,
       rowHoverBg: '#F7F6F3',

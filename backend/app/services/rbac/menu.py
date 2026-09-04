@@ -184,7 +184,7 @@ async def ensure_ai_provider_menu(session: AsyncSession) -> None:
                 required_capability=None,
                 group_key="school-affairs",
                 group_title="学籍教务",
-                group_icon="file-text",
+                group_icon="school",
                 group_sort=20,
             )
         )

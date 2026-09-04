@@ -52,7 +52,7 @@ def upgrade() -> None:
     op.execute(
         """
         INSERT INTO menu (key, name, path, icon, sort, enabled, roles_csv, required_capability, group_key, group_title, group_icon, group_sort)
-        VALUES ('ai-providers', '服务商管理', '/ai-providers', 'cloud', 15, TRUE, 'director', NULL, 'school-affairs', '学籍教务', 'file-text', 20)
+        VALUES ('ai-providers', '服务商管理', '/ai-providers', 'cloud', 15, TRUE, 'director', NULL, 'school-affairs', '学籍教务', 'school', 20)
         ON CONFLICT (key) DO NOTHING
         """
     )

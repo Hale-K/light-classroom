@@ -10,10 +10,10 @@
   --surface: #ffffff;
   --surface-2: #f1f5f9;
   --surface-3: #e2e8f0;
-  --ink: #0f172a;
-  --text-1: #1e293b;
-  --text-2: #475569;
-  --text-3: #94a3b8;
+  --ink: #0a0a0a;
+  --text-1: #111111;
+  --text-2: #3f3f46;
+  --text-3: #71717a;
   --border: #e2e8f0;
   --border-2: #edf2f7;
 
@@ -276,7 +276,9 @@ body[data-theme='tech'] .nav-item:not(.active) {
 }
 body[data-theme='tech'] .nav-caption,
 body[data-theme='tech'] .nav-caption-static,
-body[data-theme='tech'] .nav-group-head,
+body[data-theme='tech'] .nav-group-head {
+  color: #f4f4f5;
+}
 body[data-theme='tech'] .workspace-label,
 body[data-theme='tech'] .brand-en,
 body[data-theme='tech'] .dock-copy small,
@@ -649,22 +651,22 @@ kbd {
 .nav-caption {
   margin: 0;
   padding: 16px 12px 8px;
-  color: var(--text-3);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-weight: 600;
+  color: var(--text-1);
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
 }
 .nav-caption { display: flex; align-items: center; gap: 6px; }
 .nav-caption svg { flex: 0 0 auto; opacity: 0.72; }
 .nav-caption-static {
   margin: 0;
   padding: 16px 12px 8px;
-  color: var(--text-3);
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-weight: 600;
+  color: var(--text-1);
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
 }
 .nav-group-head {
   display: flex;
@@ -676,21 +678,21 @@ kbd {
   border: 0;
   background: transparent;
   cursor: pointer;
-  color: var(--text-3);
+  color: var(--text-1);
   font: inherit;
   text-align: left;
   transition: color 0.15s;
 }
 .nav-group-head:hover {
-  color: var(--text-2);
+  color: var(--text-1);
 }
 .nav-group-head .nav-caption {
   padding: 0;
   margin: 0;
-  font-size: 12px;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-weight: 600;
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+  font-weight: 500;
 }
 .nav-group-toggle {
   flex-shrink: 0;
@@ -720,7 +722,7 @@ kbd {
   min-height: 46px;
   height: auto;
   padding: 10px 14px;
-  color: var(--text-2);
+  color: var(--text-1);
   background: transparent;
   border: 0;
   border-radius: 8px;
@@ -3898,14 +3900,14 @@ body[data-theme='tech'] .st-subject-self-study {
 }
 .nav-item.active::before { display: none; }
 .nav-caption {
-  font-size: 12px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-3);
+  font-size: 15px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--text-1);
 }
 .nav-group-head .nav-caption,
 .nav-caption-static {
-  font-size: 12px;
+  font-size: 15px;
 }
 .nav-label {
   font-size: 15px;

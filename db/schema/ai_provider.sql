@@ -51,7 +51,7 @@ VALUES (
   NULL,
   'school-affairs',
   '学籍教务',
-  'file-text',
+  'school',
   20
 )
 ON CONFLICT (key) DO NOTHING;

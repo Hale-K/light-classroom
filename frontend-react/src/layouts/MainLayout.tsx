@@ -206,7 +206,7 @@ export default function MainLayout() {
                     onClick={() => toggleGroup(group.key)}
                   >
                     <span className="nav-caption">
-                      <Icon name={group.icon} size={14} />
+                      <Icon name={group.key === 'school-affairs' ? 'school' : group.icon} size={14} />
                       <span>{group.title}</span>
                     </span>
                     <Icon name="chevron-down" size={14} className="nav-group-toggle" />
