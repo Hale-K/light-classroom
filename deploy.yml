@@ -14,8 +14,7 @@ services:
   - name: web
     type: web
     dir: frontend-react
-    # 绕开 tsc 类型检查直接打包（src/pages/scheduling/RuleGroupWorkbench.tsx 尚有 TS 错误待修）
-    build: pnpm exec vite build
+    build: pnpm build
     out: dist
     port: 80
     proxy:

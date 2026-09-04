@@ -291,6 +291,7 @@ export interface GenericScheduleRule {
     parityOddSubjects?: string[];
     parityEvenSubjects?: string[];
     maxOutsidePreferred?: number;
+  choiceCount?: number;
   requiredTeacherRole?: "head_teacher";
   priority: RulePriority;
   status: RuleStatus;
@@ -387,12 +388,6 @@ const summarizeGroup = (item: RuleGroup) => {
     ),
   ].join(" · ");
   return { enabled, hard, soft, familyCounts, typeSummary };
-};
-
-const STATUS_LABELS: Record<RuleStatus, string> = {
-  pass: "已配置",
-  warning: "待确认",
-  unresolved: "待解析",
 };
 
 const ruleCodeForRule = (
@@ -1781,27 +1776,6 @@ const RULE_KIND_BY_ACTION: Record<string, RuleKind> = {
   互斥排课: "配对",
   保持相邻: "配对",
 };
-const RULE_ACTIONS_BY_FAMILY: Record<RuleFamily, string[]> = {
-  slot: ["禁止占用指定课位", "仅允许指定课位", "固定到指定课位"],
-  distribution: ["要求连堂", "均衡分布", "节次课时下限"],
-  teacher: [
-    "禁止排课",
-    "禁止占用指定课位",
-    "固定到指定课位",
-    "优先安排",
-    "优先相邻安排",
-    "尽量避开",
-    "保持连续",
-    "尽量连续",
-    "均衡分配",
-    "每日课节上限",
-    "晚课日固定节次",
-    "节次课时下限",
-    "组合限制",
-  ],
-  class: ["禁止排课", "仅允许指定科目", "固定关联", "均衡分布", "选择自习日"],
-  combination: ["单双周配对", "白天单双周对课", "互斥排课", "保持相邻", "固定关联", "组合限制"],
-};
 const RULE_SCOPE_OPTIONS_BY_FAMILY: Record<RuleFamily, RuleScope[]> = {
   slot: ["全局", "课位", "学科", "教师", "班级"],
   distribution: ["学科", "班级", "教师"],
@@ -2644,8 +2618,6 @@ const r04NoteSubject = (amount = 3) =>
   `学科模式：勾选学科后，这些学科的任课老师都受约束——工作日每天最多 ${amount} 节，白天 1～7 节不能空节。一般不要勾体育。`;
 const r04NoteTeacher = (amount = 3) =>
   `教师模式：直接勾选老师（或选「多班教师」）。只有名单里的人受约束——工作日每天最多 ${amount} 节，白天 1～7 节不能空节。`;
-const R04_NOTE_SUBJECT = r04NoteSubject(3);
-const R04_NOTE_TEACHER = r04NoteTeacher(3);
 
 /** 多选对象名称：R04 / 课位禁排等按作用对象放开多选。 */
 const isMultiNameTargetRule = (rule: GenericScheduleRule) => {
@@ -2672,7 +2644,7 @@ const isMultiNameTargetRule = (rule: GenericScheduleRule) => {
     code === "teacher_period_minimum" ||
     code === "teacher_multi_class_evening_adjacent" ||
     code === "teacher_evening_daytime_link" ||
-    code === "teacher_weekday_preference" ||
+    code === "teacher_preferred_weekdays" ||
     code === "teacher_consecutive"
   ) {
     return rule.scope === "教师";
@@ -3565,7 +3537,7 @@ const hydrateGroupFromApi = (
       id: apiRule.id,
       category: apiRule.period_scope === "evening" ? "evening" : "global",
       scope,
-      family: RULE_TEMPLATE_MAP.get(apiRule.code)?.family,
+      family: RULE_TEMPLATE_MAP.get(apiRule.code as RuleTemplateId)?.family,
       target:
         named ||
         (apiRule.target?.type === "global"
@@ -3691,17 +3663,15 @@ export default function RuleGroupWorkbench({
   const [isNew, setIsNew] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<"all" | RuleFamily>("all");
-  const [scopeFilter, setScopeFilter] = useState<"全部" | RuleScope>("全部");
-  const [priorityFilter, setPriorityFilter] = useState<"全部" | RulePriority>(
-    "全部",
-  );
+  const [scopeFilter] = useState<"全部" | RuleScope>("全部");
+  const [priorityFilter] = useState<"全部" | RulePriority>("全部");
   const getTargetOptions = (
     scope: RuleScope,
     currentTarget = "",
     options: string[] = slotOptions,
   ) => getTargetOptionsFromResources(scope, currentTarget, options, resources);
-  const [statusFilter, setStatusFilter] = useState<"全部" | RuleStatus>("全部");
-  const [keyword, setKeyword] = useState("");
+  const [statusFilter] = useState<"全部" | RuleStatus>("全部");
+  const [keyword] = useState("");
   const resourceReadyKey = `${resources?.subjects?.length ?? 0}:${resources?.teachers?.length ?? 0}:${resources?.classes?.length ?? 0}`;
 
   const decorateGroup = (item: RuleGroup): RuleGroup => {
@@ -3853,17 +3823,10 @@ export default function RuleGroupWorkbench({
       ).length,
     }),
   );
-  const typeSummary = [
-    ...new Set(
-      group.rules.map(
-        (rule) => RULE_FAMILY_LABELS[rule.family || familyForRule(rule)],
-      ),
-    ),
-  ].join(" · ");
   const draftFamily = draft.family || familyForRule(draft);
   const draftCode = ruleCodeForRule(draft);
   const draftTemplate = ruleTemplateForRule(draft);
-  const actionOptions = RULE_ACTIONS_BY_FAMILY[draftFamily];
+  const draftScope: RuleScope = draft.scope;
   const showRelation =
     draftFamily === "combination" || draft.operator === "组合限制";
   const showSlotTeacherBalanceCap = draftCode === "slot_teacher_balance";
@@ -5019,22 +4982,20 @@ export default function RuleGroupWorkbench({
               <label>
                 <span className="rule-group-field-label">
                   {draft.id === "R04"
-                    ? draft.scope === "教师"
+                    ? draftScope === "教师"
                       ? "选择教师"
                       : "选择学科"
-                    : draft.scope === "教师" ||
-                        draftCode === "teacher_period_minimum" ||
-                        (draftCode === "slot_forbidden" &&
-                          draft.scope === "教师")
+                    : draftScope === "教师" ||
+                        draftCode === "teacher_period_minimum"
                       ? "选择教师"
                       : draftCode === "subject_allowed_slots" ||
                           draftCode === "subject_consecutive" ||
                           draftCode === "class_slot_pattern" ||
                           (draftCode === "slot_forbidden" &&
-                            draft.scope === "学科")
+                            draftScope === "学科")
                         ? "选择学科"
                         : draftCode === "slot_forbidden" &&
-                            draft.scope === "班级"
+                            draftScope === "班级"
                           ? "选择班级"
                           : "对象名称"}
                   <Tooltip
@@ -5083,15 +5044,13 @@ export default function RuleGroupWorkbench({
                     slotOptions,
                   ).map((value) => ({ value, label: value }))}
                   placeholder={
-                    draft.scope === "课位"
+                    draftScope === "课位"
                       ? "请选择具体课位"
-                      : draft.scope === "教师" ||
-                          (draftCode === "slot_forbidden" &&
-                            draft.scope === "教师") ||
+                      : draftScope === "教师" ||
                           draftCode === "teacher_period_minimum"
                         ? "搜索并多选教师，也可选「多班教师」"
                         : draftCode === "slot_forbidden" &&
-                            draft.scope === "班级"
+                            draftScope === "班级"
                           ? "请选择班级（可多选）"
                           : draftCode === "subject_consecutive" ||
                               draftCode === "class_slot_pattern" ||

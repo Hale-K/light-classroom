@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { App, Button, Checkbox, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd'
 import type { TableProps, MenuProps } from 'antd'
 import dayjs from 'dayjs'
-import type { Dayjs } from 'dayjs'
 import { authApi, fileCenterApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
@@ -73,7 +72,7 @@ export default function SchedulingView() {
   const [issues, setIssues] = useState<ScheduleValidationIssue[]>([])
   const [showAllIssues, setShowAllIssues] = useState(false)
   const [validation, setValidation] = useState<ScheduleValidationResult | null>(null)
-  const [validatedSignature, setValidatedSignature] = useState('')
+  const [, setValidatedSignature] = useState('')
   const [validatingRules, setValidatingRules] = useState(false)
   const [genSummary, setGenSummary] = useState('')
   const [genPercent, setGenPercent] = useState(0)
@@ -128,7 +127,7 @@ export default function SchedulingView() {
   const [assignPageSize, setAssignPageSize] = useState(10)
   const [academicYear, setAcademicYear] = useState(`${SCHOOL_YEAR}-${SCHOOL_YEAR + 1}`)
   const [term, setTerm] = useState(NOW.getMonth() >= 1 && NOW.getMonth() < 7 ? '2' : '1')
-  const [weekStart, setWeekStart] = useState<string>(localDateValue(MONDAY))
+  const [weekStart] = useState<string>(localDateValue(MONDAY))
   const [gridConfigVisible, setGridConfigVisible] = useState(false)
   const [savingGridConfig, setSavingGridConfig] = useState(false)
   const [gridConfigured, setGridConfigured] = useState(false)
@@ -242,8 +241,6 @@ export default function SchedulingView() {
     ruleTemplateForm,
     setRuleTemplateForm,
     activeRuleTemplate,
-    persistRuleTemplates,
-    applyRuleTemplate,
     openRuleTemplateModal,
     saveRuleTemplate,
     deleteRuleTemplate,
@@ -344,7 +341,6 @@ export default function SchedulingView() {
   }
 
   const payloadSignature = () => JSON.stringify(generationPayload())
-  const validationIsCurrent = Boolean(validation?.valid && validatedSignature === payloadSignature())
 
   const issueText = (issue: ScheduleValidationIssue) => {
     if (issue.code === 'primary_admin_track_conflict') {
@@ -867,11 +863,12 @@ export default function SchedulingView() {
         ...(ruleGroupId ? { rule_group_id: ruleGroupId } : {}),
       }
       const { job_id } = await schedulingApi.startGenerateJob(payload)
-      let result: {
+      type GenerateJobResult = {
         created: number
         class_count: number
         unplaced?: Array<{ assignment_id: number; count: number }>
-      } | null = null
+      }
+      let result: GenerateJobResult | null = null
       let jobError: unknown = null
       await schedulingApi.streamGenerateJob(job_id, (event) => {
         if (event.stage === 'validating' || event.stage === 'generating' || event.stage === 'refreshing' || event.stage === 'done') {
@@ -920,16 +917,21 @@ export default function SchedulingView() {
         )
       }
       if (!result) throw new Error('生成任务未返回结果')
+      const generated = result as {
+        created: number
+        class_count: number
+        unplaced?: Array<{ assignment_id: number; count: number }>
+      }
       setGenStage('refreshing')
       setFailedStageIndex(2)
-      setGenSummary(`已生成 ${result.created} 节课，正在刷新周课表与日期课表`)
+      setGenSummary(`已生成 ${generated.created} 节课，正在刷新周课表与日期课表`)
       await loadTable()
       setGenStage('done')
       setFailedStageIndex(3)
-      setGenSummary(`已完成 ${result.class_count} 个班、${result.created} 节课`)
-      const unplaced = result.unplaced?.reduce((sum, item) => sum + item.count, 0) ?? 0
-      if (unplaced) message.warning(`已生成 ${result.created} 节，另有 ${unplaced} 节未能排入`)
-      else message.success(`已为 ${result.class_count} 个班生成 ${result.created} 节课程`)
+      setGenSummary(`已完成 ${generated.class_count} 个班、${generated.created} 节课`)
+      const unplaced = generated.unplaced?.reduce((sum: number, item: { count: number }) => sum + item.count, 0) ?? 0
+      if (unplaced) message.warning(`已生成 ${generated.created} 节，另有 ${unplaced} 节未能排入`)
+      else message.success(`已为 ${generated.class_count} 个班生成 ${generated.created} 节课程`)
       void loadVersions()
       setDiagOpen(false)
     } catch (e) {

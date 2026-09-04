@@ -81,7 +81,8 @@ export default function PersonnelView() {
   useEffect(() => { void load() }, [])
 
   const unitTreeData = useMemo(() => {
-    const toNodes = (items: OrganizationUnit[]): { title: string; value: number; children?: ReturnType<typeof toNodes> }[] =>
+    type OrgTreeNode = { title: string; value: number; children?: OrgTreeNode[] }
+    const toNodes = (items: OrganizationUnit[]): OrgTreeNode[] =>
       items.filter((item) => item.status === 'active').map((item) => ({
         title: item.name,
         value: item.id,

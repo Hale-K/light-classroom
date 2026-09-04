@@ -154,7 +154,7 @@ export default function RbacWorkbenchView() {
       setRoles(roleList)
       const fromUrl = Number(searchParams.get('role'))
       const candidates = [preferRoleId, fromUrl, roleId].filter(
-        (id): id is number => Number.isFinite(id) && id > 0,
+        (id): id is number => typeof id === 'number' && id > 0,
       )
       const next =
         candidates.find((id) => roleList.some((role) => role.id === id)) ??

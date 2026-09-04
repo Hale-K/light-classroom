@@ -123,7 +123,7 @@ export default function CourseHoursPanel({
       weekly_periods: row.weekly_periods,
       week_parity: row.week_parity,
       evening_periods: both || row.evening_periods_odd || row.evening_periods_even
-        ? (isHalfEvening && eveningParity !== 'all' ? 0.5 : 1)
+        ? (isHalfEvening ? 0.5 : 1)
         : 0,
       evening_parity: eveningParity === 'all' ? 'either' : eveningParity,
     })
