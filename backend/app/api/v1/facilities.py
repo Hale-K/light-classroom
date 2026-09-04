@@ -16,10 +16,10 @@ from app.models.facility import (
     RoomCohortAllocation,
 )
 from app.models.org import Class, Grade, OrganizationUnit, Student, User
-from app.services.resource_allocation import room_matches_rule
-from app.services.staff_roles import get_staff_role_codes
-from app.services.naming import normalize_entity_name
-from app.services.cohort import current_academic_year, expected_cohort_label, normalize_cohort_label
+from app.services.facilities.allocation import room_matches_rule
+from app.services.org.staff_roles import get_staff_role_codes
+from app.services.org.naming import normalize_entity_name
+from app.services.org.cohort import current_academic_year, expected_cohort_label, normalize_cohort_label
 
 router = APIRouter(tags=["校区场室与会议"])
 

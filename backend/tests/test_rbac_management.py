@@ -4,8 +4,12 @@ from pydantic import ValidationError
 from app.api.v1.rbac import RoleIn, RoleMembersIn
 from app.main import app
 from app.models.rbac import Role
-from app.services.rbac import role_belongs_to_tenant
-from app.services.menu import build_menu
+from app.services.rbac import (
+    MENU_PERMISSION_SEED,
+    build_menu,
+    role_belongs_to_tenant,
+    seed_menu_items,
+)
 
 
 def menu_paths(items):
@@ -22,6 +26,11 @@ def test_rbac_routes_are_registered_in_the_application():
 
     assert "/api/v1/rbac/roles" in paths
     assert "/api/v1/rbac/permissions" in paths
+    assert "/api/v1/rbac/roles/{role_id}/menu-preview" in paths
+    assert "/api/v1/rbac/menu-permissions" in paths
+    assert "/api/v1/rbac/menu-permissions/{menu_key}" in paths
+    assert "/api/v1/rbac/permission-items" in paths
+    assert "/api/v1/rbac/menus" in paths
 
 
 def test_custom_role_code_uses_a_stable_machine_readable_format():
@@ -56,6 +65,40 @@ def test_permission_codes_drive_the_non_admin_menu():
         "teacher",
         "3+1+2",
         permission_codes={"dashboard:view", "scheduling:view"},
+        menu_permissions=MENU_PERMISSION_SEED,
+        menu_items=seed_menu_items(),
     ))
 
     assert paths == {"/dashboard", "/scheduling"}
+
+
+def test_menu_preview_ignores_director_bypass_and_uses_permission_codes_only():
+    from app.services.rbac import preview_menu_by_permissions
+
+    preview = preview_menu_by_permissions(
+        {"dashboard:view", "rbac:manage", "staff:view"},
+        "3+1+2",
+        menu_permissions=MENU_PERMISSION_SEED,
+        menu_items=seed_menu_items(),
+    )
+    paths = menu_paths(preview["menus"])
+
+    assert paths == {"/dashboard", "/staff", "/rbac"}
+    assert preview["matched_permissions"]["rbac"] == ["rbac:manage"]
+    assert "permission_codes" in preview
+
+
+def test_build_menu_respects_injected_db_menu_permission_map():
+    paths = menu_paths(build_menu(
+        "teacher",
+        "3+1+2",
+        permission_codes={"dashboard:view", "meetings:view"},
+        menu_permissions={
+            "dashboard": {"dashboard:view"},
+            "meetings": {"meetings:view"},
+            "scheduling": {"scheduling:view"},
+        },
+        menu_items=seed_menu_items(),
+    ))
+
+    assert paths == {"/dashboard", "/meetings"}

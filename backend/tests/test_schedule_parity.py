@@ -137,6 +137,25 @@ def test_generate_rules_keep_saturday_limits_separate_from_weekday_limits():
     assert rules.max_teacher_lessons_on_saturday == 7
 
 
+def test_generate_rules_accept_preview_and_locked_grid_cells():
+    rules = GenerateIn(
+        academic_year="2026-2027",
+        preview=True,
+        locked_items=[{
+            "assignment_id": 1,
+            "class_id": 10,
+            "subject_id": 8,
+            "teacher_id": 100,
+            "weekday": 2,
+            "period": 3,
+        }],
+    )
+
+    assert rules.preview is True
+    assert rules.locked_items[0].weekday == 2
+    assert rules.locked_items[0].period == 3
+
+
 def test_generate_rules_expose_the_pe_teacher_daily_limit():
     rules = GenerateIn(
         academic_year="2026-2027",
@@ -280,6 +299,23 @@ def test_evening_study_uses_the_subjects_selected_for_each_week_parity():
     ]
 
 
+def test_evening_builder_merges_same_assignment_odd_even_into_one_weekly_slot():
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 1, "subject_id": 101, "teacher_id": 11,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 1},
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 0, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 0, 0, 0, 0, 0, 0],
+    )
+
+    assert [(item.subject_id, item.teacher_id, item.weekday, item.period, item.week_parity) for item in items] == [
+        (101, 11, 1, 9, WeekParity.all),
+    ]
+
+
 def test_evening_study_can_use_subject_pools_per_class_and_week():
     items = build_evening_study_items(
         [
@@ -313,7 +349,78 @@ def test_evening_study_can_be_a_standalone_activity_without_subject_or_teacher()
         evening_daily_periods_even=[0, 1, 0, 0, 0, 0, 0],
     )
 
-    assert [(item.subject_id, item.teacher_id, item.weekday, item.week_parity) for item in items] == [
-        (999, None, 1, WeekParity.odd),
-        (999, None, 2, WeekParity.even),
-    ]
+    assert items == []
+
+
+def test_evening_study_respects_teacher_forbidden_slots():
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 1, "subject_id": 101, "teacher_id": 11,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 2, "class_id": 1, "subject_id": 202, "teacher_id": 22,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 0},
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[0, 0, 0, 0, 0, 0, 0],
+        teacher_forbidden_slots={11: {(1, 9)}},
+    )
+
+    placed = {(item.subject_id, item.weekday, item.period) for item in items}
+    assert (101, 2, 9) in placed
+    assert (101, 1, 9) not in placed
+    assert (202, 1, 9) in placed
+
+
+def test_evening_builder_aligns_explicit_parity_pairs_despite_asymmetric_loads():
+    # 复现真实漂移：语文单双周都在，音乐挂单周，心理挂双周，物理单周/历史双周配对
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 1, "subject_id": 12, "teacher_id": 41,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 1},
+            {"id": 2, "class_id": 1, "subject_id": 23, "teacher_id": 42,
+             "weekly_periods": 3, "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 3, "class_id": 1, "subject_id": 24, "teacher_id": 43,
+             "weekly_periods": 3, "evening_periods_odd": 0, "evening_periods_even": 1},
+            {"id": 4, "class_id": 1, "subject_id": 26, "teacher_id": 44,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 5, "class_id": 1, "subject_id": 32, "teacher_id": 45,
+             "weekly_periods": 6, "evening_periods_odd": 0, "evening_periods_even": 1},
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        parity_subject_pairs=[(26, 32)],
+    )
+    phy_odd = [(i.weekday, i.period) for i in items if i.subject_id == 26 and i.week_parity == WeekParity.odd]
+    his_even = [(i.weekday, i.period) for i in items if i.subject_id == 32 and i.week_parity == WeekParity.even]
+    assert phy_odd == his_even
+    assert len(phy_odd) == 1
+
+    # 每周各科目只出现一次，无重复落位
+    from collections import Counter
+    counter = Counter((i.subject_id, i.week_parity) for i in items)
+    assert all(count == 1 for count in counter.values())
+
+
+def test_evening_builder_pairing_is_direction_agnostic():
+    # 课时方案若反向配置（物理双周、历史单周），同样应同位对齐
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 1, "subject_id": 26, "teacher_id": 31,
+             "weekly_periods": 6, "evening_periods_odd": 0, "evening_periods_even": 1},
+            {"id": 2, "class_id": 1, "subject_id": 32, "teacher_id": 32,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 0},
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 0, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 0, 0, 0, 0, 0, 0],
+        parity_subject_pairs=[(26, 32)],
+    )
+    slots = {(i.subject_id, i.week_parity, i.weekday, i.period) for i in items}
+    phys_even = [(s[2], s[3]) for s in slots if s[0] == 26 and s[1] == WeekParity.even]
+    hist_odd = [(s[2], s[3]) for s in slots if s[0] == 32 and s[1] == WeekParity.odd]
+    assert phys_even == hist_odd and phys_even

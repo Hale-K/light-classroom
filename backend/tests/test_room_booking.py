@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from app.services.room_booking import periods_overlap
+from app.services.facilities.booking import periods_overlap
 
 
 def test_overlapping_room_periods_conflict():

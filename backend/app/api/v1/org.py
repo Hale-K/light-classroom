@@ -17,10 +17,10 @@ from app.models.org import Grade, Class, OrganizationUnit, Student, StudentGrade
 from app.models.scan import Submission
 from app.models.enums import Gender, StudentStatus, UserStatus
 from app.models.rbac import Role, UserRole
-from app.services.head_teacher_assignments import summarize_head_teacher_assignment
-from app.services.naming import normalize_entity_name
-from app.services.cohort import cohort_labels_match, current_academic_year, expected_cohort_label, normalize_cohort_label
-from app.services.student_grade_membership import sync_student_grade_membership
+from app.services.academic.head_teacher import summarize_head_teacher_assignment
+from app.services.org.naming import normalize_entity_name
+from app.services.org.cohort import cohort_labels_match, current_academic_year, expected_cohort_label, normalize_cohort_label
+from app.services.academic.student_membership import sync_student_grade_membership
 
 router = APIRouter(prefix="/org", tags=["组织学籍"])
 

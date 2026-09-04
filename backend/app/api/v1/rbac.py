@@ -1,23 +1,35 @@
-"""角色与权限管理 API：角色 CRUD + 权限点目录 + 角色→权限分配"""
-from fastapi import APIRouter, Depends, HTTPException, status
+"""角色与权限管理 API：角色 / 权限点目录 / 菜单结构 / 映射"""
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
-from app.models.org import User
+from app.models.org import Tenant, User
 from app.services.rbac import (
+    create_menu,
+    create_permission,
     create_role,
+    delete_menu,
+    delete_permission,
     delete_role,
     ensure_builtin_roles,
+    ensure_menu_permissions,
     ensure_permissions,
+    list_menu_permission_bindings,
     list_permissions,
     list_role_members,
     list_role_permissions,
     list_roles,
+    load_menu_permission_map,
+    load_menus,
+    preview_menu_by_permissions,
+    set_menu_permissions,
     set_role_members,
     set_role_permissions,
+    update_menu,
+    update_permission,
     update_role,
 )
 
@@ -53,12 +65,61 @@ class RoleMembersIn(BaseModel):
         return sorted(set(values))
 
 
+class MenuPermissionsIn(BaseModel):
+    permissions: list[str] = Field(
+        default_factory=list,
+        description="该菜单可见所需权限点（满足任一即可）；空列表清除映射",
+    )
+
+
+class PermissionIn(BaseModel):
+    code: str = Field(min_length=2, max_length=100, pattern=r"^[a-z][a-z0-9_]*:[a-z][a-z0-9_]*$")
+    name: str = Field(min_length=1, max_length=50)
+    module: str = Field(min_length=1, max_length=50)
+    sort: int | None = None
+
+
+class PermissionUpdateIn(BaseModel):
+    name: str | None = Field(default=None, max_length=50)
+    module: str | None = Field(default=None, max_length=50)
+    sort: int | None = None
+
+
+class MenuIn(BaseModel):
+    key: str = Field(min_length=1, max_length=50, pattern=r"^[a-z][a-z0-9_-]*$")
+    name: str = Field(min_length=1, max_length=50)
+    path: str | None = Field(default=None, max_length=200)
+    icon: str | None = Field(default="grid", max_length=50)
+    sort: int = 0
+    enabled: bool = True
+    roles: list[str] = Field(default_factory=list)
+    required_capability: str | None = None
+    group_key: str = "other"
+    group_title: str = "其他"
+    group_icon: str = "grid"
+    group_sort: int = 100
+
+
+class MenuUpdateIn(BaseModel):
+    name: str | None = Field(default=None, max_length=50)
+    path: str | None = Field(default=None, max_length=200)
+    icon: str | None = Field(default=None, max_length=50)
+    sort: int | None = None
+    enabled: bool | None = None
+    roles: list[str] | None = None
+    required_capability: str | None = None
+    group_key: str | None = None
+    group_title: str | None = None
+    group_icon: str | None = None
+    group_sort: int | None = None
+
+
 def _require_school_admin(user: User) -> None:
     if user.role != BaseUserRole.director:
         raise HTTPException(status_code=403, detail="仅校长管理员可以配置角色与权限")
 
 
-@router.get("/permissions", summary="权限点目录（按模块分组）")
+@router.get("/permissions", summary="权限点目录（按模块分组，读库）")
 async def permissions(
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
@@ -67,6 +128,71 @@ async def permissions(
     _require_school_admin(user)
     await ensure_permissions(session)
     return {"code": 0, "message": "ok", "data": await list_permissions(session)}
+
+
+@router.post("/permission-items", status_code=status.HTTP_201_CREATED, summary="新建权限点")
+async def create_permission_api(
+    body: PermissionIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        item = await create_permission(
+            session, body.code, body.name, body.module, body.sort
+        )
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {"code": item.code, "name": item.name, "module": item.module, "sort": item.sort},
+    }
+
+
+@router.patch("/permission-items/{code}", summary="编辑权限点")
+async def update_permission_api(
+    code: str,
+    body: PermissionUpdateIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        item = await update_permission(
+            session,
+            code,
+            name=body.name,
+            module=body.module,
+            sort=body.sort,
+        )
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {"code": item.code, "name": item.name, "module": item.module, "sort": item.sort},
+    }
+
+
+@router.delete("/permission-items/{code}", summary="删除权限点")
+async def delete_permission_api(
+    code: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        await delete_permission(session, code)
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "message": "ok", "data": None}
 
 
 @router.get("/roles", summary="角色列表")
@@ -166,6 +292,139 @@ async def set_role_permissions_api(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"code": 0, "message": "ok", "data": codes}
+
+
+@router.get("/roles/{role_id}/menu-preview", summary="按权限码预览角色侧栏菜单")
+async def role_menu_preview(
+    role_id: int,
+    codes: str | None = Query(
+        default=None,
+        description="逗号分隔的权限点编码；省略则使用该角色已保存权限",
+    ),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    await ensure_permissions(session)
+    try:
+        if codes is None:
+            permission_codes = await list_role_permissions(session, role_id, tenant_id)
+        else:
+            permission_codes = {item.strip() for item in codes.split(",") if item.strip()}
+            await list_role_permissions(session, role_id, tenant_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    tenant = await session.get(Tenant, tenant_id)
+    gaokao_mode = tenant.gaokao_mode if tenant else "3+1+2"
+    await ensure_menu_permissions(session)
+    menu_permissions = await load_menu_permission_map(session)
+    menu_items = await load_menus(session, include_disabled=False)
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": preview_menu_by_permissions(
+            permission_codes,
+            gaokao_mode,
+            menu_permissions=menu_permissions,
+            menu_items=menu_items,
+        ),
+    }
+
+
+@router.get("/menus", summary="菜单结构列表（管理台，含未开放）")
+async def menus_list(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    await ensure_menu_permissions(session)
+    data = await load_menus(session, include_disabled=True)
+    await session.commit()
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.post("/menus", status_code=status.HTTP_201_CREATED, summary="新建菜单项")
+async def menus_create(
+    body: MenuIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        item = await create_menu(session, body.model_dump())
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "message": "ok", "data": {"key": item.key, "name": item.name}}
+
+
+@router.patch("/menus/{menu_key}", summary="编辑菜单项")
+async def menus_update(
+    menu_key: str,
+    body: MenuUpdateIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        item = await update_menu(
+            session,
+            menu_key,
+            body.model_dump(exclude_unset=True),
+        )
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "message": "ok", "data": {"key": item.key, "name": item.name}}
+
+
+@router.delete("/menus/{menu_key}", summary="删除菜单项")
+async def menus_delete(
+    menu_key: str,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        await delete_menu(session, menu_key)
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "message": "ok", "data": None}
+
+
+@router.get("/menu-permissions", summary="菜单可见权限映射（管理台）")
+async def menu_permissions_list(
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    data = await list_menu_permission_bindings(session)
+    await session.commit()
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.put("/menu-permissions/{menu_key}", summary="整量设置某菜单的可见权限点")
+async def menu_permissions_set(
+    menu_key: str,
+    body: MenuPermissionsIn,
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    _require_school_admin(user)
+    try:
+        codes = await set_menu_permissions(session, menu_key, body.permissions)
+        await session.commit()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"code": 0, "message": "ok", "data": {"menu_key": menu_key, "permissions": codes}}
 
 
 @router.get("/roles/{role_id}/members", summary="角色成员列表")

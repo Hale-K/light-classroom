@@ -2,7 +2,7 @@
  * 各业务模块 API（对接 FastAPI 后端 /api/v1 真实端点）。
  * 返回类型从 @/types 复用；数据由 http 拦截器解包为业务 data。
  */
-import { http, unwrap, setAuthResolver } from './http'
+import { ApiError, http, unwrap, setAuthResolver } from './http'
 import type {
   AdminSchool,
   AnswerScore,
@@ -27,7 +27,9 @@ import type {
   Paper,
   PaperSummary,
   PlatformAdminInfo,
+  MenuPermissionBinding,
   PermissionGroup,
+  RoleMenuPreview,
   Question,
   RoleInfo,
   RoleMembersResult,
@@ -40,6 +42,9 @@ import type {
   ScheduleValidationResult,
   ScheduleVersionSummary,
   SchedulingResources,
+  SchedulingRuleGroup,
+  SchedulingRuleGroupCatalog,
+  SchedulingRuleValidationResult,
   SeatArrangement,
   SeatEntry,
   StaffAccount,
@@ -243,7 +248,7 @@ export const organizationApi = {
     unwrap<{ unit_id: number | null; unit_name: string | null }>(http.get('/organization/grade-center')),
   setGradeCenter: (unitId: number) =>
     unwrap<{ unit_id: number; unit_name: string }>(http.put(`/organization/grade-center/${unitId}`)),
-  appointments: (includeArchived = false) => unwrap<StaffAppointment[]>(http.get('/organization/appointments', { params: { include_archived: includeArchived } })),
+  appointments: () => unwrap<StaffAppointment[]>(http.get('/organization/appointments')),
   createAppointment: (data: {
     organization_unit_id: number
     staff_id: number
@@ -251,12 +256,6 @@ export const organizationApi = {
     academic_year?: string
     replace_grade_assignment?: boolean
   }) => unwrap<StaffAppointment>(http.post('/organization/appointments', data)),
-  autoAllocateAppointments: (data: {
-    target_unit_id: number
-    academic_year?: string
-    position_code: StaffAppointment['position_code']
-    plans: Array<{ source_unit_id: number; teacher_ids: number[]; required_count: number }>
-  }) => unwrap<{ created_count: number; target_unit_id: number }>(http.post('/organization/appointments/auto-allocate', data)),
   deleteAppointment: (id: number) =>
     unwrap<{ id: number }>(http.delete(`/organization/appointments/${id}`)),
   archiveUnitAppointments: (unitId: number) =>
@@ -391,6 +390,7 @@ export const schedulingApi = {
       saturday_periods: number
       weekly_periods: number
       week_parity: import('@/types').WeekParity
+      evening_parity?: import('@/types').EveningParity
       evening_periods_odd: number
       evening_periods_even: number
   }) => unwrap<import('@/types').CourseHourPlanInfo>(http.post('/scheduling/course-hours', data)),
@@ -418,12 +418,50 @@ export const schedulingApi = {
     unwrap<import('@/types').TeacherScopeRule[]>(http.get('/scheduling/teacher-scope-rules', { params })),
   saveScopeRules: (data: { academic_year: string; term: string; rules: import('@/types').TeacherScopeRule[] }) =>
     unwrap<import('@/types').TeacherScopeRule[]>(http.put('/scheduling/teacher-scope-rules', data)),
+  ruleGroup: (params: { academic_year: string; term: string; grade_id?: number; group_id?: string }) =>
+    unwrap<SchedulingRuleGroup | null>(http.get('/scheduling/rule-group', { params })),
+  ruleGroups: (params: { academic_year: string; term: string }) =>
+    unwrap<SchedulingRuleGroupCatalog>(http.get('/scheduling/rule-groups', { params })),
+  saveRuleGroup: (data: SchedulingRuleGroup) =>
+    unwrap<{ group: SchedulingRuleGroup; compiler: Array<{ rule_id: string; code: string; status: 'ready' | 'unresolved'; reason?: string | null }> }>(
+      http.put('/scheduling/rule-group', data),
+    ),
+  applyRuleSuggestion: (data: {
+    academic_year: string
+    term: string
+    group_id: string
+    suggestion: Record<string, unknown>
+  }) =>
+    unwrap<{
+      note: string
+      group: SchedulingRuleGroup
+      compiler: Array<{ rule_id: string; code: string; status: 'ready' | 'unresolved'; reason?: string | null }>
+    }>(http.post('/scheduling/rule-group/apply-suggestion', data)),
+  saveRuleGroups: (data: { academic_year: string; term: string; active_id?: string | null; groups: SchedulingRuleGroup[] }) =>
+    unwrap<SchedulingRuleGroupCatalog>(http.put('/scheduling/rule-groups', data)),
+  verifySchedule: (data: {
+    academic_year: string
+    term: string
+    class_id?: number
+    grade_id?: number
+    rule_group_id?: string
+  }) =>
+    unwrap<{
+      rule_group_id: string
+      rule_group_name: string
+      grade_id: number | null
+      class_count: number
+      hard_failure_count: number
+      soft_failure_count: number
+      validation: SchedulingRuleValidationResult
+    }>(http.post('/scheduling/verify-schedule', data)),
   autoTeaching: (data: { academic_year: string; term: string; class_ids?: number[]; subject_id?: number; weekly_periods: number; max_weekly_periods: number; subject_period_rules?: Array<{ subject_id: number; weekly_periods: number }>; subject_teacher_limits?: Array<{ subject_id: number; max_weekly_periods: number }>; execute?: boolean; days?: number; periods_per_day?: number; forbidden_slots?: Array<[number, number]>; max_class_lessons_per_day?: number; max_teacher_lessons_per_day?: number; max_same_subject_per_day?: number }) =>
     unwrap<{ created: Array<{ teacher_id: number; subject_id: number; class_id: number; weekly_periods: number; student_count?: number; suggested_weekly_periods?: number }>; skipped: Array<{ class_id: number; subject_id: number; reason: string }>; created_count: number; skipped_count: number; updated_count: number; executed: boolean; workload_summary: Array<{ teacher_id: number; teacher_name?: string; weekly_periods: number; max_weekly_periods: number; sufficient: boolean }>; plan: Array<{ teacher_id?: number; subject_id: number; class_id: number; weekly_periods?: number; student_count?: number; suggested_weekly_periods?: number; teacher_name?: string; subject_name?: string; class_name?: string; reason?: string; status: 'success' | 'skipped' }>; time_structure: { days: number; periods_per_day: number; forbidden_slots: Array<[number, number]>; max_class_lessons_per_day?: number; max_teacher_lessons_per_day?: number; max_same_subject_per_day?: number; weekly_lesson_cap: number; same_subject_weekly_cap?: number; teacher_weekly_cap?: number } }>(http.post('/scheduling/auto-teaching', data)),
   generate: (data: {
     academic_year: string
     term: string
     class_ids?: number[]
+    rule_group_id?: string
     days?: number
     periods_per_day?: number
     forbidden_slots?: Array<[number, number]>
@@ -442,19 +480,178 @@ export const schedulingApi = {
     require_full_week?: boolean
     avoid_consecutive_teacher_lessons?: boolean
     strategy_codes?: string[]
+    preview?: boolean
+    locked_items?: Array<{
+      assignment_id?: number
+      class_id: number
+      subject_id: number
+      teacher_id?: number | null
+      weekday: number
+      period: number
+      week_parity?: import('@/types').WeekParity
+    }>
   }) =>
     unwrap<{
       created: number
       class_count: number
-    unplaced: Array<{ assignment_id: number; count: number }>
+      unplaced: Array<{ assignment_id: number; count: number }>
       can_rollback: boolean
-    }>(http.post('/scheduling/generate', data)),
+      preview?: boolean
+      items?: Array<{
+        assignment_id: number
+        class_id: number
+        weekday: number
+        period: number
+        subject_id: number
+        teacher_id: number | null
+        room?: string | null
+        week_parity: import('@/types').WeekParity
+      }>
+      rule_validation?: SchedulingRuleValidationResult | null
+    }>(http.post('/scheduling/generate', data, { timeout: 300000 })),
+  startGenerateJob: (data: Record<string, unknown>) =>
+    unwrap<{ job_id: string }>(http.post('/scheduling/generate-jobs', data)),
+  streamGenerateJob: async (
+    jobId: string,
+    onEvent: (event: {
+      type: string
+      stage?: string
+      message?: string
+      percent?: number
+      elapsed?: number
+      solutions?: number
+      phase?: string
+      result?: {
+        created: number
+        class_count: number
+        unplaced?: Array<{ assignment_id: number; count: number }>
+      }
+      detail?: unknown
+    }) => void,
+  ) => {
+    const { getAuthHeaders, getSseApiBaseURL } = await import('./http')
+    const response = await fetch(`${getSseApiBaseURL()}/scheduling/generate-jobs/${jobId}/events`, {
+      headers: {
+        ...getAuthHeaders(),
+        Accept: 'text/event-stream',
+        'Cache-Control': 'no-cache',
+      },
+      cache: 'no-store',
+    })
+    if (!response.ok) {
+      if (response.status === 401) {
+        throw new ApiError('登录已失效，请重新登录', 401, 401)
+      }
+      throw new ApiError(`订阅生成进度失败（${response.status}）`, response.status, response.status)
+    }
+    if (!response.body) throw new ApiError('浏览器不支持流式响应', -1, 0)
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder('utf-8')
+    let buffer = ''
+    let currentEvent = 'message'
+    let finished = false
+    while (!finished) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const chunks = buffer.split(/\r?\n/)
+      buffer = chunks.pop() || ''
+      for (const line of chunks) {
+        if (line.startsWith('event:')) {
+          currentEvent = line.slice(6).trim()
+          continue
+        }
+        if (!line.startsWith('data:')) continue
+        const raw = line.slice(5).trim()
+        if (!raw) continue
+        const payload = JSON.parse(raw) as {
+          type?: string
+          stage?: string
+          message?: string
+          percent?: number
+          elapsed?: number
+          solutions?: number
+          phase?: string
+          result?: {
+            created: number
+            class_count: number
+            unplaced?: Array<{ assignment_id: number; count: number }>
+          }
+          detail?: unknown
+        }
+        const type = payload.type || currentEvent
+        onEvent({
+          type,
+          stage: payload.stage,
+          message: payload.message,
+          percent: payload.percent,
+          elapsed: payload.elapsed,
+          solutions: payload.solutions,
+          phase: payload.phase,
+          result: payload.result,
+          detail: payload.detail,
+        })
+        currentEvent = 'message'
+        if (type === 'done' || type === 'error') {
+          finished = true
+          break
+        }
+      }
+    }
+  },
   adjustmentOptions: (params: { schedule_id: number; academic_year: string; term: string; days?: number; periods_per_day?: number }) =>
-    unwrap<Array<{ weekday: number; period: number; available: boolean; reason: string }>>(
+    unwrap<Array<{
+      weekday: number
+      period: number
+      week_parity?: 'all' | 'odd' | 'even'
+      available: boolean
+      selectable?: boolean
+      reason: string
+      mode?: 'move' | 'swap'
+      checks?: Array<{ key: string; label: string; passed: boolean; severity?: string }>
+      swap_schedule_id?: number | null
+      swap_with_subject?: string | null
+      swap_with_teacher?: string | null
+    }>>(
       http.get('/scheduling/adjustments/options', { params }),
     ),
-  moveSchedule: (data: { schedule_id: number; target_weekday: number; target_period: number; academic_year: string; term: string; days?: number; periods_per_day?: number }) =>
-    unwrap<{ id: number; weekday: number; period: number }>(http.post('/scheduling/adjustments', data)),
+  previewAdjustment: (data: {
+    schedule_id: number
+    target_weekday: number
+    target_period: number
+    target_week_parity?: 'all' | 'odd' | 'even'
+    academic_year: string
+    term: string
+    days?: number
+    periods_per_day?: number
+  }) =>
+    unwrap<{
+      weekday: number
+      period: number
+      week_parity?: 'all' | 'odd' | 'even'
+      available: boolean
+      selectable?: boolean
+      reason: string
+      mode?: 'move' | 'swap'
+      checks: Array<{ key: string; label: string; passed: boolean; severity?: string }>
+      swap_schedule_id?: number | null
+      swap_with_subject?: string | null
+      swap_with_teacher?: string | null
+    }>(http.post('/scheduling/adjustments/preview', data)),
+  moveSchedule: (data: {
+    schedule_id: number
+    target_weekday: number
+    target_period: number
+    target_week_parity?: 'all' | 'odd' | 'even'
+    academic_year: string
+    term: string
+    days?: number
+    periods_per_day?: number
+    force?: boolean
+  }) =>
+    unwrap<{ id: number; weekday: number; period: number; mode?: string; forced?: boolean }>(
+      http.post('/scheduling/adjustments', data),
+    ),
   substitutes: (params: { schedule_id: number; academic_year: string; term: string }) =>
     unwrap<Array<{ teacher_id: number; teacher_name: string; weekly_lessons: number; available: boolean; reason: string }>>(
       http.get('/scheduling/substitutes', { params }),
@@ -737,6 +934,82 @@ export const rbacApi = {
   /** 整量设置角色成员，不影响这些人员的其他角色 */
   setRoleMembers: (roleId: number, userIds: number[]) =>
     unwrap<number[]>(http.put(`/rbac/roles/${roleId}/members`, { user_ids: userIds })),
+  /** 按权限码预览角色侧栏菜单（可传草稿勾选） */
+  roleMenuPreview: (roleId: number, codes?: string[]) =>
+    unwrap<RoleMenuPreview>(
+      http.get(`/rbac/roles/${roleId}/menu-preview`, {
+        params: codes ? { codes: codes.join(',') } : undefined,
+      }),
+    ),
+  /** 菜单可见权限映射列表 */
+  menuPermissions: () =>
+    unwrap<MenuPermissionBinding[]>(http.get('/rbac/menu-permissions')),
+  /** 整量设置某菜单的可见权限点 */
+  setMenuPermissions: (menuKey: string, permissions: string[]) =>
+    unwrap<{ menu_key: string; permissions: string[] }>(
+      http.put(`/rbac/menu-permissions/${menuKey}`, { permissions }),
+    ),
+}
+
+export type FileTransferJobType = {
+  value: string
+  label: string
+  direction: 'import' | 'export'
+}
+
+export type FileTransferJob = {
+  id: string
+  job_type: string
+  job_type_label: string
+  direction: 'import' | 'export'
+  status: 'queued' | 'running' | 'success' | 'failed' | string
+  progress: number
+  processed: number
+  total: number
+  operator_id?: number | null
+  operator_name?: string
+  scope?: string
+  file_name?: string | null
+  object_key?: string | null
+  file_size: number
+  error_message?: string | null
+  created_at?: string | null
+  started_at?: string | null
+  finished_at?: string | null
+  duration_ms?: number | null
+  downloadable?: boolean
+}
+
+/** 文件中心：异步导入 / 导出 / 下载 */
+export const fileCenterApi = {
+  jobTypes: () => unwrap<FileTransferJobType[]>(http.get('/file-center/job-types')),
+  listJobs: (params?: { direction?: string; job_type?: string; status?: string; limit?: number }) =>
+    unwrap<FileTransferJob[]>(http.get('/file-center/jobs', { params })),
+  getJob: (jobId: string) => unwrap<FileTransferJob>(http.get(`/file-center/jobs/${jobId}`)),
+  download: (jobId: string) =>
+    unwrap<{ url: string; file_name?: string; file_size?: number }>(
+      http.get(`/file-center/jobs/${jobId}/download`),
+    ),
+  exportTimetable: (data: {
+    academic_year: string
+    term: string
+    class_ids?: number[] | null
+    periods_per_day?: number
+    evening_start_period?: number | null
+    sheets?: string[]
+  }) => unwrap<FileTransferJob>(http.post('/file-center/exports/timetable', data)),
+  exportStudents: (data: {
+    grade_id?: number | null
+    class_id?: number | null
+    unassigned_only?: boolean
+  }) => unwrap<FileTransferJob>(http.post('/file-center/exports/students', data)),
+  createImport: (data: { job_type: string; file: File; scope?: string }) => {
+    const body = new FormData()
+    body.append('job_type', data.job_type)
+    if (data.scope) body.append('scope', data.scope)
+    body.append('file', data.file)
+    return unwrap<FileTransferJob>(http.post('/file-center/imports', body))
+  },
 }
 
 /** 教师档案 */

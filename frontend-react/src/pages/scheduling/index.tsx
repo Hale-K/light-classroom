@@ -1,9 +1,10 @@
-﻿import { useEffect, useMemo, useState } from 'react'
-import { App, Button, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tabs, Tag } from 'antd'
+﻿import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { App, Button, Checkbox, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd'
 import type { TableProps, MenuProps } from 'antd'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
-import { authApi, orgApi, schedulingApi } from '@/api'
+import { authApi, fileCenterApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import TableCard from '@/components/TableCard'
@@ -24,59 +25,46 @@ import type {
   TeachingAssignment,
 } from '@/types'
 import RuleDesigner from './RuleDesigner'
+import RuleGroupWorkbench, {
+  ruleGroupScopeLabel,
+  type RuleGroup,
+} from './RuleGroupWorkbench'
+import GenerationDiagnosisDrawer from './GenerationDiagnosisDrawer'
 import CourseHoursPanel from './course-hours'
+import ScheduleVerifyWorkbench from './ScheduleVerifyWorkbench'
+import SlotStructurePanel from './SlotStructurePanel'
+import {
+  BUILTIN_PERIOD_PLANS,
+  DEFAULT_GRID_CONFIG,
+  appendGenTrace,
+  GEN_STEPS,
+  MONDAY,
+  NOW,
+  PERIOD_PLANS_KEY,
+  SCHOOL_YEAR,
+  SUBJECT_ORDER,
+  WEEKDAY_NAMES,
+  buildGenerationPayload,
+  buildRuleGridConfig,
+  getConfiguredSlotOptions,
+  localDateValue,
+  normalizeGridConfig,
+  parseGenerationDiagnosis,
+  type GenerationDiagnosis,
+  type GenTraceEvent,
+} from './scheduling-model'
+import useRuleTemplates from './use-rule-templates'
 import './index.css'
-
-/** 初始时间基线：学年 / 学期 / 本周一（与 Vue 版一致） */
-const NOW = new Date()
-const SCHOOL_YEAR = NOW.getMonth() >= 7 ? NOW.getFullYear() : NOW.getFullYear() - 1
-const MONDAY = (() => {
-  const d = new Date(NOW)
-  d.setDate(NOW.getDate() - ((NOW.getDay() + 6) % 7))
-  return d
-})()
-const localDateValue = (value: Date) => [
-  value.getFullYear(),
-  String(value.getMonth() + 1).padStart(2, '0'),
-  String(value.getDate()).padStart(2, '0'),
-].join('-')
-const SUBJECT_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理', '体育']
-const WEEKDAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
-
-const GEN_STEPS = [
-  { code: 'validating', label: '校验资源' },
-  { code: 'generating', label: '初排与冲突修复' },
-  { code: 'refreshing', label: '保存并刷新' },
-  { code: 'done', label: '生成完成' },
-] as const
-type GenStage = 'idle' | (typeof GEN_STEPS)[number]['code'] | 'blocked' | 'error'
-
-interface AssignmentForm {
-  mode?: 'subject' | 'activity'
-  teacher_id?: number
-  subject_id?: number
-  class_id?: number
-  weekly_periods: number
-  room: string
-}
-
-interface ScheduleAdjustmentOption {
-  weekday: number
-  period: number
-  available: boolean
-  reason: string
-}
-
-interface SubstituteOption {
-  teacher_id: number
-  teacher_name: string
-  weekly_lessons: number
-  available: boolean
-  reason: string
-}
+import type {
+  AssignmentForm,
+  GenStage,
+  ScheduleAdjustmentOption,
+  SubstituteOption,
+} from './scheduling-model'
 
 export default function SchedulingView() {
   const { message } = App.useApp()
+  const navigate = useNavigate()
 
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
@@ -88,11 +76,42 @@ export default function SchedulingView() {
   const [validatedSignature, setValidatedSignature] = useState('')
   const [validatingRules, setValidatingRules] = useState(false)
   const [genSummary, setGenSummary] = useState('')
+  const [genPercent, setGenPercent] = useState(0)
+  const [genElapsed, setGenElapsed] = useState(0)
+  const [genSolutions, setGenSolutions] = useState(0)
+  const [genDiagnosis, setGenDiagnosis] = useState<GenerationDiagnosis | null>(null)
+  const [genTrace, setGenTrace] = useState<GenTraceEvent[]>([])
+  const [generationFocus, setGenerationFocus] = useState<{
+    groupId: string
+    token: number
+  } | null>(null)
+  const [diagOpen, setDiagOpen] = useState(false)
+  const [ruleCatalogEpoch, setRuleCatalogEpoch] = useState(0)
+  const [verifyVisible, setVerifyVisible] = useState(false)
+  const lastGenerateRef = useRef<{ classIds?: number[]; ruleGroupId?: string }>({})
+  const genWallClockRef = useRef<number | null>(null)
+
+  // SSE 被代理缓冲时，至少让「已用时」按墙钟走，避免界面假死在 2s
+  useEffect(() => {
+    if (!generating) {
+      genWallClockRef.current = null
+      return
+    }
+    if (genWallClockRef.current == null) {
+      genWallClockRef.current = Date.now()
+    }
+    const timer = window.setInterval(() => {
+      const started = genWallClockRef.current
+      if (started == null) return
+      setGenElapsed((prev) => Math.max(prev, (Date.now() - started) / 1000))
+    }, 1000)
+    return () => window.clearInterval(timer)
+  }, [generating])
 
   const [scheduleVersions, setScheduleVersions] = useState<ScheduleVersionSummary[]>([])
   const [versionsLoading, setVersionsLoading] = useState(false)
 
-  const [activeTab, setActiveTab] = useState<'hours' | 'rules' | 'assignments' | 'schedule'>('hours')
+  const [activeTab, setActiveTab] = useState<'hours' | 'slots' | 'rules' | 'assignments' | 'schedule'>('slots')
   const [resources, setResources] = useState<SchedulingResources>({
     teachers: [],
     subjects: [],
@@ -111,14 +130,9 @@ export default function SchedulingView() {
   const [term, setTerm] = useState(NOW.getMonth() >= 1 && NOW.getMonth() < 7 ? '2' : '1')
   const [weekStart, setWeekStart] = useState<string>(localDateValue(MONDAY))
   const [gridConfigVisible, setGridConfigVisible] = useState(false)
-  const [gridConfig, setGridConfig] = useState<SchedulingGridConfig>({
-    days: 5, periods_per_day: 7, enable_saturday: false, enable_evening: false,
-    daily_periods: [7, 7, 7, 7, 7, 0, 0], evening_start_period: null,
-    evening_daily_periods_odd: [0, 0, 0, 0, 0, 0, 0],
-    evening_daily_periods_even: [0, 0, 0, 0, 0, 0, 0],
-    evening_subject_ids: [], evening_subject_ids_odd: [], evening_subject_ids_even: [],
-    term_start_monday: null, first_week_parity: 'odd',
-  })
+  const [savingGridConfig, setSavingGridConfig] = useState(false)
+  const [gridConfigured, setGridConfigured] = useState(false)
+  const [gridConfig, setGridConfig] = useState<SchedulingGridConfig>(DEFAULT_GRID_CONFIG)
 
   // 弹窗
   const [assignmentVisible, setAssignmentVisible] = useState(false)
@@ -127,12 +141,36 @@ export default function SchedulingView() {
   const [teacherVisible, setTeacherVisible] = useState(false)
   const [conditionVisible, setConditionVisible] = useState(false)
   const [generationRuleVisible, setGenerationRuleVisible] = useState(false)
+  const [generateRuleOptions, setGenerateRuleOptions] = useState<RuleGroup[]>([])
+  const [selectedGenerateRuleId, setSelectedGenerateRuleId] = useState<string>()
   const [adjustmentEntry, setAdjustmentEntry] = useState<ScheduleEntry>()
   const [adjustmentOptions, setAdjustmentOptions] = useState<ScheduleAdjustmentOption[]>([])
   const [adjustmentLoading, setAdjustmentLoading] = useState(false)
   const [movingSchedule, setMovingSchedule] = useState(false)
   const [substituteOptions, setSubstituteOptions] = useState<SubstituteOption[]>([])
   const [adjustmentTab, setAdjustmentTab] = useState<'move' | 'substitute'>('move')
+  const [adjustConfirmOpen, setAdjustConfirmOpen] = useState(false)
+  const [adjustPreview, setAdjustPreview] = useState<ScheduleAdjustmentOption | null>(null)
+  const [adjustPreviewLoading, setAdjustPreviewLoading] = useState(false)
+  const [acknowledgedChecks, setAcknowledgedChecks] = useState<Record<string, boolean>>({})
+  const [exportModalOpen, setExportModalOpen] = useState(false)
+  /** 导出目标：'all' = 全部班级，否则为班级 id */
+  const [exportClassKey, setExportClassKey] = useState<number | 'all'>('all')
+  const [exportSheets, setExportSheets] = useState<string[]>([
+    'cover',
+    'teacher_relation',
+    'teacher_hours',
+    'teacher_grid',
+    'class_timetables',
+  ])
+  const [exportSubmitting, setExportSubmitting] = useState(false)
+  const [exportDoneOpen, setExportDoneOpen] = useState(false)
+  const [exportDoneInfo, setExportDoneInfo] = useState<{
+    jobTypeLabel: string
+    directionLabel: string
+    scope: string
+    fileName?: string
+  } | null>(null)
   const [scopeRuleVisible, setScopeRuleVisible] = useState(false)
   const [scopeRules, setScopeRules] = useState<TeacherScopeRule[]>([])
   const [scopeRuleForm, setScopeRuleForm] = useState<Partial<TeacherScopeRule>>({ mode: 'allow', weekly_periods: 4 })
@@ -143,10 +181,6 @@ export default function SchedulingView() {
   const [grades, setGrades] = useState<Grade[]>([])
   const [autoGradeIds, setAutoGradeIds] = useState<number[]>([])
   // 课时方案：内置标准方案 + 本地自定义方案，一键填充学科课时规则
-  const PERIOD_PLANS_KEY = 'scheduling.period_plans.v1'
-  const BUILTIN_PERIOD_PLANS: Array<{ name: string; rules: Record<string, number> }> = [
-    { name: '标准方案', rules: { 语文: 5, 数学: 5, 英语: 5, 物理: 3, 化学: 3, 生物: 2, 政治: 2, 历史: 2, 地理: 2, 体育: 1 } },
-  ]
   const [periodPlans, setPeriodPlans] = useState<Array<{ name: string; rules: Record<string, number> }>>([])
   const allPeriodPlans = useMemo(() => [...BUILTIN_PERIOD_PLANS, ...periodPlans], [periodPlans])
   // 自动生成：按课时方案直接生成任教关系
@@ -186,244 +220,45 @@ export default function SchedulingView() {
   const [savingAssignment, setSavingAssignment] = useState(false)
   const [savingTeacher, setSavingTeacher] = useState(false)
 
-  // ---------- 规则模板（建立规则 Tab） ----------
-  const DEFAULT_RULE_TEMPLATE_KEY = 'scheduling.default_rule_template_id'
-  const RULE_TEMPLATES_KEY = 'scheduling.rule_templates.v1'
-  const RULE_CONFIG_REVISION_KEY = 'scheduling.rule_config_revision'
-  const RULE_CONFIG_REVISION = '2026-08-29-course-hours-v4'
-  const DEFAULT_RULE_CONFIG: ScheduleRuleConfig = {
-    days: 5,
-    periods_per_day: 8,
-    saturday_periods: 7,
-    enable_evening: false,
-    evening_start_period: null,
-    evening_daily_periods_odd: [0, 0, 0, 0, 0, 0, 0],
-    evening_daily_periods_even: [0, 0, 0, 0, 0, 0, 0],
-    evening_subject_ids: [],
-    evening_subject_ids_odd: [],
-    evening_subject_ids_even: [],
-    max_class_lessons_per_day: 8,
-    max_teacher_lessons_per_day: 6,
-    max_class_lessons_on_saturday: 7,
-    max_teacher_lessons_on_saturday: 7,
-    max_pe_teacher_lessons_per_day: 4,
-    max_teacher_weekly_periods: 30,
-    pe_weekly_periods: 2,
-    max_same_subject_per_day: 2,
-    require_full_week: false,
-    avoid_consecutive_teacher_lessons: true,
-    forbidden_slots: [],
-    strategy_codes: ['cross_day_variety', 'class_compact', 'daily_balance', 'cross_class_gap_repair', 'random_tiebreak'],
-  }
-  const buildInTemplates = (): ScheduleRuleTemplate[] => [
-    {
-      id: 'builtin-balanced',
-      name: '常规均衡排课',
-      desc: '课时足额 / 同科分散 / 禁排时段',
-      enabled: true,
-      config: DEFAULT_RULE_CONFIG,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+  const configuredSlotOptions = useMemo(() => getConfiguredSlotOptions(gridConfig), [gridConfig])
+
+  const ruleTemplatesState = useRuleTemplates({
+    academicYear,
+    term,
+    onConfigApplied: (config) => {
+      setConditions(config)
+      setValidation(null)
+      setValidatedSignature('')
     },
-    {
-      id: 'builtin-intensive',
-      name: '集中紧凑排课',
-      desc: '班级课表紧凑；同科课时仍由算法按全周自动分散',
-      enabled: true,
-      config: {
-        ...DEFAULT_RULE_CONFIG,
-        max_same_subject_per_day: 3,
-        avoid_consecutive_teacher_lessons: false,
-      },
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    },
-  ]
-  const loadTemplates = (): ScheduleRuleTemplate[] => {
-    try {
-      const raw = localStorage.getItem(RULE_TEMPLATES_KEY)
-      if (!raw) return buildInTemplates()
-      const parsed = JSON.parse(raw) as ScheduleRuleTemplate[]
-      const list = Array.isArray(parsed) && parsed.length ? parsed : buildInTemplates()
-      const applyRecommendedConfig = localStorage.getItem(RULE_CONFIG_REVISION_KEY) !== RULE_CONFIG_REVISION
-      // 兼容旧数据：无 enabled 字段视为启用
-      const normalized = list.map((t) => ({
-        ...t,
-        enabled: t.enabled !== false,
-        config: {
-          ...DEFAULT_RULE_CONFIG,
-          ...(applyRecommendedConfig && t.id === 'builtin-balanced' ? {} : t.config),
-          saturday_parity: 'all' as const,
-          enable_evening: applyRecommendedConfig ? false : (t.config.enable_evening ?? false),
-          evening_start_period: applyRecommendedConfig ? null : (t.config.evening_start_period ?? null),
-          evening_daily_periods_odd: applyRecommendedConfig ? [0, 0, 0, 0, 0, 0, 0] : (t.config.evening_daily_periods_odd ?? [0, 0, 0, 0, 0, 0, 0]),
-          evening_daily_periods_even: applyRecommendedConfig ? [0, 0, 0, 0, 0, 0, 0] : (t.config.evening_daily_periods_even ?? [0, 0, 0, 0, 0, 0, 0]),
-          evening_subject_ids_odd: Array.isArray(t.config.evening_subject_ids_odd) ? t.config.evening_subject_ids_odd : (t.config.evening_subject_ids ?? []),
-          evening_subject_ids_even: Array.isArray(t.config.evening_subject_ids_even) ? t.config.evening_subject_ids_even : (t.config.evening_subject_ids ?? []),
-          evening_subject_ids: [...new Set([
-            ...(Array.isArray(t.config.evening_subject_ids_odd) ? t.config.evening_subject_ids_odd : (t.config.evening_subject_ids ?? [])),
-            ...(Array.isArray(t.config.evening_subject_ids_even) ? t.config.evening_subject_ids_even : (t.config.evening_subject_ids ?? [])),
-          ])],
-        },
-      }))
-      if (applyRecommendedConfig) {
-        localStorage.setItem(RULE_CONFIG_REVISION_KEY, RULE_CONFIG_REVISION)
-        localStorage.setItem(RULE_TEMPLATES_KEY, JSON.stringify(normalized))
-      }
-      return normalized
-    } catch {
-      return buildInTemplates()
-    }
-  }
-  const [ruleTemplates, setRuleTemplates] = useState<ScheduleRuleTemplate[]>(() => {
-    const loaded = loadTemplates()
-    // 互斥归一化：最多只保留一个开启；默认模板优先，否则第一个
-    const defaultId = localStorage.getItem(DEFAULT_RULE_TEMPLATE_KEY) || 'builtin-balanced'
-    const enabledCount = loaded.filter(t => t.enabled !== false).length
-    if (enabledCount <= 1) return loaded
-    const keep = loaded.find(t => t.id === defaultId && t.enabled !== false) || loaded.find(t => t.enabled !== false)
-    return loaded.map(t => t.id === keep?.id
-      ? { ...t, enabled: true }
-      : { ...t, enabled: false })
+    onScopeRulesApplied: setScopeRules,
   })
-  const [defaultRuleTemplateId, setDefaultRuleTemplateId] = useState<string>(
-    () => localStorage.getItem(DEFAULT_RULE_TEMPLATE_KEY) || 'builtin-balanced',
-  )
-  const [ruleTemplateModalOpen, setRuleTemplateModalOpen] = useState(false)
-  const [editingRuleTemplateId, setEditingRuleTemplateId] = useState<string>()
-  const [ruleTemplateForm, setRuleTemplateForm] = useState<{
-    name: string
-    desc: string
-    config: ScheduleRuleConfig
-    scope_rules: TeacherScopeRule[]
-  }>({
-    name: '',
-    desc: '',
-    config: DEFAULT_RULE_CONFIG,
-    scope_rules: [],
-  })
-  const persistRuleTemplates = (next: ScheduleRuleTemplate[]) => {
-    setRuleTemplates(next)
-    try { localStorage.setItem(RULE_TEMPLATES_KEY, JSON.stringify(next)) } catch {}
-  }
-  useEffect(() => {
-    // 初次挂载时若无默认，选第一个启用的模板（互斥模式下唯一开启者）
-    if (!ruleTemplates.some(t => t.id === defaultRuleTemplateId)) {
-      const firstEnabled = ruleTemplates.find(t => t.enabled !== false)
-      if (firstEnabled) setDefaultRuleTemplateId(firstEnabled.id)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-  useEffect(() => {
-    try { localStorage.setItem(DEFAULT_RULE_TEMPLATE_KEY, defaultRuleTemplateId) } catch {}
-  }, [defaultRuleTemplateId])
-  const openRuleTemplateModal = (record?: ScheduleRuleTemplate) => {
-    if (record) {
-      setEditingRuleTemplateId(record.id)
-      setRuleTemplateForm({
-        name: record.name,
-        desc: record.desc || '',
-        config: JSON.parse(JSON.stringify(record.config)),
-        scope_rules: JSON.parse(JSON.stringify(record.scope_rules || [])),
-      })
-    } else {
-      setEditingRuleTemplateId(undefined)
-      setRuleTemplateForm({
-        name: '',
-        desc: '',
-        config: JSON.parse(JSON.stringify(DEFAULT_RULE_CONFIG)),
-        scope_rules: [],
-      })
-    }
-    setRuleTemplateModalOpen(true)
-  }
-  const saveRuleTemplate = () => {
-    const name = ruleTemplateForm.name.trim()
-    if (!name) {
-      message.warning('请填写规则模板名称')
-      return
-    }
-    const scopePayload = ruleTemplateForm.scope_rules.length > 0
-      ? JSON.parse(JSON.stringify(ruleTemplateForm.scope_rules))
-      : undefined
-    if (editingRuleTemplateId) {
-      persistRuleTemplates(ruleTemplates.map(t => t.id === editingRuleTemplateId
-        ? { ...t, name, desc: ruleTemplateForm.desc, config: ruleTemplateForm.config, scope_rules: scopePayload, updated_at: new Date().toISOString() }
-        : t))
-      message.success('规则模板已更新')
-    } else {
-      const newTpl: ScheduleRuleTemplate = {
-        id: `tpl_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
-        name,
-        desc: ruleTemplateForm.desc,
-        config: ruleTemplateForm.config,
-        scope_rules: scopePayload,
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      }
-      persistRuleTemplates([...ruleTemplates, newTpl])
-      message.success('规则模板已创建')
-    }
-    setRuleTemplateModalOpen(false)
-  }
-  const deleteRuleTemplate = (record: ScheduleRuleTemplate) => {
-    if (record.id.startsWith('builtin-')) {
-      message.warning('内置规则模板不可删除')
-      return
-    }
-    const next = ruleTemplates.filter(t => t.id !== record.id)
-    persistRuleTemplates(next)
-    if (defaultRuleTemplateId === record.id) {
-      setDefaultRuleTemplateId(next[0]?.id || '')
-    }
-    message.success('规则模板已删除')
-  }
-  const toggleRuleTemplate = (record: ScheduleRuleTemplate) => {
-    const turningOn = record.enabled === false
-    let next: ScheduleRuleTemplate[]
-    if (turningOn) {
-      // 开启一个 → 其余全部停用（最多只允许一个开启）
-      next = ruleTemplates.map(t => t.id === record.id
-        ? { ...t, enabled: true, updated_at: new Date().toISOString() }
-        : { ...t, enabled: false })
-      setDefaultRuleTemplateId(record.id)
-      void applyRuleTemplateAsConditions(record)
-    } else {
-      // 关闭当前开启的 → 全部停用，无生效模板
-      next = ruleTemplates.map(t => t.id === record.id
-        ? { ...t, enabled: false, updated_at: new Date().toISOString() }
-        : t)
-      if (defaultRuleTemplateId === record.id) {
-        setDefaultRuleTemplateId('')
-      }
-    }
-    persistRuleTemplates(next)
-    message.success(turningOn ? `规则「${record.name}」已启用` : `规则「${record.name}」已停用`)
-  }
-  // 当前 Tab 生效使用的规则：唯一开启的模板（最多只允许一个开启）
-  const activeRuleTemplate = useMemo(
-    () => ruleTemplates.find(t => t.enabled !== false) || undefined,
-    [ruleTemplates],
-  )
-  const applyRuleTemplateAsConditions = async (record: ScheduleRuleTemplate) => {
-    setConditions(JSON.parse(JSON.stringify(record.config)))
-    setValidation(null)
-    setValidatedSignature('')
-    // —— 同步模板的教师任教范围到全局（后端 TenantConfig 持久化 + 前端 scopeRules 状态）——
-    //    这样 autoTeaching（自动生成任教关系）和 generate 仍然通过读后端生效，无需改接口
-    const scopeRulesClone: TeacherScopeRule[] = JSON.parse(JSON.stringify(record.scope_rules || []))
-    setScopeRules(scopeRulesClone)
-    try {
-      await schedulingApi.saveScopeRules({ academic_year: academicYear, term, rules: scopeRulesClone })
-    } catch (e) {
-      // 静默失败，避免影响模板切换
-    }
-  }
+  const {
+    ruleTemplates,
+    defaultRuleTemplateId,
+    setDefaultRuleTemplateId,
+    ruleTemplateModalOpen,
+    setRuleTemplateModalOpen,
+    editingRuleTemplateId,
+    ruleTemplateForm,
+    setRuleTemplateForm,
+    activeRuleTemplate,
+    persistRuleTemplates,
+    applyRuleTemplate,
+    openRuleTemplateModal,
+    saveRuleTemplate,
+    deleteRuleTemplate,
+    toggleRuleTemplate,
+  } = ruleTemplatesState
 
   const selectedClassName = useMemo(
     () => resources.classes.find((item) => item.id === selectedClassId)?.name || '全部班级',
     [resources.classes, selectedClassId],
   )
+  const gradeScheduleLabel = useMemo(() => {
+    const sample = resources.classes[0]?.name || ''
+    const matched = sample.match(/^(高[一二三]|初[一二三])/)
+    return matched ? `${matched[1]}年级` : '本年级'
+  }, [resources.classes])
   const visibleAssignments = useMemo(
     () =>
       resources.assignments.filter(
@@ -463,6 +298,7 @@ export default function SchedulingView() {
   const resetAssignmentFilters = () => {
     setAssignKeyword('')
     setAppliedAssignKeyword('')
+    setSelectedClassId(undefined)
     setAssignPage(1)
   }
 
@@ -471,68 +307,40 @@ export default function SchedulingView() {
     return index >= 0 ? index : failedStageIndex
   }, [genStage, failedStageIndex])
 
-  const ruleGridConfig = (config: ScheduleRuleConfig): SchedulingGridConfig => {
-    // 时段结构由“周格设置”唯一维护，规则模板只提供排课约束与策略。
-    const dailyPeriods = Array.from({ length: 7 }, (_, index) => gridConfig.daily_periods[index] ?? 0)
-    const activeDays = dailyPeriods.reduce((lastDay, periods, index) => periods > 0 ? index + 1 : lastDay, 0)
-    const formalPeriods = Math.max(...dailyPeriods, 0)
-    // 晚自习的起始节次和每日容量也由“周格设置”维护，不跟随排课规则模板切换。
-    const eveningDailyPeriodsOdd = gridConfig.evening_daily_periods_odd ?? [0, 0, 0, 0, 0, 0, 0]
-    const eveningDailyPeriodsEven = gridConfig.evening_daily_periods_even ?? [0, 0, 0, 0, 0, 0, 0]
-    const eveningEnabled = Boolean(gridConfig.enable_evening)
-    const legacyEveningSubjects = gridConfig.evening_subject_ids ?? []
-    return {
-      ...gridConfig,
-      days: activeDays,
-      periods_per_day: formalPeriods,
-      daily_periods: dailyPeriods,
-      enable_saturday: dailyPeriods[5] > 0,
-      enable_evening: eveningEnabled,
-      // 晚自习是独立时段，始终自动接在当天正式课之后，不再由用户填写第几节。
-      evening_start_period: eveningEnabled ? formalPeriods + 1 : null,
-      evening_daily_periods_odd: eveningDailyPeriodsOdd,
-      evening_daily_periods_even: eveningDailyPeriodsEven,
-      evening_subject_ids: [...new Set([
-        ...(config.evening_subject_ids_odd ?? legacyEveningSubjects),
-        ...(config.evening_subject_ids_even ?? legacyEveningSubjects),
-      ])],
-      evening_subject_ids_odd: config.evening_subject_ids_odd ?? legacyEveningSubjects,
-      evening_subject_ids_even: config.evening_subject_ids_even ?? legacyEveningSubjects,
-    }
-  }
+  const ruleGridConfig = (config: ScheduleRuleConfig) => buildRuleGridConfig(config, gridConfig)
+  const generationPayload = (config: ScheduleRuleConfig = conditions) => (
+    buildGenerationPayload(config, gridConfig, academicYear, term)
+  )
 
-  const generationPayload = (config: ScheduleRuleConfig = conditions) => {
-    const ruleGrid = ruleGridConfig(config)
-    const strategyCodes = [
-      'daily_balance',
-      ...config.strategy_codes.filter((code) => code !== 'daily_balance'),
-    ]
-    const structuralForbidden: Array<[number, number]> = []
-    ruleGrid.daily_periods.slice(0, ruleGrid.days).forEach((available, dayIndex) => {
-      for (let period = available + 1; period <= ruleGrid.periods_per_day; period += 1) {
-        structuralForbidden.push([dayIndex + 1, period])
+  const formatGenerationError = (error: unknown) => {
+    const fallback = error instanceof Error ? error.message : '生成课表失败'
+    const diagnosis = parseGenerationDiagnosis(error)
+    if (diagnosis?.summary) return diagnosis.summary
+    try {
+      const detail = JSON.parse(fallback) as {
+        message?: unknown
+        rule_validation?: {
+          results?: Array<{
+            priority: string
+            status: string
+            title: string
+            message: string
+          }>
+        }
       }
-    })
-    const forbidden = new Map<string, [number, number]>()
-    ;[
-      ...config.forbidden_slots.map((slot) => slot.split('-').map(Number) as [number, number]),
-      ...structuralForbidden,
-    ].forEach((slot) => forbidden.set(`${slot[0]}-${slot[1]}`, slot))
-    return {
-      academic_year: academicYear,
-      term,
-      days: ruleGrid.days,
-      periods_per_day: ruleGrid.periods_per_day,
-      enable_evening: ruleGrid.enable_evening,
-      evening_start_period: ruleGrid.evening_start_period,
-      evening_daily_periods_odd: ruleGrid.evening_daily_periods_odd,
-      evening_daily_periods_even: ruleGrid.evening_daily_periods_even,
-      evening_subject_ids: ruleGrid.evening_subject_ids,
-      evening_subject_ids_odd: ruleGrid.evening_subject_ids_odd,
-      evening_subject_ids_even: ruleGrid.evening_subject_ids_even,
-      forbidden_slots: [...forbidden.values()],
-      strategy_codes: strategyCodes,
+      const failures = detail.rule_validation?.results?.filter(
+        (item) => item.priority === 'hard' && ['fail', 'unresolved', 'not_run'].includes(item.status),
+      ) || []
+      if (failures.length) {
+        const names = failures.slice(0, 3).map((item) => `${item.title}（${item.message}）`).join('；')
+        const suffix = failures.length > 3 ? `；另有 ${failures.length - 3} 条` : ''
+        return `${typeof detail.message === 'string' ? detail.message : '规则校验未通过'}：${names}${suffix}`
+      }
+      if (typeof detail.message === 'string') return detail.message
+    } catch {
+      // 普通 API 错误不需要额外解析。
     }
+    return fallback
   }
 
   const payloadSignature = () => JSON.stringify(generationPayload())
@@ -563,13 +371,15 @@ export default function SchedulingView() {
   }
 
   const loadResources = async () => {
-    const [data, strategyOptions, academicSettings] = await Promise.all([
+    const [data, strategyOptions, academicSettings, gradeList] = await Promise.all([
       schedulingApi.resources(),
       schedulingApi.strategies(),
       authApi.academicYears(),
+      orgApi.grades().catch(() => [] as Grade[]),
     ])
     setResources(data)
     setStrategies(strategyOptions)
+    setGrades(gradeList)
     if (academicSettings.current_academic_year) setAcademicYear(academicSettings.current_academic_year)
     if (academicSettings.current_term) setTerm(academicSettings.current_term)
     setSelectedClassId((prev) => prev ?? data.classes[0]?.id)
@@ -742,15 +552,39 @@ export default function SchedulingView() {
   }
 
   const loadTable = async () => {
-    if (!selectedClassId) return
+    const classIds = resources.classes.map((item) => item.id)
+    if (!classIds.length) {
+      setCalendar([])
+      return
+    }
+    const primaryId = selectedClassId ?? classIds[0]
     if (!generating) setLoading(true)
     try {
-      const c = await schedulingApi.weekly({
-        class_id: selectedClassId,
+      // 先拉当前班，避免 N 个并行 weekly 任一失败就整页 Network Error
+      const primary = await schedulingApi.weekly({
+        class_id: primaryId,
         academic_year: academicYear,
         term,
       })
-      setCalendar(c)
+      setCalendar(primary)
+      if (!generating) setLoading(false)
+
+      const rest = classIds.filter((id) => id !== primaryId)
+      if (!rest.length) return
+      const settled = await Promise.allSettled(
+        rest.map((classId) =>
+          schedulingApi.weekly({
+            class_id: classId,
+            academic_year: academicYear,
+            term,
+          }),
+        ),
+      )
+      const extras = settled.flatMap((result) => (result.status === 'fulfilled' ? result.value : []))
+      setCalendar((prev) => {
+        const keep = prev.filter((entry) => entry.class_id === primaryId)
+        return [...keep, ...extras]
+      })
     } catch (e) {
       message.error(e instanceof Error ? e.message : '课表加载失败')
     } finally {
@@ -764,6 +598,9 @@ export default function SchedulingView() {
     setAdjustmentOptions([])
     setSubstituteOptions([])
     setAdjustmentTab('move')
+    setAdjustConfirmOpen(false)
+    setAdjustPreview(null)
+    setAcknowledgedChecks({})
     setAdjustmentLoading(true)
     try {
       const rule = ruleGridConfig(activeRuleTemplate?.config || conditions)
@@ -807,23 +644,70 @@ export default function SchedulingView() {
     }
   }
 
-  const moveEntry = async (option: ScheduleAdjustmentOption) => {
-    if (!adjustmentEntry || !option.available) return
-    setMovingSchedule(true)
+  const openAdjustConfirm = async (option: ScheduleAdjustmentOption) => {
+    if (!adjustmentEntry || option.selectable === false) return
+    setAdjustPreviewLoading(true)
+    setAdjustConfirmOpen(true)
+    setAdjustPreview(null)
+    setAcknowledgedChecks({})
     try {
       const rule = ruleGridConfig(activeRuleTemplate?.config || conditions)
-      await schedulingApi.moveSchedule({
+      const preview = await schedulingApi.previewAdjustment({
         schedule_id: adjustmentEntry.id,
         target_weekday: option.weekday,
         target_period: option.period,
+        target_week_parity: option.week_parity,
         academic_year: academicYear,
         term,
         days: rule.days,
         periods_per_day: rule.periods_per_day,
       })
+      setAdjustPreview(preview)
+      // 系统判定「通过」的默认打勾；「未通过」仍需用户手动点成 √
+      setAcknowledgedChecks(
+        Object.fromEntries(
+          (preview.checks || []).map((item) => [item.key, Boolean(item.passed)]),
+        ),
+      )
+    } catch (error) {
+      setAdjustConfirmOpen(false)
+      message.error(error instanceof Error ? error.message : '检查项加载失败')
+    } finally {
+      setAdjustPreviewLoading(false)
+    }
+  }
+
+  const allChecksAcknowledged = Boolean(
+    adjustPreview
+    && (
+      !(adjustPreview.checks?.length)
+        ? true
+        : adjustPreview.checks.every((item) => acknowledgedChecks[item.key])
+    ),
+  )
+
+  const confirmMoveEntry = async () => {
+    if (!adjustmentEntry || !adjustPreview || !allChecksAcknowledged) return
+    setMovingSchedule(true)
+    try {
+      const rule = ruleGridConfig(activeRuleTemplate?.config || conditions)
+      const result = await schedulingApi.moveSchedule({
+        schedule_id: adjustmentEntry.id,
+        target_weekday: adjustPreview.weekday,
+        target_period: adjustPreview.period,
+        target_week_parity: adjustPreview.week_parity,
+        academic_year: academicYear,
+        term,
+        days: rule.days,
+        periods_per_day: rule.periods_per_day,
+        force: true,
+      })
+      setAdjustConfirmOpen(false)
+      setAdjustPreview(null)
       setAdjustmentEntry(undefined)
       await loadTable()
-      message.success('调课成功')
+      const swapped = result.mode === 'swap'
+      message.success(swapped ? '对调成功' : '调课成功')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '调课失败')
     } finally {
@@ -832,13 +716,18 @@ export default function SchedulingView() {
   }
 
   const saveGridConfig = async () => {
+    setSavingGridConfig(true)
     try {
-      const saved = await schedulingApi.saveGridConfig({ ...gridConfig, academic_year: academicYear, term })
-      setGridConfig(saved)
+      const payload = normalizeGridConfig(gridConfig)
+      const saved = await schedulingApi.saveGridConfig({ ...payload, academic_year: academicYear, term })
+      setGridConfig(normalizeGridConfig({ ...saved, configured: true }))
+      setGridConfigured(true)
       setGridConfigVisible(false)
-      message.success('排课周格已保存')
+      message.success('课位结构已保存')
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '排课周格保存失败')
+      message.error(error instanceof Error ? error.message : '课位结构保存失败')
+    } finally {
+      setSavingGridConfig(false)
     }
   }
 
@@ -861,20 +750,24 @@ export default function SchedulingView() {
   }, [])
 
   useEffect(() => {
-    if (selectedClassId !== undefined) void loadTable()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedClassId, academicYear, term, weekStart])
-
-  useEffect(() => {
     void schedulingApi.gridConfig({ academic_year: academicYear, term })
-      .then(setGridConfig)
+      .then((config) => {
+        setGridConfig(normalizeGridConfig(config))
+        setGridConfigured(Boolean(config.configured))
+        if (!config.configured) setActiveTab('slots')
+      })
       .catch(() => undefined)
   }, [academicYear, term])
 
   useEffect(() => {
-    if (activeTab === 'schedule') void loadVersions()
+    if (activeTab !== 'schedule') return
+    if (selectedClassId === undefined && resources.classes[0]?.id != null) {
+      setSelectedClassId(resources.classes[0].id)
+    }
+    void loadVersions()
+    void loadTable()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab])
+  }, [activeTab, academicYear, term, weekStart, resources.classes.length])
 
   const updateConditions = (next: ScheduleRuleConfig) => {
     setConditions(next)
@@ -894,11 +787,11 @@ export default function SchedulingView() {
     try {
       const signature = payloadSignature()
       const savedGrid = await schedulingApi.saveGridConfig({
-        ...ruleGridConfig(conditions),
+        ...normalizeGridConfig(ruleGridConfig(conditions)),
         academic_year: academicYear,
         term,
       })
-      setGridConfig(savedGrid)
+      setGridConfig(normalizeGridConfig(savedGrid))
       const result = await schedulingApi.validate(generationPayload())
       setValidation(result)
       setValidatedSignature(signature)
@@ -927,16 +820,106 @@ export default function SchedulingView() {
     }
   }
 
-  const generateAll = async () => {
+  const classesForGrade = (gradeId: number | null | undefined) => {
+    if (gradeId == null) return []
+    const target = Number(gradeId)
+    if (!Number.isFinite(target)) return []
+    return resources.classes
+      .filter((item) => Number(item.grade_id) === target)
+      .map((item) => item.id)
+  }
+
+  const openDiagnosisDrawer = (diagnosis: GenerationDiagnosis | null = genDiagnosis) => {
+    if (diagnosis) setGenDiagnosis(diagnosis)
+    setDiagOpen(true)
+  }
+
+  const openRuleWorkbenchForGroup = (groupId?: string) => {
+    const id =
+      groupId ||
+      genDiagnosis?.rule_group_id ||
+      lastGenerateRef.current.ruleGroupId
+    setDiagOpen(false)
+    setActiveTab('rules')
+    if (id) setGenerationFocus({ groupId: id, token: Date.now() })
+  }
+
+  const generateAll = async (classIds?: number[], ruleGroupId?: string) => {
     const generationConfig = activeRuleTemplate?.config || conditions
+    lastGenerateRef.current = { classIds, ruleGroupId }
+    genWallClockRef.current = Date.now()
     setGenerating(true)
-    setGenStage('generating')
-    setFailedStageIndex(1)
+    setGenStage('validating')
+    setFailedStageIndex(0)
     setIssues([])
-    setGenSummary('正在生成课表')
+    setGenDiagnosis(null)
+    setGenTrace([])
+    setGenPercent(2)
+    setGenElapsed(0)
+    setGenSolutions(0)
+    setGenSummary('已提交生成任务，等待进度…')
+    setDiagOpen(true)
+    let streamedDiagnosis: GenerationDiagnosis | null = null
     try {
-      const payload = generationPayload(generationConfig)
-      const result = await schedulingApi.generate(payload)
+      const payload = {
+        ...generationPayload(generationConfig),
+        ...(classIds?.length ? { class_ids: classIds } : {}),
+        ...(ruleGroupId ? { rule_group_id: ruleGroupId } : {}),
+      }
+      const { job_id } = await schedulingApi.startGenerateJob(payload)
+      let result: {
+        created: number
+        class_count: number
+        unplaced?: Array<{ assignment_id: number; count: number }>
+      } | null = null
+      let jobError: unknown = null
+      await schedulingApi.streamGenerateJob(job_id, (event) => {
+        if (event.stage === 'validating' || event.stage === 'generating' || event.stage === 'refreshing' || event.stage === 'done') {
+          setGenStage(event.stage)
+          if (event.stage === 'validating') setFailedStageIndex(0)
+          if (event.stage === 'generating') setFailedStageIndex(1)
+          if (event.stage === 'refreshing') setFailedStageIndex(2)
+          if (event.stage === 'done') setFailedStageIndex(3)
+        }
+        if (event.message) setGenSummary(event.message)
+        if (typeof event.percent === 'number') setGenPercent(Math.max(0, Math.min(100, event.percent)))
+        if (typeof event.elapsed === 'number') {
+          setGenElapsed((prev) => Math.max(prev, event.elapsed as number))
+        }
+        if (typeof event.solutions === 'number') setGenSolutions(event.solutions)
+        if (event.type === 'progress' || event.type === 'error' || event.message) {
+          setGenTrace((prev) =>
+            appendGenTrace(prev, {
+              stage: event.stage,
+              phase: event.phase,
+              message: event.message,
+              percent: event.percent,
+              elapsed: event.elapsed,
+              solutions: event.solutions,
+            }),
+          )
+        }
+        if (event.type === 'done' && event.result) {
+          result = event.result
+          setGenPercent(100)
+        }
+        if (event.type === 'error') {
+          jobError =
+            event.detail && typeof event.detail === 'object'
+              ? event.detail
+              : { message: event.message || '生成失败' }
+          streamedDiagnosis = parseGenerationDiagnosis(jobError)
+          if (streamedDiagnosis) setGenDiagnosis(streamedDiagnosis)
+        }
+      })
+      if (jobError) {
+        throw new Error(
+          typeof jobError === 'string'
+            ? jobError
+            : JSON.stringify(jobError),
+        )
+      }
+      if (!result) throw new Error('生成任务未返回结果')
       setGenStage('refreshing')
       setFailedStageIndex(2)
       setGenSummary(`已生成 ${result.created} 节课，正在刷新周课表与日期课表`)
@@ -948,19 +931,73 @@ export default function SchedulingView() {
       if (unplaced) message.warning(`已生成 ${result.created} 节，另有 ${unplaced} 节未能排入`)
       else message.success(`已为 ${result.class_count} 个班生成 ${result.created} 节课程`)
       void loadVersions()
+      setDiagOpen(false)
     } catch (e) {
       setGenStage('error')
-      setGenSummary(e instanceof Error ? e.message : '生成课表失败')
-      message.error(e instanceof Error ? e.message : '生成课表失败')
+      const diagnosis = streamedDiagnosis || parseGenerationDiagnosis(e)
+      if (diagnosis) setGenDiagnosis(diagnosis)
+      const detail = formatGenerationError(e)
+      setGenSummary(detail)
+      message.error(detail)
+      openDiagnosisDrawer(diagnosis)
     } finally {
       setGenerating(false)
     }
   }
 
-  const openGenerationRulePreview = () => {
-    const config = activeRuleTemplate?.config || conditions
-    setConditions(JSON.parse(JSON.stringify(config)))
-    setGenerationRuleVisible(true)
+  const openVerifyWorkbench = () => {
+    if (!calendar.length) {
+      message.warning('请先生成课表后再做反向校验')
+      return
+    }
+    setVerifyVisible(true)
+  }
+
+  const openGenerationRulePreview = async () => {
+    try {
+      const gradeList = grades.length ? grades : await orgApi.grades().catch(() => [] as Grade[])
+      if (!grades.length && gradeList.length) setGrades(gradeList)
+      const catalog = await schedulingApi.ruleGroups({ academic_year: academicYear, term })
+      const options: RuleGroup[] = (catalog.groups || []).map((item) => {
+        const grade_id = item.grade_id != null ? Number(item.grade_id) : null
+        return {
+          id: item.id,
+          name: item.name,
+          grade_id,
+          scope: ruleGroupScopeLabel(
+            { grade_id, scope: '' },
+            gradeList,
+            resources.classes,
+          ),
+          term: `${item.academic_year} · 第${item.term}学期`,
+          rules: [],
+        }
+      })
+      if (!options.length) {
+        message.warning('请先在「建立规则」中新增综合规则（选择适用年级）')
+        return
+      }
+      setGenerateRuleOptions(options)
+      setSelectedGenerateRuleId(catalog.active_id || options[0]?.id)
+      setGenerationRuleVisible(true)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '加载综合规则失败，请检查后端服务')
+    }
+  }
+
+  const confirmGenerateByRule = async () => {
+    const group = generateRuleOptions.find((item) => item.id === selectedGenerateRuleId)
+    if (!group) {
+      message.warning('请选择要生成的综合规则（年级）')
+      return
+    }
+    const classIds = classesForGrade(group.grade_id)
+    if (!classIds.length) {
+      message.warning(`「${ruleGroupScopeLabel(group, grades, resources.classes)}」下没有可排课班级`)
+      return
+    }
+    setGenerationRuleVisible(false)
+    void generateAll(classIds, group.id)
   }
 
   const loadVersions = async () => {
@@ -969,8 +1006,12 @@ export default function SchedulingView() {
       const list = await schedulingApi.listVersions()
       setScheduleVersions(list || [])
     } catch (e) {
-      // 静默失败：版本列表不是核心功能
       setScheduleVersions([])
+      // 版本列表失败不阻断课表，但给出可读提示（避免误以为整页挂了）
+      const detail = e instanceof Error ? e.message : '课表版本加载失败'
+      if (detail === 'Network Error') {
+        message.warning('课表版本暂时无法连接后端，请确认服务已启动后刷新')
+      }
     } finally {
       setVersionsLoading(false)
     }
@@ -1142,16 +1183,7 @@ export default function SchedulingView() {
       <PageHeader
         title="排课管理"
         extra={
-          activeTab === 'rules' ? (
-            <Button
-              type="primary"
-              size="large"
-              icon={<Icon name="plus" size={14} />}
-              onClick={() => openRuleTemplateModal()}
-            >
-              新建规则
-            </Button>
-          ) : activeTab === 'assignments' ? (
+          activeTab === 'assignments' ? (
             <Button
               type="primary"
               size="large"
@@ -1175,33 +1207,106 @@ export default function SchedulingView() {
             <div>
               <strong>{genStateCopy}</strong>
               <span>{genSummary}</span>
+              {(generating || genPercent > 0) && (
+                <div className="sk-status-meta">
+                  <span>进度 {Math.round(genPercent)}%</span>
+                  <span>已用时 {Math.max(0, Math.floor(genElapsed))}s</span>
+                  {genSolutions > 0 ? <span>可行解 {genSolutions} 个</span> : null}
+                </div>
+              )}
             </div>
             {!generating && (
-              <Button type="link" size="small" onClick={() => setGenStage('idle')}>
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  setGenStage('idle')
+                  setGenDiagnosis(null)
+                  setGenTrace([])
+                }}
+              >
                 收起
               </Button>
             )}
+            {(generating || genStage === 'error') && (
+              <Button type="link" size="small" onClick={() => setDiagOpen(true)}>
+                排课诊断
+              </Button>
+            )}
           </div>
-          <div className="sk-track">
-            {GEN_STEPS.map((step, index) => (
-              <div
-                key={step.code}
-                className={[
-                  'sk-step',
-                  generating && genStepIndex === index ? 'active' : '',
-                  genStepIndex > index || genStage === 'done' ? 'done' : '',
-                  (genStage === 'blocked' || genStage === 'error') && genStepIndex === index
-                    ? 'failed'
-                    : '',
-                ]
-                  .filter(Boolean)
-                  .join(' ')}
+          {(generating || genStage === 'done' || genPercent > 0) && (
+            <Progress
+              className="sk-status-progress"
+              percent={Math.round(genPercent)}
+              status={
+                genStage === 'error' || genStage === 'blocked'
+                  ? 'exception'
+                  : genStage === 'done'
+                    ? 'success'
+                    : 'active'
+              }
+              showInfo
+              strokeColor={genStage === 'done' ? undefined : { from: '#4c6fff', to: '#7aa2ff' }}
+            />
+          )}
+          <ol className="sk-track" aria-label="生成进度">
+            {GEN_STEPS.map((step, index) => {
+              const isDone = genStage === 'done' || genStepIndex > index
+              const isActive =
+                generating &&
+                genStepIndex === index &&
+                genStage !== 'blocked' &&
+                genStage !== 'error'
+              const isFailed =
+                (genStage === 'blocked' || genStage === 'error') &&
+                genStepIndex === index
+              return (
+                <li
+                  key={step.code}
+                  className={[
+                    'sk-step',
+                    isActive ? 'active' : '',
+                    isDone ? 'done' : '',
+                    isFailed ? 'failed' : '',
+                  ]
+                    .filter(Boolean)
+                    .join(' ')}
+                >
+                  <div className="sk-step-node">
+                    <i aria-hidden="true">{isDone ? '✓' : ''}</i>
+                    {index < GEN_STEPS.length - 1 ? (
+                      <b
+                        className={[
+                          'sk-step-connector',
+                          isDone ? 'done' : '',
+                          isActive ? 'active' : '',
+                        ]
+                          .filter(Boolean)
+                          .join(' ')}
+                        aria-hidden="true"
+                      />
+                    ) : null}
+                  </div>
+                  <span>{step.label}</span>
+                </li>
+              )
+            })}
+          </ol>
+          {genStage === 'error' && (
+            <div className="sk-diagnosis">
+              <p className="sk-diagnosis-hint" style={{ marginTop: 0 }}>
+                {genDiagnosis?.stuck_label || '生成未完成。'}
+                详细过程与优化建议在右侧「排课诊断」中查看，改规则请进独立的规则工作台。
+              </p>
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => openDiagnosisDrawer(genDiagnosis)}
               >
-                <i aria-hidden="true" />
-                <span>{step.label}</span>
-              </div>
-            ))}
-          </div>
+                打开排课诊断
+              </Button>
+            </div>
+          )}
           {issues.length > 0 && (
             <ul className="sk-issues">
               {(showAllIssues ? issues : issues.slice(0, 8)).map((issue) => (
@@ -1229,48 +1334,10 @@ export default function SchedulingView() {
         </section>
       )}
 
-      <section className="sk-control">
-        <div className="sk-field">
-          <span>查看班级</span>
-          <Select
-            allowClear
-            value={selectedClassId}
-            onChange={(next) => {
-              setSelectedClassId(next)
-              if (next === undefined) {
-                setCalendar([])
-              }
-            }}
-            placeholder="全部班级"
-            className="sk-class-select"
-            style={{ width: 260 }}
-            popupMatchSelectWidth={300}
-            options={resources.classes.map(classOption)}
-          />
-        </div>
-        {activeTab === 'schedule' && (
-          <div className="sk-field">
-            <span>所在周</span>
-            <DatePicker
-              value={dayjs(weekStart)}
-              onChange={(d: Dayjs | null) => setWeekStart(d ? d.format('YYYY-MM-DD') : '')}
-              format="YYYY年MM月DD日"
-            />
-          </div>
-        )}
-        <span className="sk-note">
-          {resources.assignments.filter(
-            (item) => item.academic_year === academicYear && item.term === term,
-          ).length }{' '}
-          条任教关系
-          {' · '}{validationIsCurrent ? '规则已通过' : '规则待校验'}
-        </span>
-      </section>
-
       <Tabs
         className="sk-tabs"
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'hours' | 'rules' | 'assignments' | 'schedule')}
+        onChange={(key) => setActiveTab(key as 'hours' | 'slots' | 'rules' | 'assignments' | 'schedule')}
         items={[
           {
             key: 'hours',
@@ -1282,19 +1349,46 @@ export default function SchedulingView() {
                 academicYear={academicYear}
                 term={term}
                 classId={selectedClassId}
+                onClassChange={setSelectedClassId}
+                classOptions={resources.classes.map(classOption)}
+              />
+            ),
+          },
+          {
+            key: 'slots',
+            label: '课位结构',
+            children: (
+              <SlotStructurePanel
+                config={gridConfig}
+                academicYear={academicYear}
+                term={term}
+                saving={savingGridConfig}
+                onChange={setGridConfig}
+                onSave={() => void saveGridConfig()}
               />
             ),
           },
           {
             key: 'rules',
             label: '建立规则',
+            disabled: !gridConfigured,
             children: (
               <div className="st-rules">
+                <RuleGroupWorkbench
+                  slotOptions={configuredSlotOptions}
+                  academicYear={academicYear}
+                  term={term}
+                  resources={resources}
+                  grades={grades}
+                  openGroupRequest={generationFocus}
+                  catalogEpoch={ruleCatalogEpoch}
+                />
+                <div className="st-rules-legacy">
                 <TableCard>
                   <div className="zh-table-head">
                     <div className="zh-table-head-title">
                       <h2>排课规则模板</h2>
-                      <p>课时在“课时管理”按班级维护，排课时段在“周格设置”统一维护；这里仅配置负载上限、教师约束、禁排时段与策略组合。</p>
+                      <p>课时在“课时管理”按班级维护，课位在“课位结构”统一维护；这里仅配置负载上限、教师约束、禁排时段与策略组合。</p>
                     </div>
                     <div className="zh-table-head-right">
                       <div className="zh-info-chip">
@@ -1430,6 +1524,7 @@ export default function SchedulingView() {
                     }}
                   />
                 </TableCard>
+                </div>
               </div>
             ),
           },
@@ -1440,6 +1535,18 @@ export default function SchedulingView() {
               <section className="sk-assign">
                 <div className="zh-filter-row sk-assign-filters">
                   <div className="sk-assign-query">
+                    <Select
+                      allowClear
+                      value={selectedClassId}
+                      onChange={(next) => {
+                        setSelectedClassId(next)
+                        setAssignPage(1)
+                      }}
+                      placeholder="全部班级"
+                      style={{ width: 200 }}
+                      popupMatchSelectWidth={280}
+                      options={resources.classes.map(classOption)}
+                    />
                     <Input
                       className="sk-assignment-search"
                       value={assignKeyword}
@@ -1488,41 +1595,37 @@ export default function SchedulingView() {
           },
           {
             key: 'schedule',
-            label: '日课表',
+            label: '课表',
+            disabled: !gridConfigured,
             children: (
+              <div className="sk-schedule-workspace">
               <section className="sk-surface sk-schedule-surface">
                 <div className="sk-surface-head">
                   <div>
                     <div className="sk-surface-head-row">
-                      <span className="sk-class-pill">{selectedClassName}</span>
-                      <Tag color={activeRuleTemplate?.id?.startsWith('builtin-') ? 'blue' : 'green'}>
-                        规则：{activeRuleTemplate?.name || '—'}
-                      </Tag>
+                      <span className="sk-class-pill">{gradeScheduleLabel}</span>
                       <Tag color="purple">{academicYear} 学年 · 第 {term} 学期</Tag>
-                      <Tag color="default" style={{ whiteSpace: 'nowrap' }}>{weekStart} 所在周</Tag>
+                      <Tag color="default" style={{ whiteSpace: 'nowrap' }}>
+                        {resources.classes.length} 个班
+                      </Tag>
                     </div>
-                    <h2>{selectedClassName} · 日课表</h2>
+                    <h2>
+                      {selectedClassName === '全部班级'
+                        ? `${gradeScheduleLabel} · 年级日课表`
+                        : `${selectedClassName} · 日课表`}
+                    </h2>
                   </div>
                   <div className="sk-calendar-actions">
                     <Select
-                      style={{ width: 220 }}
-                      value={defaultRuleTemplateId || undefined}
-                      placeholder="选择启用模板"
-                      onChange={(v) => {
-                        const tpl = ruleTemplates.find(t => t.id === v)
-                        if (tpl) {
-                          // 切换下拉 = 开启该模板（其余自动停用），保持互斥
-                          setDefaultRuleTemplateId(tpl.id)
-                          persistRuleTemplates(ruleTemplates.map(t => t.id === tpl.id
-                            ? { ...t, enabled: true, updated_at: new Date().toISOString() }
-                            : { ...t, enabled: false }))
-                          void applyRuleTemplateAsConditions(tpl)
-                        }
-                      }}
-                      options={ruleTemplates.filter(t => t.enabled !== false).map(t => ({
-                        label: t.name + (defaultRuleTemplateId === t.id ? '（当前）' : ''),
-                        value: t.id,
-                      }))}
+                      showSearch
+                      optionFilterProp="label"
+                      value={selectedClassId}
+                      onChange={setSelectedClassId}
+                      placeholder="选择班级"
+                      className="sk-schedule-class-select"
+                      style={{ width: 200 }}
+                      popupMatchSelectWidth={260}
+                      options={resources.classes.map(classOption)}
                     />
                     <Dropdown
                       disabled={generating || scheduleVersions.length === 0}
@@ -1556,24 +1659,60 @@ export default function SchedulingView() {
                     <Button
                       type="primary"
                       loading={generating}
-                      disabled={generating}
+                      disabled={generating || !gridConfigured}
+                      title={!gridConfigured ? '请先在“课位结构”中生成并保存课位结构' : undefined}
                       icon={!generating ? <Icon name="sparkles" size={14} /> : undefined}
                       onClick={openGenerationRulePreview}
                     >
                       {generating ? '正在生成' : '生成课表'}
                     </Button>
-                    <Button onClick={() => setGridConfigVisible(true)}>周格设置</Button>
+                    <Button
+                      disabled={generating || calendar.length === 0}
+                      title={
+                        calendar.length === 0
+                          ? '请先生成课表后再做反向校验'
+                          : '打开工作台：选择综合规则后逐条校验课表'
+                      }
+                      onClick={openVerifyWorkbench}
+                    >
+                      结果反向校验
+                    </Button>
                     <Button onClick={() => window.print()}>
                       <Icon name="printer" size={14} />
                       打印
+                    </Button>
+                    <Button
+                      disabled={generating}
+                      title="选择班级或全部后导出课表"
+                      onClick={() => {
+                        if (!resources.classes.length) {
+                          message.warning('暂无班级可导出')
+                          return
+                        }
+                        if (calendar.length === 0) {
+                          message.warning('请先生成课表后再导出')
+                          return
+                        }
+                        setExportClassKey(selectedClassId ?? 'all')
+                        setExportSheets([
+                          'cover',
+                          'teacher_relation',
+                          'teacher_hours',
+                          'teacher_grid',
+                          'class_timetables',
+                        ])
+                        setExportModalOpen(true)
+                      }}
+                    >
+                      导出完整包
                     </Button>
                   </div>
                 </div>
                 <div className="sk-schedule-overview">
                   <div className="sk-schedule-overview-copy">
                     <span className="sk-schedule-overview-label">WEEKLY RHYTHM</span>
-                    <strong>本周课程节奏</strong>
-                    <span>按教学日查看课程分布，颜色仅用于快速识别学科类别。</span>
+                    <strong>班级课程节奏</strong>
+                    <span>生成按年级整批排课；这里下拉切换班级查看课表。</span>
                   </div>
                   <div className="sk-schedule-legend" aria-label="学科颜色图例">
                     <span><i className="sk-legend-swatch language" />语言</span>
@@ -1587,10 +1726,44 @@ export default function SchedulingView() {
                   <div className="sk-schedule-loading">
                     <EmptyState icon="calendar" title="课表加载中…" height={320} />
                   </div>
-                ) : (
-                  calendar.length ? (
+                ) : (() => {
+                  const viewClassId = selectedClassId ?? resources.classes[0]?.id
+                  const entries = viewClassId
+                    ? calendar.filter((item) => item.class_id === viewClassId)
+                    : []
+                  if (!viewClassId) {
+                    return (
+                      <EmptyState
+                        icon="calendar"
+                        title="暂无班级"
+                        desc="请先在组织架构中配置班级。"
+                        height={260}
+                      />
+                    )
+                  }
+                  if (!calendar.length) {
+                    return (
+                      <EmptyState
+                        icon="calendar"
+                        title={`${gradeScheduleLabel}还没有课表`}
+                        desc="点击「生成课表」按综合规则为年级一次性排课。"
+                        height={260}
+                      />
+                    )
+                  }
+                  if (!entries.length) {
+                    return (
+                      <EmptyState
+                        icon="calendar"
+                        title={`${selectedClassName}还没有课表`}
+                        desc="该班尚未排入课程，可切换其他班级查看，或重新生成课表。"
+                        height={260}
+                      />
+                    )
+                  }
+                  return (
                     <ScheduleGrid
-                      entries={calendar}
+                      entries={entries}
                       periods={gridConfig.periods_per_day}
                       days={gridConfig.days}
                       dailyPeriods={gridConfig.daily_periods}
@@ -1600,25 +1773,19 @@ export default function SchedulingView() {
                       weekStart={weekStart}
                       onLessonContextMenu={openAdjustment}
                     />
-                  ) : (
-                    <EmptyState
-                      icon="calendar"
-                      title="当前班级还没有课表"
-                      desc="请先配置任教关系并生成课表。"
-                      height={260}
-                    />
                   )
-                )}
+                })()}
               </section>
+              </div>
             ),
           },
         ].sort((left, right) => {
-          const order = ['hours', 'assignments', 'rules', 'schedule']
+          const order = ['hours', 'slots', 'assignments', 'rules', 'schedule']
           return order.indexOf(left.key) - order.indexOf(right.key)
         })}
       />
 
-      <Modal title="公共周格设置" open={gridConfigVisible} onCancel={() => setGridConfigVisible(false)} onOk={() => void saveGridConfig()} width={760}>
+      <Modal title="课位结构设置" open={gridConfigVisible} onCancel={() => setGridConfigVisible(false)} onOk={() => void saveGridConfig()} width={760}>
         <Form layout="vertical">
           <p style={{ color: '#667085', marginTop: 0 }}>逐日设置正式课节数。未启用的日期填 0；自动排课会把超过当日节数的时段视为禁排。</p>
           <div className="sk-weekday-period-grid">
@@ -1628,17 +1795,15 @@ export default function SchedulingView() {
                 <InputNumber min={0} max={12} value={gridConfig.daily_periods[index]} addonAfter="节" onChange={(v) => setGridConfig((current) => {
                   const dailyPeriods = [...current.daily_periods]
                   dailyPeriods[index] = v ?? 0
-                  const active = dailyPeriods.map((count, day) => count > 0 ? day + 1 : 0)
-                  return { ...current, daily_periods: dailyPeriods, days: Math.max(...active), periods_per_day: Math.max(...dailyPeriods) }
+                  return normalizeGridConfig({ ...current, daily_periods: dailyPeriods })
                 })} />
               </div>
             ))}
           </div>
           <Space size="large">
-            <Form.Item label="启用晚自习"><Switch checked={gridConfig.enable_evening} onChange={(v) => setGridConfig((x) => ({
+            <Form.Item label="启用晚自习"><Switch checked={gridConfig.enable_evening} onChange={(v) => setGridConfig((x) => normalizeGridConfig({
               ...x,
               enable_evening: v,
-              evening_start_period: null,
               evening_daily_periods_odd: v ? x.evening_daily_periods_odd : [0, 0, 0, 0, 0, 0, 0],
               evening_daily_periods_even: v ? x.evening_daily_periods_even : [0, 0, 0, 0, 0, 0, 0],
             }))} /></Form.Item>
@@ -1655,14 +1820,14 @@ export default function SchedulingView() {
                 {WEEKDAY_NAMES.slice(0, gridConfig.days).map((day, index) => <InputNumber key={day} aria-label={`${label}${day}晚自习节数`} min={0} max={1} value={gridConfig[field][index]} onChange={(v) => setGridConfig((current) => {
                   const profile = [...current[field]]
                   profile[index] = v ?? 0
-                  return { ...current, [field]: profile }
+                  return normalizeGridConfig({ ...current, [field]: profile })
                 })} />)}
                 <strong>{gridConfig[field].reduce((sum, count) => sum + count, 0)} 节</strong>
               </div>)}
             </div>
           </Form.Item>}
           {gridConfig.enable_evening && <div className="sk-grid-help sk-evening-business-note">
-            晚自习每天只有 1 节。请在“课时管理”中填写晚课 0、0.5 或 1：0.5 再选择单周或双周；生成课表时会自动带出对应任教关系中的坐班老师。未配置晚课的剩余格显示为自主学习。
+            晚自习每天只有 1 节。请在“课时管理”中填写晚课 0、0.5 或 1：1 为单双周同一科目不可拆开；0.5 再选择单周或双周，并与另一门 0.5 对课。各班晚课额度应排满一周 6 节，晚自习不排自主学习。
           </div>}
           <Form.Item label="学期首周周一"><DatePicker value={gridConfig.term_start_monday ? dayjs(gridConfig.term_start_monday) : null} onChange={(v) => setGridConfig((x) => ({ ...x, term_start_monday: v?.format('YYYY-MM-DD') ?? null }))} /></Form.Item>
         </Form>
@@ -2018,12 +2183,12 @@ export default function SchedulingView() {
             <div className="sk-template-editor-card">
             <div className="sk-template-source-note">
               <strong>科目课时已确定</strong>
-              <span>课时统一来自“课时管理”，排课时段统一来自“周格设置”；这里集中维护排课约束。</span>
+              <span>课时统一来自“课时管理”，课位统一来自“课位结构”；这里集中维护排课约束。</span>
             </div>
             <div className="sk-template-editor-head">
               <div>
                 <h3>模板规则内容</h3>
-                <p>模板只配置负载、完整度、教师约束、禁排与策略；科目课时和排课时段分别由“课时管理”“周格设置”维护。</p>
+                <p>模板只配置负载、完整度、教师约束、禁排与策略；科目课时和课位结构分别由“课时管理”“课位结构”维护。</p>
               </div>
               <Space>
                 <Button
@@ -2060,7 +2225,7 @@ export default function SchedulingView() {
             </dl>
           </div>
           <div className="sk-help">
-            <strong>使用流程：</strong>先在「周格设置」维护排课时段，再点「在规则设计器中编辑」设置约束并校验 → 「同步当前规则到模板」→ 「保存规则」。
+            <strong>使用流程：</strong>先在「课位结构」维护具体课位，再点「在规则设计器中编辑」设置约束并校验 → 「同步当前规则到模板」→ 「保存规则」。
           </div>
         </Form>
       </Modal>
@@ -2078,23 +2243,206 @@ export default function SchedulingView() {
         gridConfig={gridConfig}
       />
 
-      <RuleDesigner
+      <Modal
+        title="生成年级课表"
         open={generationRuleVisible}
-        value={activeRuleTemplate?.config || conditions}
-        strategies={strategies}
-        validation={null}
-        validating={false}
-        issueText={issueText}
-        onChange={() => undefined}
-        onValidate={() => undefined}
-        onClose={() => setGenerationRuleVisible(false)}
-        gridConfig={gridConfig}
-        readOnly
-        onConfirm={() => {
-          setGenerationRuleVisible(false)
-          void generateAll()
+        onCancel={() => setGenerationRuleVisible(false)}
+        onOk={() => void confirmGenerateByRule()}
+        okText="开始生成"
+        cancelText="取消"
+        confirmLoading={generating}
+        destroyOnClose
+        width={520}
+      >
+        <div className="sk-generate-rule-form">
+          <p>
+            选择一条综合规则即可确定生成年级。规则已关联高一/高二等组织范围，将为该年级全部班级一次性排课。
+          </p>
+          <label>
+            <span>综合规则 / 年级</span>
+            <Select
+              style={{ width: '100%' }}
+              value={selectedGenerateRuleId}
+              placeholder="请选择综合规则"
+              options={generateRuleOptions.map((item) => ({
+                value: item.id,
+                label: `${item.name}（${ruleGroupScopeLabel(item, grades, resources.classes)}）`,
+              }))}
+              onChange={setSelectedGenerateRuleId}
+            />
+          </label>
+          {selectedGenerateRuleId ? (
+            <small>
+              {(() => {
+                const group = generateRuleOptions.find((item) => item.id === selectedGenerateRuleId)
+                const ids = classesForGrade(group?.grade_id)
+                const names = resources.classes
+                  .filter((item) => ids.includes(item.id))
+                  .map((item) => item.name)
+                if (!ids.length) return '未匹配到班级，请确认综合规则已关联组织年级'
+                const preview = names.slice(0, 4).join('、')
+                const more = names.length > 4 ? ` 等 ${names.length} 个班` : `，共 ${names.length} 个班`
+                return `将生成：${preview}${more}`
+              })()}
+            </small>
+          ) : null}
+        </div>
+      </Modal>
+
+      <GenerationDiagnosisDrawer
+        open={diagOpen}
+        onClose={() => setDiagOpen(false)}
+        generation={{
+          generating,
+          stage: genStage,
+          percent: genPercent,
+          elapsed: genElapsed,
+          solutions: genSolutions,
+          summary: genSummary,
+          trace: genTrace,
+          diagnosis: genDiagnosis,
+          groupId:
+            genDiagnosis?.rule_group_id || lastGenerateRef.current.ruleGroupId,
         }}
+        academicYear={academicYear}
+        term={term}
+        onRetryGenerate={() => {
+          const { classIds, ruleGroupId } = lastGenerateRef.current
+          void generateAll(classIds, ruleGroupId)
+        }}
+        onGoHours={() => {
+          setDiagOpen(false)
+          setActiveTab('hours')
+        }}
+        onOpenRules={(groupId) => {
+          setDiagOpen(false)
+          openRuleWorkbenchForGroup(groupId)
+        }}
+        onSuggestionApplied={() => setRuleCatalogEpoch((n) => n + 1)}
       />
+
+      <ScheduleVerifyWorkbench
+        open={verifyVisible}
+        onClose={() => setVerifyVisible(false)}
+        academicYear={academicYear}
+        term={term}
+        classId={selectedClassId ?? resources.classes[0]?.id}
+        grades={grades}
+        classes={resources.classes}
+      />
+
+      <Modal
+        title="导出排课完整包"
+        open={exportModalOpen}
+        onCancel={() => !exportSubmitting && setExportModalOpen(false)}
+        okText="导出"
+        cancelText="取消"
+        confirmLoading={exportSubmitting}
+        centered
+        width={460}
+        destroyOnClose
+        onOk={async () => {
+          if (!exportSheets.length) {
+            message.warning('请至少勾选一种工作表')
+            return Promise.reject()
+          }
+          setExportSubmitting(true)
+          try {
+            const classIds = exportClassKey === 'all' ? null : [exportClassKey]
+            const scopeLabel = exportClassKey === 'all'
+              ? '全部班级'
+              : (resources.classes.find((item) => item.id === exportClassKey)?.name || '所选班级')
+            const job = await fileCenterApi.exportTimetable({
+              academic_year: academicYear,
+              term,
+              class_ids: classIds,
+              periods_per_day: gridConfig.periods_per_day,
+              evening_start_period: gridConfig.evening_start_period,
+              sheets: exportSheets,
+            })
+            setExportModalOpen(false)
+            setExportDoneInfo({
+              jobTypeLabel: job.job_type_label || '导出排课完整包',
+              directionLabel: '导出',
+              scope: job.scope || scopeLabel,
+              fileName: job.file_name || undefined,
+            })
+            setExportDoneOpen(true)
+          } catch (error) {
+            message.error(error instanceof Error ? error.message : '创建导出任务失败')
+            return Promise.reject()
+          } finally {
+            setExportSubmitting(false)
+          }
+        }}
+      >
+        <p className="sk-adjustment-hint" style={{ marginBottom: 12 }}>
+          先选班级范围，再勾选要打包的工作表，最后点「导出」。
+        </p>
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 6, color: '#64748b', fontSize: 13 }}>班级范围</div>
+          <Select
+            style={{ width: '100%' }}
+            value={exportClassKey}
+            onChange={(value) => setExportClassKey(value as number | 'all')}
+            options={[
+              { value: 'all', label: '全部' },
+              ...resources.classes.map(classOption),
+            ]}
+          />
+        </div>
+        <div>
+          <div style={{ marginBottom: 6, color: '#64748b', fontSize: 13 }}>包含工作表</div>
+          <Checkbox.Group
+            style={{ display: 'grid', gap: 8 }}
+            value={exportSheets}
+            onChange={(values) => setExportSheets(values as string[])}
+            options={[
+              { value: 'cover', label: '说明' },
+              { value: 'teacher_relation', label: '教师课时关系' },
+              { value: 'teacher_hours', label: '教师课时' },
+              { value: 'teacher_grid', label: '教师分课表' },
+              { value: 'class_timetables', label: '各班课表' },
+            ]}
+          />
+        </div>
+      </Modal>
+
+      <Modal
+        title="已提交到文件中心"
+        open={exportDoneOpen}
+        onCancel={() => setExportDoneOpen(false)}
+        centered
+        width={440}
+        destroyOnClose
+        footer={[
+          <Button key="stay" onClick={() => setExportDoneOpen(false)}>
+            稍后查看
+          </Button>,
+          <Button
+            key="go"
+            type="primary"
+            onClick={() => {
+              setExportDoneOpen(false)
+              navigate('/file-center')
+            }}
+          >
+            前往文件中心
+          </Button>,
+        ]}
+      >
+        <p className="sk-adjustment-hint" style={{ marginBottom: 12 }}>
+          任务已创建，可在文件中心查看进度并下载。
+        </p>
+        <div className="sk-export-done-meta">
+          <div><span>操作</span><strong>{exportDoneInfo?.directionLabel || '导出'}</strong></div>
+          <div><span>文件类型</span><strong>{exportDoneInfo?.jobTypeLabel || '导出排课完整包'}</strong></div>
+          <div><span>范围</span><strong>{exportDoneInfo?.scope || '—'}</strong></div>
+          {exportDoneInfo?.fileName ? (
+            <div><span>文件名</span><strong>{exportDoneInfo.fileName}</strong></div>
+          ) : null}
+        </div>
+      </Modal>
 
       <Modal
         title={adjustmentEntry ? `${adjustmentEntry.subject_name || '课程'} · ${adjustmentEntry.teacher_name || '未安排教师'} · 周${['一', '二', '三', '四', '五', '六', '日'][adjustmentEntry.weekday - 1]}第${adjustmentEntry.period}节` : '课程调整'}
@@ -2102,7 +2450,8 @@ export default function SchedulingView() {
         onCancel={() => setAdjustmentEntry(undefined)}
         footer={null}
         centered
-        width={620}
+        width={adjustmentTab === 'move' ? 860 : 560}
+        destroyOnClose
       >
         <div className="sk-adjustment-panel">
           <Tabs
@@ -2112,32 +2461,285 @@ export default function SchedulingView() {
               {
                 key: 'move',
                 label: '调课（换时段）',
-                children: (
-                  <>
-                    <p>仅显示当前课时之后的时段；灰色时段表示存在班级或教师冲突。</p>
-                    <div className="sk-adjustment-options">
-                      {adjustmentLoading ? <EmptyState icon="calendar" title="正在计算可调时段…" height={160} /> : adjustmentOptions.map((option) => (
-                        <Button
-                          key={`${option.weekday}-${option.period}`}
-                          disabled={!option.available || movingSchedule}
-                          loading={movingSchedule && option.available}
-                          onClick={() => void moveEntry(option)}
-                          className={!option.available ? 'is-unavailable' : ''}
+                children: (() => {
+                  const days = gridConfig.days || 6
+                  const eveningStart = gridConfig.enable_evening
+                    ? (gridConfig.evening_start_period ?? null)
+                    : null
+                  const dayColumns = days < 6
+                    ? Array.from({ length: days }, (_, index) => ({
+                        key: `d${index + 1}`,
+                        label: `周${['一', '二', '三', '四', '五', '六', '日'][index]}`,
+                        weekday: index + 1,
+                        parity: 'all' as const,
+                      }))
+                    : [
+                        ...[1, 2, 3, 4, 5].map((weekday) => ({
+                          key: `d${weekday}`,
+                          label: `周${['一', '二', '三', '四', '五'][weekday - 1]}`,
+                          weekday,
+                          parity: 'all' as const,
+                        })),
+                        { key: 'sat-odd', label: '单六', weekday: 6, parity: 'odd' as const },
+                        { key: 'sat-even', label: '双六', weekday: 6, parity: 'even' as const },
+                        ...(days >= 7
+                          ? [{ key: 'd7', label: '周日', weekday: 7, parity: 'all' as const }]
+                          : []),
+                      ]
+                  const daytimeEnd = eveningStart
+                    ? Math.max(0, eveningStart - 1)
+                    : (gridConfig.periods_per_day || 9)
+                  const daytimePeriods = Array.from(
+                    { length: daytimeEnd },
+                    (_, index) => index + 1,
+                  )
+                  const optionMap = new Map(
+                    adjustmentOptions.map((item) => [
+                      `${item.weekday}-${item.period}-${item.week_parity || 'all'}`,
+                      item,
+                    ] as const),
+                  )
+                  const sourceParity = (adjustmentEntry?.week_parity || 'all') as 'all' | 'odd' | 'even'
+                  const sourceIsSat = adjustmentEntry?.weekday === 6
+                  const sourceIsEvening = Boolean(
+                    eveningStart && adjustmentEntry && adjustmentEntry.period >= eveningStart,
+                  )
+                  const lookupOption = (
+                    weekday: number,
+                    period: number,
+                    columnParity: 'all' | 'odd' | 'even',
+                    rowParity?: 'odd' | 'even',
+                  ) => {
+                    if (rowParity) {
+                      // 晚自习：工作日按行单双；周六按列单六/双六（左右单双都可点）
+                      const parity = weekday === 6 && columnParity !== 'all'
+                        ? columnParity
+                        : rowParity
+                      return optionMap.get(`${weekday}-${period}-${parity}`)
+                        || optionMap.get(`${weekday}-${period}-all`)
+                    }
+                    if (columnParity === 'all') {
+                      return optionMap.get(`${weekday}-${period}-${sourceParity}`)
+                        || optionMap.get(`${weekday}-${period}-all`)
+                    }
+                    return optionMap.get(`${weekday}-${period}-${columnParity}`)
+                      || optionMap.get(`${weekday}-${period}-all`)
+                  }
+                  const currentKey = adjustmentEntry
+                    ? `${adjustmentEntry.weekday}-${adjustmentEntry.period}-${sourceParity}`
+                    : ''
+                  const renderCell = (
+                    option: ScheduleAdjustmentOption | undefined,
+                    key: string,
+                    columnParity?: 'all' | 'odd' | 'even',
+                    rowParity?: 'odd' | 'even',
+                  ) => {
+                    if (!option) {
+                      return <div key={key} className="sk-adj-cell is-empty" />
+                    }
+                    const optionParity = (option.week_parity || 'all') as 'all' | 'odd' | 'even'
+                    const optionKey = `${option.weekday}-${option.period}-${optionParity}`
+                    const sameSlot = Boolean(adjustmentEntry)
+                      && option.weekday === adjustmentEntry!.weekday
+                      && option.period === adjustmentEntry!.period
+                    // 整课/整晚：该节任一单双格都标当前；0.5 只标对应单双
+                    const isCurrent = sameSlot && (
+                      optionKey === currentKey
+                      || sourceParity === 'all'
+                      || (optionParity === 'all' && (
+                        columnParity === sourceParity
+                        || rowParity === sourceParity
+                        || columnParity === 'all'
+                        || !columnParity
+                      ))
+                    )
+                    const selectable = option.selectable !== false && !isCurrent
+                    const isSwap = option.mode === 'swap'
+                    const peerSubject = (option.swap_with_subject || '').trim()
+                    const peerTeacher = (option.swap_with_teacher || '').trim()
+                    const blockedAsCollision = /(会撞课|已有其他班)/.test(option.reason || '')
+                    let label: string
+                    if (isCurrent) {
+                      label = '当前'
+                    } else if (peerSubject && (isSwap || blockedAsCollision)) {
+                      if (!selectable && blockedAsCollision) label = `撞·${peerSubject}`
+                      else if (!selectable) label = '—'
+                      else if (option.available) label = peerSubject
+                      else label = `${peerSubject}?`
+                    } else if (!selectable) {
+                      label = blockedAsCollision ? '撞课' : '—'
+                    } else if (option.available) {
+                      label = isSwap ? '对调' : '可调'
+                    } else {
+                      label = isSwap ? '对调?' : '有风险'
+                    }
+                    const tip = option.reason
+                      || (peerSubject
+                        ? `与「${peerSubject}」${peerTeacher ? `（${peerTeacher}）` : ''}对调`
+                        : undefined)
+                    const cell = (
+                      <button
+                        type="button"
+                        className={[
+                          'sk-adj-cell',
+                          option.available && selectable && !isSwap ? 'is-available' : '',
+                          option.available && selectable && isSwap ? 'is-swap' : '',
+                          !option.available && selectable ? 'is-risky' : '',
+                          !selectable && blockedAsCollision ? 'is-collision' : '',
+                          !selectable && !blockedAsCollision && !isCurrent ? 'is-blocked' : '',
+                          isCurrent ? 'is-current' : '',
+                          peerSubject ? 'has-subject' : '',
+                        ].filter(Boolean).join(' ')}
+                        disabled={!selectable || movingSchedule || adjustPreviewLoading}
+                        onClick={() => void openAdjustConfirm({
+                          ...option,
+                          // 整课/整晚必须带 all，避免点单六列时被写成 odd 拆掉双六
+                          week_parity: sourceParity === 'all'
+                            ? 'all'
+                            : (option.week_parity || rowParity || columnParity || sourceParity),
+                        })}
+                      >
+                        {label}
+                      </button>
+                    )
+                    return tip ? (
+                      <Tooltip key={key} title={tip} placement="top">
+                        <span className="sk-adj-cell-wrap">{cell}</span>
+                      </Tooltip>
+                    ) : (
+                      <span key={key} className="sk-adj-cell-wrap">{cell}</span>
+                    )
+                  }
+                  const blockedOption = (
+                    weekday: number,
+                    period: number,
+                    parity: 'all' | 'odd' | 'even',
+                    reason: string,
+                  ): ScheduleAdjustmentOption => ({
+                    weekday,
+                    period,
+                    week_parity: parity,
+                    available: false,
+                    selectable: false,
+                    reason,
+                    mode: 'move',
+                    checks: [],
+                  })
+                  const renderDaytimeColumns = (period: number) => {
+                    const nodes: React.ReactNode[] = []
+                    for (const column of dayColumns) {
+                      const option = lookupOption(column.weekday, period, column.parity)
+                      if (option) {
+                        nodes.push(renderCell(option, `${column.key}-${period}`, column.parity))
+                        continue
+                      }
+                      let reason = '不在可调范围内'
+                      if (sourceIsSat && column.weekday <= 5) reason = '周六课不能调到工作日'
+                      else if (!sourceIsSat && column.weekday === 6) reason = '工作日课不能调到单六/双六'
+                      nodes.push(renderCell(
+                        blockedOption(
+                          column.weekday,
+                          period,
+                          column.parity === 'all' ? sourceParity : column.parity,
+                          reason,
+                        ),
+                        `${column.key}-${period}`,
+                        column.parity,
+                      ))
+                    }
+                    return nodes
+                  }
+                  const renderEveningColumns = (rowParity: 'odd' | 'even') => {
+                    const nodes: React.ReactNode[] = []
+                    for (const column of dayColumns) {
+                      // 周六晚：单六列只展示在单周行、双六列只展示在双周行，避免同一选项占两格
+                      if (
+                        column.weekday === 6
+                        && column.parity !== 'all'
+                        && column.parity !== rowParity
+                      ) {
+                        nodes.push(
+                          <div
+                            key={`evening-${rowParity}-${column.key}`}
+                            className="sk-adj-cell is-empty"
+                          />,
+                        )
+                        continue
+                      }
+                      const option = lookupOption(column.weekday, eveningStart!, column.parity, rowParity)
+                      if (option) {
+                        nodes.push(renderCell(
+                          option,
+                          `evening-${rowParity}-${column.key}`,
+                          column.parity,
+                          rowParity,
+                        ))
+                        continue
+                      }
+                      const blockParity = column.weekday === 6 && column.parity !== 'all'
+                        ? column.parity
+                        : rowParity
+                      nodes.push(renderCell(
+                        blockedOption(
+                          column.weekday,
+                          eveningStart!,
+                          blockParity,
+                          sourceIsEvening ? '不在可调范围内' : '晚自习不能与白天课对调',
+                        ),
+                        `evening-${rowParity}-${column.key}`,
+                        column.parity,
+                        rowParity,
+                      ))
+                    }
+                    return nodes
+                  }
+                  return (
+                    <>
+                      <p className="sk-adjustment-hint">
+                        整课（单双相同）两格一起动，不会拆成单侧。0.5 课时可在单六↔双六（或晚自习单↔双）间挪。点格子后右侧全部 √ 才能确认。
+                      </p>
+                      {adjustmentLoading ? (
+                        <EmptyState icon="calendar" title="正在计算可调时段…" height={160} />
+                      ) : adjustmentOptions.length === 0 ? (
+                        <EmptyState icon="calendar" title="没有可调时段" height={140} />
+                      ) : (
+                        <div
+                          className="sk-adjustment-grid"
+                          style={{ '--adj-days': dayColumns.length } as CSSProperties}
                         >
-                          周{['一', '二', '三', '四', '五', '六', '日'][option.weekday - 1]} · 第{option.period}节
-                          <span>{option.reason}</span>
-                        </Button>
-                      ))}
-                    </div>
-                  </>
-                ),
+                          <div className="sk-adj-corner">节次</div>
+                          {dayColumns.map((column) => (
+                            <div key={`head-${column.key}`} className="sk-adj-day-head">
+                              {column.label}
+                            </div>
+                          ))}
+                          {daytimePeriods.map((period) => [
+                            <div key={`period-${period}`} className="sk-adj-period">
+                              第{period}节
+                            </div>,
+                            ...renderDaytimeColumns(period),
+                          ])}
+                          {eveningStart
+                            ? (['odd', 'even'] as const).map((rowParity) => [
+                                <div key={`evening-${rowParity}`} className="sk-adj-period sk-adj-evening">
+                                  <strong>晚自习</strong>
+                                  <small>{rowParity === 'odd' ? '单周' : '双周'}</small>
+                                </div>,
+                                ...renderEveningColumns(rowParity),
+                              ])
+                            : null}
+                        </div>
+                      )}
+                    </>
+                  )
+                })(),
               },
               {
                 key: 'substitute',
                 label: '代课（换老师）',
                 children: (
                   <>
-                    <p>本学期教该学科、且此时段没课的老师；按当前周课时从少到多排列，适合病假、事假临时顶课。</p>
+                    <p className="sk-adjustment-hint">本学期教该学科、且此时段没课的老师；按当前周课时从少到多排列，适合病假、事假临时顶课。</p>
                     <div className="sk-adjustment-options">
                       {adjustmentLoading ? <EmptyState icon="user" title="正在查询可代课教师…" height={160} /> : substituteOptions.length === 0 ? (
                         <EmptyState icon="user" title="没有可代课的教师" desc="该学科没有其他任教教师" height={140} />
@@ -2160,6 +2762,74 @@ export default function SchedulingView() {
             ]}
           />
         </div>
+      </Modal>
+
+      <Modal
+        title={
+          adjustPreview?.mode === 'swap'
+            ? `确认对调 · 周${['一', '二', '三', '四', '五', '六', '日'][(adjustPreview.weekday || 1) - 1]}第${adjustPreview.period}节`
+            : adjustPreview
+              ? `确认调课 · 周${['一', '二', '三', '四', '五', '六', '日'][adjustPreview.weekday - 1]}第${adjustPreview.period}节`
+              : '确认调整'
+        }
+        open={adjustConfirmOpen}
+        onCancel={() => {
+          if (movingSchedule) return
+          setAdjustConfirmOpen(false)
+          setAdjustPreview(null)
+        }}
+        okText="确认调整"
+        cancelText="取消"
+        confirmLoading={movingSchedule}
+        okButtonProps={{ disabled: !allChecksAcknowledged || adjustPreviewLoading }}
+        onOk={() => void confirmMoveEntry()}
+        centered
+        width={560}
+        destroyOnClose
+      >
+        {adjustPreviewLoading || !adjustPreview ? (
+          <EmptyState icon="calendar" title="正在核对检查项…" height={160} />
+        ) : (
+          <div className="sk-adjust-check-panel">
+            <p className="sk-adjustment-hint">
+              {adjustPreview.mode === 'swap'
+                ? `将与「${adjustPreview.swap_with_subject || '对方课程'}」${adjustPreview.swap_with_teacher ? `（${adjustPreview.swap_with_teacher}）` : ''}对调。`
+                : '将挪到该空时段。'}
+              通过项已默认打勾；未通过项为后端按「调整后课表」校验出的新增问题，需手动点成 √ 后才能确认。
+            </p>
+            <ul className="sk-adjust-check-list">
+              {(adjustPreview.checks || []).map((item) => {
+                const acknowledged = Boolean(acknowledgedChecks[item.key])
+                return (
+                  <li key={item.key} className={item.passed ? 'is-pass' : 'is-fail'}>
+                    <div className="sk-adjust-check-main">
+                      <span className="sk-adjust-check-system" title={item.passed ? '系统判定通过' : '系统判定未通过'}>
+                        {item.passed ? '通过' : '未通过'}
+                      </span>
+                      <span className="sk-adjust-check-label">{item.label}</span>
+                    </div>
+                    <button
+                      type="button"
+                      className={`sk-adjust-ack${acknowledged ? ' is-on' : ''}`}
+                      onClick={() =>
+                        setAcknowledgedChecks((prev) => ({
+                          ...prev,
+                          [item.key]: !prev[item.key],
+                        }))
+                      }
+                      aria-label={acknowledged ? '已确认' : '点击确认为√'}
+                    >
+                      {acknowledged ? '√' : '✗'}
+                    </button>
+                  </li>
+                )
+              })}
+            </ul>
+            {!allChecksAcknowledged && (
+              <p className="sk-adjust-check-tip">还有未点成 √ 的项，确认按钮暂不可用。</p>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   )

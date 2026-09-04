@@ -10,7 +10,7 @@ from app.db.session import get_session
 from app.models.enums import BaseUserRole, UserStatus
 from app.models.org import User
 from app.models.rbac import Role, UserRole
-from app.services.staff_roles import ASSIGNABLE_STAFF_ROLES, normalize_staff_roles, replace_staff_roles
+from app.services.org.staff_roles import ASSIGNABLE_STAFF_ROLES, normalize_staff_roles, replace_staff_roles
 
 router = APIRouter(prefix="/staff", tags=["人员与权限"])
 

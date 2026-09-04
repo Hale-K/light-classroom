@@ -12,17 +12,36 @@ import {
   Tooltip,
 } from 'antd'
 import type { TableProps } from 'antd'
-import { teacherProfilesApi } from '@/api'
+import { schedulingApi, teacherProfilesApi } from '@/api'
 import TableCard from '@/components/TableCard'
 import ScheduleGrid from '@/components/ScheduleGrid'
 import type {
   ScheduleEntry,
+  SchedulingGridConfig,
   TeacherProfile,
   TeacherProfileClassSummary,
   TeacherProfileFiltersMeta,
   TeacherScheduleEntry,
 } from '@/types'
 import './index.css'
+
+function mapTeacherScheduleEntries(items: TeacherScheduleEntry[]): ScheduleEntry[] {
+  return (items || []).map((s) => ({
+    id: s.id,
+    class_id: s.class_id,
+    weekday: s.weekday,
+    period: s.period,
+    subject_id: s.subject_id,
+    teacher_id: s.teacher_id,
+    room: s.room,
+    academic_year: s.academic_year,
+    term: s.term,
+    week_parity: s.week_parity || 'all',
+    teacher_name: s.teacher_name,
+    subject_name: s.subject_name,
+    class_name: s.class_name,
+  }))
+}
 
 const WEEKDAY_COLORS: Record<string, string> = {
   语文: '#b91c1c',
@@ -73,11 +92,12 @@ export default function TeacherProfilesView() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(20)
 
-  // 教师个人课表弹窗
+  // 教师个人课表弹窗（与排课页同一套 ScheduleGrid + 课位结构）
   const [scheduleVisible, setScheduleVisible] = useState(false)
   const [scheduleTeacher, setScheduleTeacher] = useState<TeacherProfile | null>(null)
   const [scheduleLoading, setScheduleLoading] = useState(false)
   const [scheduleEntries, setScheduleEntries] = useState<ScheduleEntry[]>([])
+  const [scheduleGrid, setScheduleGrid] = useState<SchedulingGridConfig | null>(null)
 
   const loadMeta = async () => {
     setMetaLoading(true)
@@ -131,27 +151,20 @@ export default function TeacherProfilesView() {
     setScheduleVisible(true)
     setScheduleLoading(true)
     setScheduleEntries([])
+    setScheduleGrid(null)
+    const year = academicYear || filtersMeta?.defaults?.academic_year || ''
     try {
-      const result = await teacherProfilesApi.weeklySchedule(row.teacher_id, {
-        academic_year: academicYear || null,
-        term,
-      })
-      // 把 TeacherScheduleEntry[] → ScheduleEntry[]
-      const mapped: ScheduleEntry[] = (result.items || []).map((s: TeacherScheduleEntry) => ({
-        id: s.id,
-        class_id: s.class_id,
-        weekday: s.weekday,
-        period: s.period,
-        subject_id: s.subject_id,
-        teacher_id: s.teacher_id,
-        room: s.room,
-        academic_year: s.academic_year,
-        term: s.term,
-        teacher_name: s.teacher_name,
-        subject_name: s.subject_name,
-        class_name: s.class_name,
-      } as ScheduleEntry))
-      setScheduleEntries(mapped)
+      const [result, grid] = await Promise.all([
+        teacherProfilesApi.weeklySchedule(row.teacher_id, {
+          academic_year: year || null,
+          term,
+        }),
+        year
+          ? schedulingApi.gridConfig({ academic_year: year, term }).catch(() => null)
+          : Promise.resolve(null),
+      ])
+      setScheduleEntries(mapTeacherScheduleEntries(result.items || []))
+      setScheduleGrid(grid)
     } catch (e: any) {
       message.error(e?.message || '加载教师课表失败')
     } finally {
@@ -317,10 +330,7 @@ export default function TeacherProfilesView() {
   )
 
   const summary = useMemo(() => {
-    // —— 班级视角汇总（优先使用后端返回的 class_summary） ——
-    //    目标周课 = 筛选班级数 × 30（5天 × 6节/天）
-    //    已排课   = 这些班级的 Schedule 记录总数
-    // —— 回退逻辑（后端未返回 class_summary 时，保持旧的教师个人任教关系求和口径） ——
+    // 目标 / 已排均按课位结构折合周课时（含周六晚自习、单双周 0.5）
     let totalWeekly: number
     let totalSched: number
     let ratio: number
@@ -339,11 +349,11 @@ export default function TeacherProfilesView() {
     return { total: items.length, ht, totalWeekly, totalSched, ratio, classCount }
   }, [items, classSummary])
 
-  const schedulePeriods = useMemo(() => {
-    let p = 7
-    scheduleEntries.forEach((e) => { if (e.period > p) p = e.period })
-    return p
-  }, [scheduleEntries])
+  const schedulePeriods = scheduleGrid?.periods_per_day
+    || Math.max(7, ...scheduleEntries.map((e) => e.period), 7)
+  const scheduleDays = scheduleGrid?.days
+    || Math.max(5, ...scheduleEntries.map((e) => e.weekday), 5)
+  const showEvening = Boolean(scheduleGrid?.enable_evening)
 
   return (
     <div className="tp-page">
@@ -466,6 +476,7 @@ export default function TeacherProfilesView() {
       </TableCard>
 
       <Modal
+        className="tp-schedule-modal"
         title={
           <div className="tp-modal-title">
             <span className="tp-modal-teacher-name">
@@ -483,25 +494,44 @@ export default function TeacherProfilesView() {
         }
         open={scheduleVisible}
         onCancel={() => setScheduleVisible(false)}
-        footer={[
-          <Button key="close" onClick={() => setScheduleVisible(false)}>
-            关闭
-          </Button>,
-        ]}
-        width={1200}
+        footer={null}
+        width={1280}
         destroyOnClose
+        centered
       >
         {scheduleLoading ? (
-          <div style={{ padding: 80, textAlign: 'center', color: 'var(--text-3)' }}>
-            正在加载课表…
-          </div>
+          <div className="tp-schedule-empty">正在加载课表…</div>
         ) : scheduleEntries.length === 0 ? (
-          <div style={{ padding: 80, textAlign: 'center', color: 'var(--text-3)' }}>
-            暂无当周课表，请先生成排课。
-          </div>
+          <div className="tp-schedule-empty">暂无当周课表，请先生成排课。</div>
         ) : (
-          <div className="tp-modal-schedule">
-            <ScheduleGrid entries={scheduleEntries} periods={schedulePeriods} showClassName />
+          <div className="tp-schedule-surface">
+            <div className="tp-schedule-overview">
+              <div className="tp-schedule-overview-copy">
+                <span className="tp-schedule-overview-label">WEEKLY RHYTHM</span>
+                <strong>教师授课节奏</strong>
+                <span>
+                  {academicYear || '当前学年'} · 第{term}学期
+                  {showEvening ? ' · 含晚自习' : ''}
+                  {scheduleDays >= 6 ? ' · 含周六单双周' : ''}
+                </span>
+              </div>
+              <div className="tp-schedule-legend" aria-label="学科颜色图例">
+                <span><i className="tp-legend-swatch language" />语言</span>
+                <span><i className="tp-legend-swatch math" />数学</span>
+                <span><i className="tp-legend-swatch science" />理科</span>
+                <span><i className="tp-legend-swatch humanities" />文科</span>
+                <span><i className="tp-legend-swatch activity" />活动</span>
+              </div>
+            </div>
+            <ScheduleGrid
+              entries={scheduleEntries}
+              periods={schedulePeriods}
+              days={scheduleDays}
+              dailyPeriods={scheduleGrid?.daily_periods}
+              showEvening={showEvening}
+              eveningStartPeriod={scheduleGrid?.evening_start_period}
+              showClassName
+            />
           </div>
         )}
       </Modal>

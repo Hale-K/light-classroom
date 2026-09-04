@@ -15,8 +15,8 @@ export default function TableCard({ children, title, extra }: TableCardProps) {
       title={title}
       extra={extra}
       styles={{
-        body: { padding: 16 },
-        header: title ? { borderBottom: '1px solid var(--border)' } : undefined,
+        body: { padding: title ? 10 : 12 },
+        header: title ? { borderBottom: '1px solid var(--border)', minHeight: 44, padding: '0 12px' } : undefined,
       }}
     >
       {children}

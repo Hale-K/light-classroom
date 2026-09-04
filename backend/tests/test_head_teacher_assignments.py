@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.head_teacher_assignments import summarize_head_teacher_assignment
+from app.services.academic.head_teacher import summarize_head_teacher_assignment
 
 
 def test_head_teacher_can_be_preassigned_before_teaching_relationship_exists():

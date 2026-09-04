@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.student_import import context_from_config, normalize_gender
+from app.services.academic.student_import import context_from_config, normalize_gender
 
 
 def test_student_import_uses_configured_current_context():

@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from app.api.v1.admin import SchoolCreate
 from app.api.v1.gaokao import _resolve_scheme_mode
-from app.services.menu import build_menu
+from app.services.rbac import MENU_PERMISSION_SEED, build_menu, seed_menu_items
 
 
 def school_payload(**overrides):
@@ -45,8 +45,9 @@ def test_new_cohort_inherits_school_mode_and_existing_cohort_keeps_snapshot():
 
 
 def test_menu_capabilities_follow_school_gaokao_mode():
-    new_groups = build_menu("director", "3+1+2")
-    traditional_groups = build_menu("director", "traditional")
+    items = seed_menu_items()
+    new_groups = build_menu("director", "3+1+2", menu_items=items)
+    traditional_groups = build_menu("director", "traditional", menu_items=items)
     new_items = {item["key"] for group in new_groups for item in group["children"]}
     traditional_items = {item["key"] for group in traditional_groups for item in group["children"]}
 
@@ -80,8 +81,7 @@ def test_menu_capabilities_follow_school_gaokao_mode():
         "dashboard",
         "settings", "subjects",
         "staff-accounts",
-        "roles",
-        "permissions",
+        "rbac",
         "facilities",
         "students",
         "teacher-profiles",
@@ -101,12 +101,12 @@ def test_menu_capabilities_follow_school_gaokao_mode():
     assert "scheduling" in traditional_items
     assert all(item["available"] for group in new_groups for item in group["children"])
     assert {
-        "students", "classes", "staff-accounts", "roles", "permissions", "settings", "subjects"
+        "students", "classes", "staff-accounts", "rbac", "settings", "subjects"
     }.issubset(new_items)
 
 
 def test_academic_director_gets_teaching_management_but_not_school_admin_menus():
-    groups = build_menu("academic_director", "3+1+2")
+    groups = build_menu("academic_director", "3+1+2", menu_items=seed_menu_items())
     items = {item["key"] for group in groups for item in group["children"]}
 
     assert {"classes", "scheduling", "subjects", "gaokao", "exam-scheduling"}.issubset(items)

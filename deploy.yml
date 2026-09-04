@@ -1,0 +1,27 @@
+# Deploy 部署声明 —— light-classroom（智衡课堂）
+# 规范见 Deploy 面板 SPEC.md；本文件是该规范的参考实现：
+#   web：React 19 + Vite 前端（frontend-react，构建产物 dist）
+#   api：FastAPI 后端（backend，自带 docker-compose 全家桶：api/worker/postgres/redis/...）
+# 前端以 /api/v1 相对路径调后端，发布时自动反代到宿主 8000 端口。
+
+name: light-classroom
+
+# 部署专用的环境配置：上传为 backend/.env（容器名互连版，见 .env.deploy 内注释）
+env:
+  file: backend/.env.deploy
+
+services:
+  - name: web
+    type: web
+    dir: frontend-react
+    build: pnpm run build
+    out: dist
+    proxy:
+      /api/v1: 8000
+
+  - name: api
+    type: docker
+    dir: backend
+    # 部署专用编排：去掉 Kafka/Zookeeper（代码未使用，省 ~1.5G 内存）
+    compose: docker-compose.deploy.yml
+    port: 8000

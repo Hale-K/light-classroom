@@ -10,7 +10,7 @@ from sqlalchemy import JSON, UniqueConstraint
 
 from app.db.base import TimestampMixin, TenantMixin
 from app.models.enums import (
-    BaseUserRole, CheckInMethod, CheckInStatus, EnrollmentStatus,
+    BaseUserRole, CheckInMethod, CheckInStatus, EnrollmentStatus, EveningParity,
     Gender, SeatLayout, SeatRule, SeatStatus, StudentStatus, TenantType, UserStatus, WeekParity,
 )
 
@@ -36,7 +36,8 @@ class TenantConfig(SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     tenant_id: int = Field(index=True)
     config_key: str = Field(max_length=50, description="配置键 school_name/logo/print_template...")
-    config_value: dict | None = Field(default=None, sa_type=JSON, description="配置值(json)")
+    # 可为对象或数组（如 scheduling_version_history 存 list）
+    config_value: dict | list | None = Field(default=None, sa_type=JSON, description="配置值(json)")
     updated_by: int | None = Field(default=None)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -196,7 +197,7 @@ class TeachingAssignment(TenantMixin, SQLModel, table=True):
     class_id: int = Field(index=True, foreign_key="class.id", ondelete="RESTRICT")
     academic_year: str = Field(max_length=20, description="如 2026-2027")
     term: str = Field(default="1", max_length=20)
-    weekly_periods: float = Field(default=4, ge=0.5, le=20)
+    weekly_periods: float = Field(default=4, ge=0, le=20)
     room: str | None = Field(default=None, max_length=50)
 
 
@@ -217,10 +218,15 @@ class CourseHourPlan(TenantMixin, SQLModel, table=True):
     term: str = Field(default="1", max_length=20, index=True)
     weekday_periods: float = Field(default=4, ge=0, le=20, description="周一至周五课时")
     saturday_periods: float = Field(default=0, ge=0, le=10, description="周六课时")
-    weekly_periods: float = Field(default=4, ge=0.5, le=20)
+    weekly_periods: float = Field(default=4, ge=0, le=20)
     week_parity: WeekParity = Field(default=WeekParity.all, max_length=10, index=True, description="每周/单周/双周")
     evening_periods_odd: int = Field(default=0, ge=0, le=1, description="单周晚自习节数")
     evening_periods_even: int = Field(default=0, ge=0, le=1, description="双周晚自习节数")
+    evening_parity: EveningParity = Field(
+        default=EveningParity.all,
+        max_length=10,
+        description="晚课周次：每周/单周/双周/无规定",
+    )
 
 
 class KnowledgePoint(SQLModel, table=True):

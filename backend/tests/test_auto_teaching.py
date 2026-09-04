@@ -1,4 +1,4 @@
-from app.services.auto_teaching import (
+from app.services.academic.auto_teaching import (
     TeacherScopeRule,
     apply_subject_periods,
     assignments_outside_rebuild_scope,

@@ -1,0 +1,167 @@
+"""新环境空库初始化种子（bootstrap）。
+
+用途：
+- 仅当 permission / menu 等表为空时，由 ensure_* 写入一遍；
+- 已有数据后不会覆盖管理台或库里的调整。
+
+日常请求路径只读数据库，不读本文件。
+部署时也可用 Alembic 数据迁移 c3d4e5f6a7b8 落同样的初始数据；
+本文件保留，方便本地/新库在未跑迁移时也能启动。
+"""
+
+# (module, name, code)
+PERMISSION_SEED: list[tuple[str, str, str]] = [
+    ("工作台", "查看工作台", "dashboard:view"),
+    ("试卷库", "查看试卷", "paper:view"),
+    ("试卷库", "新建/编辑试卷", "paper:write"),
+    ("试卷库", "发布试卷", "paper:publish"),
+    ("试卷库", "删除试卷", "paper:delete"),
+    ("扫描进卷", "查看扫描批次", "scan:view"),
+    ("扫描进卷", "上传扫描件", "scan:upload"),
+    ("扫描进卷", "切分/分配/确认批次", "scan:process"),
+    ("排课管理", "查看课表与任教关系", "scheduling:view"),
+    ("排课管理", "配置任教关系", "scheduling:assign"),
+    ("排课管理", "生成课表", "scheduling:generate"),
+    ("文件中心", "查看文件中心", "file_center:view"),
+    ("班级排座", "查看座位表", "seating:view"),
+    ("班级排座", "建立规则并生成座位", "seating:manage"),
+    ("选科走班", "查看选科分布", "gaokao:view"),
+    ("选科走班", "生成教学班/课表", "gaokao:manage"),
+    ("学生档案", "查看学生名册", "students:view"),
+    ("学生档案", "新增/编辑/删除学生", "students:manage"),
+    ("教师档案", "查看教师档案", "teacher_profiles:view"),
+    ("行政班管理", "查看班级与名单", "classes:view"),
+    ("行政班管理", "调整班级与排座", "classes:manage"),
+    ("考试管理", "查看考试与场次", "exam:view"),
+    ("考试管理", "新建/编排考试", "exam:manage"),
+    ("打分阅卷", "查看作答与成绩", "grading:view"),
+    ("打分阅卷", "录入/修改成绩", "grading:write"),
+    ("组织机构", "查看组织架构", "organization:view"),
+    ("组织机构", "维护组织与任命", "organization:manage"),
+    ("空间资源", "查看空间资源", "facilities:view"),
+    ("空间资源", "维护空间资源", "facilities:manage"),
+    ("人员与权限", "查看人员账号", "staff:view"),
+    ("人员与权限", "管理账号与状态", "staff:manage"),
+    ("人员与权限", "管理角色与权限", "rbac:manage"),
+    ("会议管理", "查看会议", "meetings:view"),
+    ("会议管理", "新建/编辑会议", "meetings:manage"),
+]
+
+# 菜单项种子：key, name, path, icon, sort, enabled, roles, capability, group_key, group_title, group_icon, group_sort
+# 侧栏仅 3 个分组：工作台 / 学籍教务 / 教学考试
+MENU_SEED: list[dict] = [
+    {"key": "dashboard", "name": "工作台", "path": "/dashboard", "icon": "dashboard", "sort": 10,
+     "enabled": True, "roles": [], "required_capability": None,
+     "group_key": "overview", "group_title": "工作台", "group_icon": "dashboard", "group_sort": 10},
+    {"key": "settings", "name": "系统设置", "path": "/settings", "icon": "settings", "sort": 10,
+     "enabled": True, "roles": ["director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "subjects", "name": "科目管理", "path": "/subjects", "icon": "book", "sort": 20,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "staff-accounts", "name": "人员账号", "path": "/staff", "icon": "users", "sort": 30,
+     "enabled": True, "roles": ["director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "rbac", "name": "角色与权限", "path": "/rbac", "icon": "shield", "sort": 40,
+     "enabled": True, "roles": ["director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "facilities", "name": "空间资源", "path": "/campus-buildings", "icon": "building", "sort": 50,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "students", "name": "学生档案", "path": "/students", "icon": "user", "sort": 60,
+     "enabled": True, "roles": [], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "teacher-profiles", "name": "教师档案", "path": "/teacher-profiles", "icon": "users", "sort": 70,
+     "enabled": True, "roles": [], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "classes", "name": "行政班管理", "path": "/classes", "icon": "grid", "sort": 80,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "gaokao", "name": "学生选课", "path": "/gaokao", "icon": "git-branch", "sort": 90,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": "walk_class",
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "stream-choice", "name": "文理分科", "path": "/gaokao", "icon": "git-branch", "sort": 100,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": "stream_choice",
+     "group_key": "school-affairs", "group_title": "学籍教务", "group_icon": "file-text", "group_sort": 20},
+    {"key": "scheduling", "name": "排课管理", "path": "/scheduling", "icon": "calendar", "sort": 10,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "file-center", "name": "文件中心", "path": "/file-center", "icon": "upload", "sort": 15,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "seating", "name": "班级排座", "path": "/seating", "icon": "grid", "sort": 20,
+     "enabled": True, "roles": [], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "exams", "name": "试卷库", "path": "/exams", "icon": "book", "sort": 30,
+     "enabled": True, "roles": [], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "exam-scheduling", "name": "排考管理", "path": "/exam-scheduling", "icon": "clipboard", "sort": 40,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "scans", "name": "扫描进卷", "path": "/scans", "icon": "scan", "sort": 50,
+     "enabled": True, "roles": [], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "meetings", "name": "会议管理", "path": "/meetings", "icon": "message", "sort": 60,
+     "enabled": True, "roles": ["director", "academic_director"], "required_capability": None,
+     "group_key": "teaching-exams", "group_title": "教学考试", "group_icon": "book", "group_sort": 30},
+    {"key": "chart", "name": "学情分析", "path": None, "icon": "chart", "sort": 10,
+     "enabled": False, "roles": [], "required_capability": None,
+     "group_key": "future", "group_title": "待开放", "group_icon": "sparkles", "group_sort": 100},
+    {"key": "practice", "name": "巩固训练", "path": None, "icon": "book", "sort": 20,
+     "enabled": False, "roles": [], "required_capability": None,
+     "group_key": "future", "group_title": "待开放", "group_icon": "sparkles", "group_sort": 100},
+    {"key": "ai", "name": "AI 押题", "path": None, "icon": "sparkles", "sort": 30,
+     "enabled": False, "roles": [], "required_capability": None,
+     "group_key": "future", "group_title": "待开放", "group_icon": "sparkles", "group_sort": 100},
+]
+
+# 菜单默认可见权限（menu_key → permission codes）；仅空映射时播种
+MENU_PERMISSION_SEED: dict[str, set[str]] = {
+    "dashboard": {"dashboard:view"},
+    "exams": {"paper:view", "exam:view"},
+    "scans": {"scan:view"},
+    "scheduling": {"scheduling:view"},
+    "file-center": {"file_center:view"},
+    "gaokao": {"gaokao:view"},
+    "stream-choice": {"gaokao:view"},
+    "exam-scheduling": {"exam:view"},
+    "seating": {"seating:view"},
+    "students": {"students:view"},
+    "teacher-profiles": {"teacher_profiles:view"},
+    "classes": {"classes:view"},
+    "organization": {"organization:view"},
+    "facilities": {"facilities:view"},
+    "subjects": {"scheduling:assign"},
+    "staff-accounts": {"staff:view"},
+    "rbac": {"rbac:manage"},
+    "meetings": {"meetings:view"},
+}
+
+BUILTIN_ROLE_SEED: tuple[tuple[str, str, str], ...] = (
+    ("school_admin", "校长管理员", "学校最高权限，可管理全部功能与人员权限"),
+    ("academic_director", "教导主任", "负责教学管理：排课、排考、选科与教学安排"),
+    ("head_teacher", "班主任", "负责行政班学生管理与班级排座"),
+    ("subject_teacher", "任教老师", "承担学科教学、建卷与阅卷任务"),
+)
+
+BUILTIN_ROLE_PERMISSION_SEED: dict[str, set[str]] = {
+    "school_admin": set(),  # 播种时填入库中全部权限点
+    "academic_director": {
+        "dashboard:view", "exam:view", "exam:manage", "grading:view", "grading:write",
+        "scan:view", "scan:process", "scheduling:view", "scheduling:assign", "scheduling:generate",
+        "file_center:view",
+        "seating:view", "seating:manage", "gaokao:view", "gaokao:manage",
+        "students:view", "teacher_profiles:view", "classes:view", "classes:manage",
+        "organization:view", "facilities:view", "facilities:manage",
+        "meetings:view", "meetings:manage",
+    },
+    "head_teacher": {
+        "dashboard:view", "exam:view", "grading:view", "scan:view",
+        "seating:view", "seating:manage", "students:view", "teacher_profiles:view",
+        "classes:view", "meetings:view",
+    },
+    "subject_teacher": {
+        "dashboard:view", "exam:view", "paper:view", "paper:write",
+        "scan:view", "scan:upload", "grading:view", "grading:write", "students:view",
+    },
+}

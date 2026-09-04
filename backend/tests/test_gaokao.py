@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.gaokao import (
+from app.services.academic.gaokao import (
     SubjectChoice,
     SubjectChoicePolicy,
     form_teaching_classes,

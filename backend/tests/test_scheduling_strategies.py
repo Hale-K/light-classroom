@@ -1,6 +1,6 @@
 import pytest
 
-from app.services.scheduling_strategies import (
+from app.services.scheduling.strategies import (
     CandidateContext,
     build_schedule_strategy,
     list_schedule_strategies,
@@ -18,6 +18,7 @@ def test_schedule_strategy_registry_exposes_teacher_selectable_options():
         "teacher_friendly",
         "resource_tight",
         "cross_class_gap_repair",
+        "slot_teacher_spread",
     ]
     assert all(option.name and option.description for option in options)
 

@@ -15,7 +15,7 @@ from sqlalchemy import event, select
 from sqlalchemy.orm import with_loader_criteria
 from loguru import logger
 from app.core.config import settings
-from app.services.tenant import resolve_tenant_id
+from app.services.org.tenant import resolve_tenant_id
 
 # ---------- 多租户上下文 ----------
 # ContextVar 携带当前请求的 tenant_id（由中间件从 X-School-Code 解析后写入）

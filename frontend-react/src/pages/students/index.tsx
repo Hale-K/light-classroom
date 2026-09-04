@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { App, Button, Dropdown, Form, Input, Modal, Progress, Select, Space, Table, Tabs, Tag } from 'antd'
-import { DownloadOutlined, ImportOutlined } from '@ant-design/icons'
+import { DownloadOutlined, ExportOutlined, ImportOutlined } from '@ant-design/icons'
 import type { TableProps } from 'antd'
-import { orgApi, organizationApi } from '@/api'
+import { fileCenterApi, orgApi, organizationApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import FilterCard from '@/components/FilterCard'
 import TableCard from '@/components/TableCard'
@@ -36,8 +37,11 @@ interface StudentFormValues {
   parent_phone?: string
 }
 
+type StudentExportKey = 'all' | 'unassigned' | `grade:${number}` | `class:${number}`
+
 export default function StudentsView() {
   const { message } = App.useApp()
+  const navigate = useNavigate()
   const [classes, setClasses] = useState<ClassInfo[]>([])
   const [grades, setGrades] = useState<Grade[]>([])
   const [students, setStudents] = useState<Student[]>([])
@@ -60,6 +64,16 @@ export default function StudentsView() {
   const [pageSize, setPageSize] = useState(10)
   const [form] = Form.useForm<StudentFormValues>()
   const formGradeId = Form.useWatch('grade_id', form)
+  const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [exportScopeKey, setExportScopeKey] = useState<StudentExportKey>('all')
+  const [exportSubmitting, setExportSubmitting] = useState(false)
+  const [exportDoneOpen, setExportDoneOpen] = useState(false)
+  const [exportDoneInfo, setExportDoneInfo] = useState<{
+    jobTypeLabel: string
+    directionLabel: string
+    scope: string
+    fileName?: string
+  } | null>(null)
   const [importOpen, setImportOpen] = useState(false)
   const [importType, setImportType] = useState<StudentImportType>('full')
   const [importFile, setImportFile] = useState<File | null>(null)
@@ -220,6 +234,56 @@ export default function StudentsView() {
     URL.revokeObjectURL(url)
   }
 
+  const exportScopeOptions = useMemo(
+    () => [
+      { value: 'all' as const, label: '全部学生' },
+      { value: 'unassigned' as const, label: '待分班' },
+      ...grades.map((grade) => ({ value: `grade:${grade.id}` as const, label: `年级 · ${grade.name}` })),
+      ...classes.map((item) => ({ value: `class:${item.id}` as const, label: `班级 · ${item.name}` })),
+    ],
+    [grades, classes],
+  )
+
+  const openExport = () => {
+    if (appliedClassFilter === 'unassigned') {
+      setExportScopeKey('unassigned')
+    } else if (typeof appliedClassFilter === 'number') {
+      setExportScopeKey(`class:${appliedClassFilter}`)
+    } else if (appliedGradeFilter) {
+      setExportScopeKey(`grade:${appliedGradeFilter}`)
+    } else {
+      setExportScopeKey('all')
+    }
+    setExportModalOpen(true)
+  }
+
+  const submitStudentExport = async () => {
+    setExportSubmitting(true)
+    try {
+      const payload = {
+        grade_id: exportScopeKey.startsWith('grade:') ? Number(exportScopeKey.slice(6)) : null,
+        class_id: exportScopeKey.startsWith('class:') ? Number(exportScopeKey.slice(6)) : null,
+        unassigned_only: exportScopeKey === 'unassigned',
+      }
+      const scopeLabel =
+        exportScopeOptions.find((item) => item.value === exportScopeKey)?.label || '全部学生'
+      const job = await fileCenterApi.exportStudents(payload)
+      setExportModalOpen(false)
+      setExportDoneInfo({
+        jobTypeLabel: job.job_type_label || '导出学生',
+        directionLabel: '导出',
+        scope: job.scope || scopeLabel,
+        fileName: job.file_name || undefined,
+      })
+      setExportDoneOpen(true)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '创建导出任务失败')
+      return Promise.reject()
+    } finally {
+      setExportSubmitting(false)
+    }
+  }
+
   const openImport = (type: StudentImportType) => {
     setImportType(type)
     setImportFile(null)
@@ -371,6 +435,7 @@ export default function StudentsView() {
             >
               <Button icon={<DownloadOutlined />}>模板下载</Button>
             </Dropdown>
+            <Button icon={<ExportOutlined />} onClick={openExport}>导出 Excel</Button>
             <Button icon={<ImportOutlined />} onClick={() => openImport('full')}>导入学生</Button>
             <Button type="primary" onClick={openCreate}>新增学生</Button>
           </Space>
@@ -570,6 +635,86 @@ export default function StudentsView() {
             </Form.Item>
           </div>
         </Form>
+      </Modal>
+
+      <Modal
+        title="导出学生档案"
+        open={exportModalOpen}
+        onCancel={() => !exportSubmitting && setExportModalOpen(false)}
+        okText="导出"
+        cancelText="取消"
+        confirmLoading={exportSubmitting}
+        centered
+        width={420}
+        destroyOnClose
+        onOk={() => submitStudentExport()}
+      >
+        <p className="zh-page-desc" style={{ marginBottom: 12 }}>
+          先选择导出范围（全部、待分班、年级或班级），再点「导出」。
+        </p>
+        <Select
+          style={{ width: '100%' }}
+          value={exportScopeKey}
+          onChange={(value) => setExportScopeKey(value as StudentExportKey)}
+          options={exportScopeOptions}
+        />
+      </Modal>
+
+      <Modal
+        title="已提交到文件中心"
+        open={exportDoneOpen}
+        onCancel={() => setExportDoneOpen(false)}
+        centered
+        width={440}
+        destroyOnClose
+        footer={[
+          <Button key="stay" onClick={() => setExportDoneOpen(false)}>
+            稍后查看
+          </Button>,
+          <Button
+            key="go"
+            type="primary"
+            onClick={() => {
+              setExportDoneOpen(false)
+              navigate('/file-center')
+            }}
+          >
+            前往文件中心
+          </Button>,
+        ]}
+      >
+        <p className="zh-page-desc" style={{ marginBottom: 12 }}>
+          任务已创建，可在文件中心查看进度并下载。
+        </p>
+        <div
+          style={{
+            display: 'grid',
+            gap: 10,
+            padding: '12px 14px',
+            border: '1px solid #e2e8f0',
+            borderRadius: 10,
+            background: '#f8fafc',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+            <span style={{ color: '#64748b' }}>操作</span>
+            <strong>{exportDoneInfo?.directionLabel || '导出'}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+            <span style={{ color: '#64748b' }}>文件类型</span>
+            <strong>{exportDoneInfo?.jobTypeLabel || '导出学生'}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+            <span style={{ color: '#64748b' }}>范围</span>
+            <strong>{exportDoneInfo?.scope || '—'}</strong>
+          </div>
+          {exportDoneInfo?.fileName ? (
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, fontSize: 13 }}>
+              <span style={{ color: '#64748b' }}>文件名</span>
+              <strong style={{ textAlign: 'right', wordBreak: 'break-all' }}>{exportDoneInfo.fileName}</strong>
+            </div>
+          ) : null}
+        </div>
       </Modal>
 
       <Modal

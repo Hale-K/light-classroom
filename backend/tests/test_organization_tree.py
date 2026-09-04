@@ -1,4 +1,4 @@
-from app.services.organization import build_organization_tree
+from app.services.org.organization import build_organization_tree
 
 
 def test_build_organization_tree_keeps_persisted_parent_child_structure():

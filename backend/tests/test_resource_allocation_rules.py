@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from app.api.v1.facilities import ResourceAllocationRuleIn
-from app.services.resource_allocation import room_matches_rule
+from app.services.facilities.allocation import room_matches_rule
 
 
 def test_rule_rejects_an_inverted_floor_range():

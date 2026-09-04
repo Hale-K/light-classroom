@@ -19,7 +19,7 @@ from app.models.gaokao import (
     TeachingClassStudent,
 )
 from app.models.org import Class, Grade, Student, Subject, TeachingAssignment, Tenant, User
-from app.services.gaokao import (
+from app.services.academic.gaokao import (
     SubjectChoice,
     SubjectChoicePolicy,
     form_teaching_classes,

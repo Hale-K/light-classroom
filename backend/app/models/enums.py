@@ -217,3 +217,11 @@ class WeekParity(str, Enum):
     all = "all"      # 每周都上
     odd = "odd"      # 单周
     even = "even"    # 双周
+
+
+class EveningParity(str, Enum):
+    """晚课 0.5 节的单双周：可指定，也可无规定由程序安排。"""
+    all = "all"          # 1 节：单双周都上
+    odd = "odd"          # 0.5 节：锁定单周
+    even = "even"        # 0.5 节：锁定双周
+    either = "either"    # 0.5 节：无规定，求解器任选单或双

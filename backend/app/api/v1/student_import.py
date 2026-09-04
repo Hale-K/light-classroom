@@ -15,8 +15,8 @@ from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import AsyncSessionLocal, get_session
 from app.models.enums import EnrollmentStatus, Gender
 from app.models.org import Class, EnrollmentBatch, Grade, Student, TenantConfig
-from app.services.student_grade_membership import sync_student_grade_membership
-from app.services.student_import import ImportContext, context_from_config, normalize_gender, parse_rows
+from app.services.academic.student_membership import sync_student_grade_membership
+from app.services.academic.student_import import ImportContext, context_from_config, normalize_gender, parse_rows
 
 router = APIRouter(prefix="/org/students/import", tags=["学生档案导入"])
 

@@ -1,4 +1,4 @@
-from app.services.cohort import cohort_labels_match, expected_cohort_label, normalize_cohort_label
+from app.services.org.cohort import cohort_labels_match, expected_cohort_label, normalize_cohort_label
 
 
 def test_expected_cohort_label_uses_entry_year_semantics():

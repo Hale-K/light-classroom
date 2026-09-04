@@ -2,6 +2,15 @@ import type { ScheduleEntry } from '@/types'
 
 const WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
+type DayParity = 'all' | 'odd' | 'even'
+
+interface DayColumn {
+  key: string
+  label: string
+  weekday: number
+  parity: DayParity
+}
+
 interface ScheduleGridProps {
   entries: ScheduleEntry[]
   periods?: number
@@ -10,10 +19,42 @@ interface ScheduleGridProps {
   showEvening?: boolean
   eveningStartPeriod?: number | null
   showClassName?: boolean
+  /** 高亮该教师的课（班主任看班级课表时标出「我的课」） */
+  highlightTeacherId?: number | null
   /** 表头附加日期列（排考/走班日历用） */
   dateMode?: boolean
   weekStart?: string
   onLessonContextMenu?: (entry: ScheduleEntry, event: React.MouseEvent<HTMLDivElement>) => void
+}
+
+/** days≥6 时：周一～周五 + 单六 + 双六（+ 周日若有）；否则保持原周一～N */
+function buildDayColumns(days: number): DayColumn[] {
+  if (days < 6) {
+    return Array.from({ length: days }, (_, index) => ({
+      key: `d${index + 1}`,
+      label: WEEKDAY_LABELS[index],
+      weekday: index + 1,
+      parity: 'all' as const,
+    }))
+  }
+  const cols: DayColumn[] = [1, 2, 3, 4, 5].map((weekday) => ({
+    key: `d${weekday}`,
+    label: WEEKDAY_LABELS[weekday - 1],
+    weekday,
+    parity: 'all' as const,
+  }))
+  cols.push({ key: 'sat-odd', label: '单六', weekday: 6, parity: 'odd' })
+  cols.push({ key: 'sat-even', label: '双六', weekday: 6, parity: 'even' })
+  if (days >= 7) {
+    cols.push({ key: 'd7', label: '周日', weekday: 7, parity: 'all' })
+  }
+  return cols
+}
+
+function matchesParity(entryParity: ScheduleEntry['week_parity'] | undefined, columnParity: DayParity) {
+  const parity = entryParity || 'all'
+  if (columnParity === 'all') return true
+  return parity === 'all' || parity === columnParity
 }
 
 /** 课表大表：节次 × 星期 网格，适配打印 */
@@ -25,6 +66,7 @@ export default function ScheduleGrid({
   showEvening = false,
   eveningStartPeriod,
   showClassName = false,
+  highlightTeacherId = null,
   dateMode = false,
   weekStart = '',
   onLessonContextMenu,
@@ -35,27 +77,43 @@ export default function ScheduleGrid({
     String(today.getMonth() + 1).padStart(2, '0'),
     String(today.getDate()).padStart(2, '0'),
   ].join('-')
-  const headers = WEEKDAY_LABELS.slice(0, days).map((label, index) => {
-    const weekday = index + 1
-    const item = entries.find((e) => e.weekday === weekday && e.lesson_date)
+  const todayWeekday = ((today.getDay() + 6) % 7) + 1
+  const dayColumns = buildDayColumns(days)
+
+  const headers = dayColumns.map((column) => {
+    const item = entries.find((e) => e.weekday === column.weekday && e.lesson_date)
     let date = item?.lesson_date
     if (!date && dateMode && weekStart) {
       const day = new Date(`${weekStart}T00:00:00`)
-      day.setDate(day.getDate() + index)
+      day.setDate(day.getDate() + (column.weekday - 1))
       date = [
         day.getFullYear(),
         String(day.getMonth() + 1).padStart(2, '0'),
         String(day.getDate()).padStart(2, '0'),
       ].join('-')
     }
-    return { label, date: date?.slice(5), fullDate: date }
+    return { ...column, date: date?.slice(5), fullDate: date }
   })
 
-  const lessons = (weekday: number, period: number) =>
-    entries.filter((e) => e.weekday === weekday && e.period === period)
-  const eveningLessons = (weekday: number) => entries.filter((e) => (
-    e.weekday === weekday && e.period >= (eveningStartPeriod ?? periods + 1)
-  ))
+  const lessons = (weekday: number, period: number, columnParity: DayParity) =>
+    entries.filter(
+      (e) =>
+        e.weekday === weekday
+        && e.period === period
+        && matchesParity(e.week_parity, columnParity),
+    )
+
+  const eveningLessons = (weekday: number, columnParity: DayParity, rowParity: 'odd' | 'even') => {
+    if (weekday === 6 && columnParity !== 'all' && columnParity !== rowParity) {
+      return []
+    }
+    return entries.filter((e) => (
+      e.weekday === weekday
+      && e.period >= (eveningStartPeriod ?? periods + 1)
+      && matchesParity(e.week_parity, rowParity)
+    ))
+  }
+
   const subjectTone = (subjectName: string) => {
     if (['语文', '英语'].includes(subjectName)) return 'language'
     if (subjectName === '数学') return 'math'
@@ -66,6 +124,16 @@ export default function ScheduleGrid({
     if (['自主学习', '不排课'].includes(subjectName)) return 'self-study'
     return 'default'
   }
+
+  const isMine = (entry: ScheduleEntry) =>
+    highlightTeacherId != null && entry.teacher_id === highlightTeacherId
+
+  const cellHighlightClass = (cellEntries: ScheduleEntry[]) => {
+    if (highlightTeacherId == null || cellEntries.length === 0) return ''
+    if (cellEntries.some(isMine)) return ' mine'
+    return ' other'
+  }
+
   const renderEntries = (cellEntries: ScheduleEntry[]) => {
     const ordered = [...cellEntries].sort((left, right) => {
       const parityOrder = { odd: 0, even: 1, all: 2 }
@@ -74,8 +142,10 @@ export default function ScheduleGrid({
     const tones = ordered.map((lesson) => subjectTone(lesson.subject_name || '未知学科'))
     const tone = tones.length > 1 ? 'multi' : tones[0] || 'default'
     const classNames = [...new Set(ordered.map((lesson) => lesson.class_name).filter(Boolean))]
+    const mine = ordered.some(isMine)
     return (
-      <div className={`st-lessons st-tone-${tone}`}>
+      <div className={`st-lessons st-tone-${tone}${mine ? ' is-mine' : ''}`}>
+        {mine && <span className="st-mine-badge" aria-label="我的课">我</span>}
         <div className="st-subject-line">
           {ordered.map((lesson, index) => {
             const subjectName = lesson.subject_name || '未知学科'
@@ -103,28 +173,31 @@ export default function ScheduleGrid({
   )
   headers.forEach((h) => {
     cells.push(
-      <div key={`head-${h.label}`} className={`st-day-head${h.fullDate === todayValue ? ' current' : ''}`}>
+      <div key={`head-${h.key}`} className={`st-day-head${h.fullDate === todayValue ? ' current' : ''}`}>
         <strong>{h.label}</strong>
         {dateMode && <small>{h.date || '—'}</small>}
       </div>,
     )
   })
+
   for (let period = 1; period <= periods; period += 1) {
     cells.push(
       <div key={`period-${period}`} className="st-period">
         <strong>第 {period} 节</strong>
       </div>,
     )
-    for (let weekday = 1; weekday <= days; weekday += 1) {
-      const cellEntries = lessons(weekday, period)
+    for (const column of dayColumns) {
+      const cellEntries = lessons(column.weekday, period, column.parity)
       const entry = cellEntries[0]
+      const dayCap = dailyPeriods?.[column.weekday - 1] ?? periods
+      const isTodayCol = column.weekday === todayWeekday && column.parity === 'all'
       cells.push(
         <div
-          key={`lesson-${weekday}-${period}`}
-          className={`st-lesson${entry ? ' filled' : ''}${dailyPeriods && period > (dailyPeriods[weekday - 1] ?? periods) ? ' unavailable' : ''}`}
+          key={`lesson-${column.key}-${period}`}
+          className={`st-lesson${entry ? ' filled' : ''}${dailyPeriods && period > dayCap ? ' unavailable' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
           onContextMenu={entry && onLessonContextMenu ? (event) => onLessonContextMenu(entry, event) : undefined}
         >
-          {dailyPeriods && period > (dailyPeriods[weekday - 1] ?? periods) ? (
+          {dailyPeriods && period > dayCap ? (
             <span className="st-unavailable-mark">不排课</span>
           ) : entry ? (
             renderEntries(cellEntries)
@@ -135,30 +208,47 @@ export default function ScheduleGrid({
       )
     }
   }
+
   if (showEvening) {
-    cells.push(
-      <div key="period-evening" className="st-period st-evening-period">
-        <strong>晚自习</strong>
-        <small>每天 1 节</small>
-      </div>,
-    )
-    for (let weekday = 1; weekday <= days; weekday += 1) {
-      const cellEntries = eveningLessons(weekday)
+    for (const row of [
+      { key: 'odd', label: '晚自习', sub: '单周', parity: 'odd' as const },
+      { key: 'even', label: '晚自习', sub: '双周', parity: 'even' as const },
+    ]) {
       cells.push(
-        <div key={`evening-${weekday}`} className={`st-lesson${cellEntries.length ? ' filled' : ''}`}>
-          {cellEntries.length ? (
-            renderEntries(cellEntries)
-          ) : (
-            <span className="st-empty-mark">—</span>
-          )}
+        <div key={`period-evening-${row.key}`} className="st-period st-evening-period">
+          <strong>{row.label}</strong>
+          <small>{row.sub}</small>
         </div>,
       )
+      for (const column of dayColumns) {
+        const cellEntries = eveningLessons(column.weekday, column.parity, row.parity)
+        const entry = cellEntries[0]
+        const isTodayCol = column.weekday === todayWeekday && column.parity === 'all'
+        cells.push(
+          <div
+            key={`evening-${row.key}-${column.key}`}
+            className={`st-lesson${cellEntries.length ? ' filled' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
+            onContextMenu={entry && onLessonContextMenu ? (event) => onLessonContextMenu(entry, event) : undefined}
+          >
+            {cellEntries.length ? (
+              renderEntries(cellEntries)
+            ) : (
+              <span className="st-empty-mark">—</span>
+            )}
+          </div>,
+        )
+      }
     }
   }
 
   return (
     <div className="schedule-table-wrap" role="region" aria-label="课程表" tabIndex={0}>
-      <div className="schedule-table" style={{ '--schedule-days': days } as React.CSSProperties}>{cells}</div>
+      <div
+        className="schedule-table"
+        style={{ '--schedule-days': dayColumns.length } as React.CSSProperties}
+      >
+        {cells}
+      </div>
     </div>
   )
 }

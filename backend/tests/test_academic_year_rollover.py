@@ -1,4 +1,4 @@
-from app.services.academic_year_rollover import (
+from app.services.academic.rollover import (
     build_rollover_plan,
     next_grade_level,
     promoted_class_name,

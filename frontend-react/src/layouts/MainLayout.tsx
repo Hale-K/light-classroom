@@ -1,5 +1,5 @@
 import { App, Dropdown } from 'antd'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '@/api'
 import Icon from '@/components/Icon'
@@ -7,6 +7,10 @@ import { routeTitle } from '@/router/meta'
 import { useAuthStore, selectDisplayName } from '@/store/auth'
 import { APP_NAME } from '@/types'
 import type { MenuNode } from '@/types'
+
+const MENU_GROUP_ORDER = ['overview', 'school-affairs', 'teaching-exams']
+const NAV_COLLAPSED_KEY = 'zh_nav_collapsed_groups'
+const EXAM_MODULE_PATHS = ['/exam-rooms', '/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling']
 
 /** 当前学年·学期（8 月前后切换） */
 function academicTerm(): string {
@@ -26,7 +30,31 @@ function roleLabel(user: { role?: string; roles?: string[] } | null): string {
   return '任教老师'
 }
 
-/** 学校端主布局：后端菜单分组侧栏 + 顶栏（面包屑/学期/账号） */
+function isNavItemActive(pathname: string, itemPath?: string | null): boolean {
+  if (!itemPath) return false
+  if (itemPath === '/exam-scheduling') {
+    return EXAM_MODULE_PATHS.some((path) => pathname.startsWith(path))
+  }
+  return pathname.startsWith(itemPath)
+}
+
+function readCollapsedGroups(): Set<string> {
+  try {
+    const raw = localStorage.getItem(NAV_COLLAPSED_KEY)
+    if (!raw) return new Set()
+    const parsed = JSON.parse(raw) as unknown
+    if (!Array.isArray(parsed)) return new Set()
+    return new Set(parsed.filter((item): item is string => typeof item === 'string'))
+  } catch {
+    return new Set()
+  }
+}
+
+function writeCollapsedGroups(collapsed: Set<string>) {
+  localStorage.setItem(NAV_COLLAPSED_KEY, JSON.stringify([...collapsed]))
+}
+
+/** 学校端主布局：3 组可折叠侧栏 + 顶栏 */
 export default function MainLayout() {
   const { modal } = App.useApp()
   const navigate = useNavigate()
@@ -35,6 +63,7 @@ export default function MainLayout() {
   const schoolCode = useAuthStore((s) => s.schoolCode)
   const logout = useAuthStore((s) => s.logout)
   const [menus, setMenus] = useState<MenuNode[]>([])
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => readCollapsedGroups())
   const [themeMode, setThemeMode] = useState<'minimal' | 'tech'>(() => {
     return localStorage.getItem('zh_theme') === 'tech' ? 'tech' : 'minimal'
   })
@@ -47,17 +76,48 @@ export default function MainLayout() {
   useEffect(() => {
     authApi
       .menus()
-        .then((res) => {
-          // 系统设置改为左下角入口，不再占用侧边菜单
-        const menuOrder = ['overview', 'school', 'staffing', 'resources', 'enrollment', 'placement', 'teaching', 'exams', 'collaboration']
+      .then((res) => {
         const orderedMenus = [...res.menus].sort((a, b) => {
-          const aIndex = menuOrder.indexOf(a.key)
-          const bIndex = menuOrder.indexOf(b.key)
-          return (aIndex === -1 ? menuOrder.length : aIndex) - (bIndex === -1 ? menuOrder.length : bIndex)
+          const aIndex = MENU_GROUP_ORDER.indexOf(a.key)
+          const bIndex = MENU_GROUP_ORDER.indexOf(b.key)
+          return (aIndex === -1 ? MENU_GROUP_ORDER.length : aIndex) - (bIndex === -1 ? MENU_GROUP_ORDER.length : bIndex)
         })
         setMenus(orderedMenus)
       })
       .catch(() => setMenus([]))
+  }, [])
+
+  const activeGroupKey = useMemo(() => {
+    for (const group of menus) {
+      if ((group.children || []).some((item) => isNavItemActive(location.pathname, item.path))) {
+        return group.key
+      }
+    }
+    return null
+  }, [location.pathname, menus])
+
+  useEffect(() => {
+    if (!activeGroupKey) return
+    setCollapsedGroups((prev) => {
+      if (!prev.has(activeGroupKey)) return prev
+      const next = new Set(prev)
+      next.delete(activeGroupKey)
+      writeCollapsedGroups(next)
+      return next
+    })
+  }, [activeGroupKey])
+
+  const toggleGroup = useCallback((groupKey: string) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev)
+      if (next.has(groupKey)) {
+        next.delete(groupKey)
+      } else {
+        next.add(groupKey)
+      }
+      writeCollapsedGroups(next)
+      return next
+    })
   }, [])
 
   const displayName = useMemo(() => selectDisplayName({ user } as never), [user])
@@ -99,36 +159,63 @@ export default function MainLayout() {
 
         <div className="menu-scroll">
           <nav className="nav" aria-label="主导航">
-            {menus.map((group) => (
-              <section key={group.key} className="nav-group">
-                <h2 className="nav-caption">
-                  <Icon name={group.icon} size={12} />
-                  <span>{group.title}</span>
-                </h2>
-                {(group.children || []).map((item) => {
-                  const examModulePaths = ['/exam-rooms', '/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling']
-                  const active = item.path === '/exam-scheduling'
-                    ? examModulePaths.some((path) => location.pathname.startsWith(path))
-                    : !!item.path && location.pathname.startsWith(item.path)
-                  const targetPath = item.path === '/exam-scheduling' ? '/exam-rooms' : item.path
-                  return (
-                    <button
-                      key={item.key}
-                      type="button"
-                      className={`nav-item${active ? ' active' : ''}`}
-                      disabled={!item.available}
-                      onClick={() => targetPath && item.available && navigate(targetPath)}
-                    >
-                      <span className="nav-icon-wrap">
-                        <Icon name={item.icon} size={17} />
-                      </span>
-                      <span className="nav-label">{item.title}</span>
-                      {!item.available && <span className="nav-lock">待开放</span>}
-                    </button>
-                  )
-                })}
-              </section>
-            ))}
+            {menus.map((group) => {
+              const children = group.children || []
+              if (children.length === 0) return null
+
+              const renderNavItem = (item: MenuNode) => {
+                const active = isNavItemActive(location.pathname, item.path)
+                const targetPath = item.path === '/exam-scheduling' ? '/exam-rooms' : item.path
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    className={`nav-item${active ? ' active' : ''}`}
+                    disabled={!item.available}
+                    onClick={() => targetPath && item.available && navigate(targetPath)}
+                  >
+                    <span className="nav-icon-wrap">
+                      <Icon name={item.icon} size={20} />
+                    </span>
+                    <span className="nav-label">{item.title}</span>
+                    {!item.available && <span className="nav-lock">待开放</span>}
+                  </button>
+                )
+              }
+
+              // 仅一项时不显示分组标题（避免「工作台」重复出现）
+              if (children.length === 1) {
+                return (
+                  <section key={group.key} className="nav-group nav-group-single">
+                    {renderNavItem(children[0])}
+                  </section>
+                )
+              }
+
+              const collapsed = collapsedGroups.has(group.key)
+              return (
+                <section
+                  key={group.key}
+                  className={`nav-group${collapsed ? ' is-collapsed' : ''}`}
+                >
+                  <button
+                    type="button"
+                    className="nav-group-head"
+                    aria-expanded={!collapsed}
+                    onClick={() => toggleGroup(group.key)}
+                  >
+                    <span className="nav-caption">
+                      <Icon name={group.icon} size={14} />
+                      <span>{group.title}</span>
+                    </span>
+                    <Icon name="chevron-down" size={14} className="nav-group-toggle" />
+                  </button>
+                  <div className="nav-group-body">
+                    {children.map((item) => renderNavItem(item))}
+                  </div>
+                </section>
+              )
+            })}
           </nav>
         </div>
 
@@ -185,7 +272,7 @@ export default function MainLayout() {
             type="button"
             className="theme-toggle"
             aria-label={themeMode === 'tech' ? '切换到极简主题' : '切换到科技主题'}
-            onClick={() => setThemeMode((current) => current === 'tech' ? 'minimal' : 'tech')}
+            onClick={() => setThemeMode((current) => (current === 'tech' ? 'minimal' : 'tech'))}
           >
             <Icon name={themeMode === 'tech' ? 'dashboard' : 'sparkles'} size={15} />
             <span>{themeMode === 'tech' ? '极简主题' : '科技主题'}</span>
@@ -198,9 +285,6 @@ export default function MainLayout() {
           </div>
         </main>
       </div>
-
-      {/* 左下角用户区已嵌入侧边栏 aside-bottom */}
-
     </div>
   )
 }

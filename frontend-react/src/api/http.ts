@@ -9,10 +9,12 @@ import type { ApiResponse } from '@/types'
 export class ApiError extends Error {
   code: number
   status: number
-  constructor(message: string, code = -1, status = 0) {
+  traceId?: string
+  constructor(message: string, code = -1, status = 0, traceId?: string) {
     super(message)
     this.code = code
     this.status = status
+    this.traceId = traceId
   }
 }
 
@@ -68,6 +70,23 @@ function isAdminUrl(url?: string): boolean {
   return !!url && url.startsWith('/admin')
 }
 
+function newTraceId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
+  }
+  return `${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`.slice(0, 16)
+}
+
+function readTraceId(headers?: AxiosResponse['headers'], body?: unknown): string | undefined {
+  const fromHeader = headers?.['x-trace-id'] || headers?.['X-Trace-Id']
+  if (typeof fromHeader === 'string' && fromHeader) return fromHeader
+  if (body && typeof body === 'object' && 'trace_id' in body) {
+    const value = (body as { trace_id?: unknown }).trace_id
+    if (typeof value === 'string' && value) return value
+  }
+  return undefined
+}
+
 function createHttp(baseURL: string): AxiosInstance {
   const http = axios.create({
     baseURL,
@@ -75,33 +94,39 @@ function createHttp(baseURL: string): AxiosInstance {
   })
 
   http.interceptors.request.use((config) => {
-    // 平台超管路由用独立令牌，与学校端令牌隔离
     const token = isAdminUrl(config.url) ? resolver.getAdminToken() : resolver.getToken()
     if (token) config.headers.Authorization = `Bearer ${token}`
     config.headers['X-School-Code'] = resolver.getSchoolCode()
+    config.headers['X-Trace-Id'] = newTraceId()
     return config
   })
 
   http.interceptors.response.use(
     (response: AxiosResponse<ApiResponse>) => {
       const body = response.data
-      // 非标准结构（如文件流）直接返回
       if (!body || typeof body !== 'object' || !('code' in body)) return response
       if (body.code === 0) return response
-      throw new ApiError(body.message || '请求失败', body.code, response.status)
+      const traceId = readTraceId(response.headers, body)
+      throw new ApiError(body.message || '请求失败', body.code, response.status, traceId)
     },
     (error) => {
       const status: number = error?.response?.status || 0
+      const traceId = readTraceId(error?.response?.headers, error?.response?.data)
+        || error?.config?.headers?.['X-Trace-Id']
       if (status === 401) {
         resolver.onUnauthorized()
-        throw new ApiError('登录已失效，请重新登录', 401, 401)
+        throw new ApiError('登录已失效，请重新登录', 401, 401, traceId)
       }
       const msg =
         normalizeErrorDetail(error?.response?.data?.detail) ||
         error?.response?.data?.message ||
         error.message ||
         '网络异常'
-      throw new ApiError(typeof msg === 'string' ? msg : JSON.stringify(msg), status, status)
+      const text = typeof msg === 'string' ? msg : JSON.stringify(msg)
+      if (import.meta.env.DEV && traceId) {
+        console.warn(`[api] ${error?.config?.method} ${error?.config?.url} traceId=${traceId}`)
+      }
+      throw new ApiError(text, status, status, traceId)
     },
   )
   return http
@@ -111,6 +136,33 @@ function createHttp(baseURL: string): AxiosInstance {
 const baseURL: string = import.meta.env?.VITE_API_BASE_URL || '/api/v1'
 
 export const http = createHttp(baseURL)
+
+export function getApiBaseURL(): string {
+  return baseURL
+}
+
+/**
+ * SSE 专用基址：开发期若走 Vite 代理，小块 event-stream 常被缓冲，
+ * 进度会卡在前几秒；改为直连后端，避免代理攒包。
+ */
+export function getSseApiBaseURL(): string {
+  const configured = import.meta.env?.VITE_API_BASE_URL as string | undefined
+  if (import.meta.env.DEV && (!configured || configured === '/api/v1')) {
+    const target = (import.meta.env.VITE_DEV_PROXY as string | undefined) || 'http://127.0.0.1:8001'
+    return `${String(target).replace(/\/$/, '')}/api/v1`
+  }
+  return baseURL
+}
+
+export function getAuthHeaders(): Record<string, string> {
+  const token = resolver.getToken()
+  const headers: Record<string, string> = {
+    'X-School-Code': resolver.getSchoolCode(),
+    'X-Trace-Id': newTraceId(),
+  }
+  if (token) headers.Authorization = `Bearer ${token}`
+  return headers
+}
 
 /** 统一解包：Axios 已拦截，data 即业务 data */
 export async function unwrap<T>(p: Promise<AxiosResponse<ApiResponse<T>>>): Promise<T> {

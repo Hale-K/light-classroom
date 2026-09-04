@@ -19,11 +19,14 @@ dependencies = [
     "bcrypt>=4.0.1",                     # 密码哈希
     # 异步任务
     "celery>=5.3.0",
+    "amqp>=5.2.0",
     "redis>=5.0.0",
     # 消息队列（Kafka 事件总线）
     "confluent-kafka>=2.3.0",
-    # 对象存储（腾讯云 COS）
+    # 对象存储（腾讯云 COS / MinIO）
     "cos-python-sdk-v5>=1.9.0",
+    "minio>=7.2.0",
+    "openpyxl>=3.1.0",
     # 监控埋点（Prometheus /metrics）
     "prometheus-fastapi-instrumentator>=7.0.0",
     # 数据库迁移

@@ -3,13 +3,17 @@ from time import perf_counter
 
 import pytest
 
+from app.models.enums import WeekParity
 from app.services.scheduling import (
     ExamRoomResource,
     arrange_students,
     arrange_exam_candidates,
     build_evening_study_items,
+    repair_evening_hard_constraints,
+    ScheduleItem,
     diagnose_staffing_gaps,
     expand_schedule,
+    filter_zero_hour_assignments,
     generate_exam_schedule,
     generate_schedule,
     normalize_exam_room_resources,
@@ -18,6 +22,44 @@ from app.services.scheduling import (
     resolve_exam_candidates,
     validate_schedule_requirements,
 )
+
+
+def test_zero_hour_assignments_are_excluded_but_evening_only_assignments_remain():
+    assignments = [
+        {
+            "id": 1,
+            "class_id": 1,
+            "subject_id": 10,
+            "teacher_id": 100,
+            "weekly_periods": 0.5,
+            "weekday_periods": 0,
+            "saturday_periods": 0,
+            "evening_periods_odd": 0,
+            "evening_periods_even": 0,
+        },
+        {
+            "id": 2,
+            "class_id": 1,
+            "subject_id": 11,
+            "teacher_id": 101,
+            "weekly_periods": 0.5,
+            "weekday_periods": 0,
+            "saturday_periods": 0,
+            "evening_periods_odd": 1,
+            "evening_periods_even": 0,
+        },
+        {
+            "id": 3,
+            "class_id": 1,
+            "subject_id": 12,
+            "teacher_id": 102,
+            "weekly_periods": 0,
+        },
+    ]
+
+    filtered = filter_zero_hour_assignments(assignments)
+
+    assert [item["id"] for item in filtered] == [2]
 
 
 def test_invigilator_pool_uses_all_active_teachers_but_excludes_school_admins():
@@ -122,16 +164,587 @@ def test_evening_study_items_use_course_hours_and_teaching_relations():
         first_evening_period=9,
         evening_daily_periods_odd=[1, 1, 0, 0, 0, 0, 0],
         evening_daily_periods_even=[1, 1, 0, 0, 0, 0, 0],
-        activity_subject_id=999,
     )
 
-    assert [
-        (item.week_parity.value, item.weekday, item.period, item.subject_id, item.teacher_id)
-        for item in items
-    ] == [
-        ("odd", 1, 9, 10, 1001), ("odd", 2, 9, 999, None),
-        ("even", 1, 9, 10, 1001), ("even", 2, 9, 20, 1002),
+    full = [i for i in items if i.subject_id == 10 and i.week_parity.value == "all"]
+    half = [i for i in items if i.subject_id == 20 and i.week_parity.value == "even"]
+    assert len(full) == 1 and full[0].teacher_id == 1001
+    assert len(half) == 1 and half[0].teacher_id == 1002
+    assert full[0].weekday != half[0].weekday or full[0].period != half[0].period
+    assert all(item.subject_id != 999 for item in items)
+
+
+def test_evening_cpsat_places_full_and_half_quotas_with_activity_fill():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 101,
+                "class_id": 1,
+                "subject_id": 10,
+                "teacher_id": 1001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+            {
+                "id": 102,
+                "class_id": 1,
+                "subject_id": 20,
+                "teacher_id": 1002,
+                "week_parity": "all",
+                "evening_periods_odd": 0,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 1, 0, 0, 0, 0, 0],
+        activity_subject_id=999,
+        r15_enabled=False,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    full = [i for i in result.items if i.subject_id == 10 and i.week_parity.value == "all"]
+    half = [i for i in result.items if i.subject_id == 20 and i.week_parity.value == "even"]
+    assert len(full) == 1 and full[0].teacher_id == 1001
+    assert len(half) == 1 and half[0].teacher_id == 1002
+    assert full[0].weekday != half[0].weekday or full[0].period != half[0].period
+    assert all(item.subject_id != 999 for item in result.items)
+
+
+def test_evening_cpsat_half_flex_lets_solver_pick_odd_or_even():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 1,
+                "class_id": 2,
+                "subject_id": 25,
+                "teacher_id": 716,
+                "week_parity": "odd",
+                "weekday_periods": 3.0,
+                "saturday_periods": 0.5,
+                "weekly_periods": 3.5,
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+                "evening_parity": "either",
+            },
+            {
+                "id": 2,
+                "class_id": 4,
+                "subject_id": 25,
+                "teacher_id": 716,
+                "week_parity": "even",
+                "weekday_periods": 3.0,
+                "saturday_periods": 0.5,
+                "weekly_periods": 3.5,
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+                "evening_parity": "either",
+            },
+        ],
+        class_ids=[2, 4],
+        first_evening_period=10,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        teacher_forbidden_slots={716: {(2, 10), (3, 10), (5, 10), (6, 10)}},
+        r15_enabled=False,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    items = [item for item in result.items if item.teacher_id == 716]
+    assert len(items) == 2
+    assert {item.weekday for item in items} <= {1, 4}
+    assert {item.week_parity for item in items} == {WeekParity.odd, WeekParity.even}
+
+
+def test_evening_cpsat_pairs_physics_and_history_in_either_orientation():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 1,
+                "class_id": 1,
+                "subject_id": 26,
+                "teacher_id": 100,
+                "week_parity": "all",
+                "weekday_periods": 3,
+                "saturday_periods": 1,
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+                "evening_parity": "either",
+            },
+            {
+                "id": 2,
+                "class_id": 1,
+                "subject_id": 32,
+                "teacher_id": 200,
+                "week_parity": "all",
+                "weekday_periods": 3,
+                "saturday_periods": 1,
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+                "evening_parity": "either",
+            },
+        ],
+        class_ids=[1],
+        first_evening_period=10,
+        evening_daily_periods_odd=[1, 0, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 0, 0, 0, 0, 0, 0],
+        parity_subject_pairs=[(26, 32)],
+        r15_enabled=False,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    placed = [(item.subject_id, item.week_parity, item.weekday) for item in result.items if item.subject_id in {26, 32}]
+    assert len(placed) == 2
+    assert {item.weekday for item in result.items if item.subject_id in {26, 32}} == {1}
+    parities = {item.subject_id: item.week_parity for item in result.items if item.subject_id in {26, 32}}
+    assert set(parities.values()) == {WeekParity.odd, WeekParity.even}
+
+
+def test_evening_cpsat_honors_head_teacher_pin_and_r15_cycle():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 1,
+                "class_id": 1,
+                "subject_id": 10,
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+            {
+                "id": 2,
+                "class_id": 2,
+                "subject_id": 10,
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[1, 2],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        activity_subject_id=999,
+        required_teacher_by_slot={(6, 9): {1: 7001}},
+        r15_exclude_subject_ids={999},
+        r15_enabled=True,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    from app.services.scheduling.rules import (
+        _sequence_follows_class_cycle,
+        _teacher_evening_class_sequence,
+    )
+
+    teacher_items = [i for i in result.items if i.teacher_id == 7001 and i.subject_id == 10]
+    seq = _teacher_evening_class_sequence(teacher_items, evening_start=9, exclude_subjects={999})
+    class_ids = {i.class_id for i in teacher_items}
+    assert any(i.class_id == 1 and i.weekday == 6 for i in teacher_items)
+    assert class_ids == {1, 2}
+    assert _sequence_follows_class_cycle(seq, class_ids)
+    assert all(item.subject_id != 999 for item in result.items)
+
+
+def test_evening_cpsat_pins_teacher_to_named_class_monday():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 1,
+                "class_id": 10,
+                "subject_id": 12,
+                "teacher_id": 695,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+            {
+                "id": 2,
+                "class_id": 7,
+                "subject_id": 12,
+                "teacher_id": 695,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[10, 7],
+        first_evening_period=10,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        required_teacher_by_slot={(1, 10): {10: 695}},
+        r15_enabled=False,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    monday_class10 = [
+        item for item in result.items
+        if item.class_id == 10 and item.weekday == 1 and item.period == 10
     ]
+    assert monday_class10
+    assert all(item.teacher_id == 695 for item in monday_class10)
+    class7_days = {item.weekday for item in result.items if item.class_id == 7}
+    assert class7_days and 1 not in class7_days
+
+
+def test_evening_cpsat_r15_allows_weekday_holes():
+    from app.services.scheduling.rules import (
+        _sequence_follows_class_cycle,
+        _teacher_evening_class_sequence,
+    )
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 1,
+                "class_id": 1,
+                "subject_id": 10,
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+            {
+                "id": 2,
+                "class_id": 2,
+                "subject_id": 10,
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[1, 2],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        teacher_forbidden_slots={
+            7001: {(2, 9), (4, 9), (5, 9), (6, 9)},
+        },
+        r15_enabled=True,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    teacher_items = [item for item in result.items if item.teacher_id == 7001]
+    days = sorted({item.weekday for item in teacher_items})
+    assert days == [1, 3]
+    seq = _teacher_evening_class_sequence(teacher_items, evening_start=9, exclude_subjects=set())
+    assert _sequence_follows_class_cycle(seq, {1, 2})
+
+
+def test_evening_cpsat_requires_monday_tuesday_cover_when_other_days_forbidden():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [
+            {
+                "id": 1,
+                "class_id": 1,
+                "subject_id": 10,
+                "teacher_id": 679,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+            {
+                "id": 2,
+                "class_id": 2,
+                "subject_id": 10,
+                "teacher_id": 679,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[1, 2],
+        first_evening_period=10,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        teacher_forbidden_slots={679: {(3, 10), (4, 10), (5, 10), (6, 10)}},
+        teacher_required_evening_weekdays={679: {1, 2}},
+        r15_enabled=False,
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    days = sorted({item.weekday for item in result.items if item.teacher_id == 679})
+    classes = {item.class_id for item in result.items if item.teacher_id == 679}
+    assert days == [1, 2]
+    assert classes == {1, 2}
+
+
+def test_evening_cpsat_requires_monday_thursday_for_four_flex_halves():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    assignments = [
+        {
+            "id": idx,
+            "class_id": cid,
+            "subject_id": 25,
+            "teacher_id": 716,
+            "week_parity": "all",
+            "evening_periods_odd": 1,
+            "evening_periods_even": 1,
+            "evening_parity": "either",
+        }
+        for idx, cid in enumerate((2, 4, 7, 10), start=1)
+    ]
+    result = generate_evening_schedule(
+        assignments,
+        class_ids=[2, 4, 7, 10],
+        first_evening_period=10,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        teacher_forbidden_slots={716: {(2, 10), (3, 10), (5, 10), (6, 10)}},
+        teacher_required_evening_weekdays={716: {1, 4}},
+        r15_enabled=True,
+        r15_exclude_teacher_ids={716},
+        max_time_seconds=5,
+    )
+    assert result.status in {"OPTIMAL", "FEASIBLE"}
+    items = [item for item in result.items if item.teacher_id == 716]
+    assert len(items) == 4
+    assert {item.weekday for item in items} == {1, 4}
+    by_day_parity = {(item.weekday, item.week_parity) for item in items}
+    assert by_day_parity == {
+        (1, WeekParity.odd), (1, WeekParity.even),
+        (4, WeekParity.odd), (4, WeekParity.even),
+    }
+
+
+def test_evening_cpsat_pin_without_subject_quota_is_infeasible():
+    from app.services.scheduling.evening_cpsat import generate_evening_schedule
+
+    result = generate_evening_schedule(
+        [{
+            "id": 1,
+            "class_id": 1,
+            "subject_id": 10,
+            "teacher_id": 1001,
+            "week_parity": "all",
+            "evening_periods_odd": 1,
+            "evening_periods_even": 1,
+        }],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[0, 0, 0, 0, 0, 1, 0],
+        evening_daily_periods_even=[0, 0, 0, 0, 0, 1, 0],
+        required_teacher_by_slot={(6, 9): {1: 7001}},
+        r15_enabled=False,
+        max_time_seconds=5,
+    )
+    assert result.status == "INFEASIBLE"
+
+
+def test_evening_slot_can_be_reserved_for_the_class_head_teacher():
+    with pytest.raises(ValueError, match="晚课 CP-SAT 无解"):
+        build_evening_study_items(
+            [{
+                "id": 103,
+                "class_id": 1,
+                "subject_id": 10,
+                "teacher_id": 1001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            }],
+            class_ids=[1],
+            first_evening_period=9,
+            evening_daily_periods_odd=[0, 0, 0, 0, 0, 1, 0],
+            evening_daily_periods_even=[0, 0, 0, 0, 0, 1, 0],
+            required_teacher_by_slot={(6, 9): {1: 7001}},
+        )
+
+
+def test_head_teacher_reserved_slot_consumes_own_subject_evening_quota():
+    """班主任晚课与学科晚课是同一角色：保留位落学科，不再另排一节。"""
+    items = build_evening_study_items(
+        [
+            {
+                "id": 103,
+                "class_id": 1,
+                "subject_id": 10,
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+            {
+                "id": 104,
+                "class_id": 2,
+                "subject_id": 10,
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[1, 2],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        activity_subject_id=999,
+        required_teacher_by_slot={(6, 9): {1: 7001}},
+        r15_enabled=True,
+    )
+
+    teacher_items = [
+        item for item in items
+        if item.teacher_id == 7001 and item.subject_id == 10
+    ]
+    assert any(item.class_id == 1 and item.weekday == 6 and item.week_parity.value == "all" for item in teacher_items)
+    class2 = [item for item in teacher_items if item.class_id == 2]
+    assert len(class2) == 1 and class2[0].week_parity.value == "all"
+    from app.services.scheduling.rules import (
+        _sequence_follows_class_cycle,
+        _teacher_evening_class_sequence,
+    )
+    seq = _teacher_evening_class_sequence(teacher_items, evening_start=9, exclude_subjects=set())
+    assert _sequence_follows_class_cycle(seq, {item.class_id for item in teacher_items})
+    assert not any(
+        item.class_id == 1 and item.weekday != 6 and item.teacher_id == 7001
+        for item in items
+    )
+
+
+def test_head_teacher_half_evening_pairs_with_parity_partner_on_reserved_slot():
+    """班主任每班仅 0.5 晚课：周六位落本科单腿，并对课另一科 0.5 拼同一格。"""
+    items = build_evening_study_items(
+        [
+            {
+                "id": 1,
+                "class_id": 1,
+                "subject_id": 10,  # 物理
+                "teacher_id": 7001,
+                "week_parity": "all",
+                "evening_periods_odd": 1,
+                "evening_periods_even": 0,
+            },
+            {
+                "id": 2,
+                "class_id": 1,
+                "subject_id": 20,  # 历史
+                "teacher_id": 8001,
+                "week_parity": "all",
+                "evening_periods_odd": 0,
+                "evening_periods_even": 1,
+            },
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        activity_subject_id=999,
+        required_teacher_by_slot={(6, 9): {1: 7001}},
+        parity_subject_pairs=[(10, 20)],
+    )
+
+    saturday = [
+        (item.subject_id, item.teacher_id, item.week_parity.value)
+        for item in items
+        if item.weekday == 6 and item.period == 9
+    ]
+    assert sorted(saturday) == [
+        (10, 7001, "odd"),
+        (20, 8001, "even"),
+    ]
+    # 额度已在周六消耗，工作日不应再出现这对物理/历史晚课
+    assert not any(
+        item.weekday != 6 and item.subject_id in {10, 20}
+        for item in items
+    )
+
+
+def test_generate_schedule_enforces_one_of_two_class_slot_patterns():
+    assignments = [{
+        "id": 801,
+        "class_id": 10,
+        "subject_id": 8,
+        "teacher_id": 7001,
+        "weekly_periods": 2,
+    }]
+    patterns = [{
+        "rule_id": "R08-02",
+        "target_type": "subject",
+        "target_ids": [8],
+        "alternatives": [
+            [
+                {"weekdays": [2], "periods": [3, 4], "count": 1},
+                {"weekdays": [4], "periods": [6, 7], "count": 1},
+            ],
+            [
+                {"weekdays": [2], "periods": [6, 7], "count": 1},
+                {"weekdays": [4], "periods": [3, 4], "count": 1},
+            ],
+        ],
+    }]
+
+    result = generate_schedule(
+        assignments,
+        days=5,
+        periods_per_day=7,
+        slot_patterns=patterns,
+        strategy_codes=["random_tiebreak"],
+        random_seed=4,
+    )
+
+    assert result.unplaced == []
+    assert {(item.weekday, item.period) for item in result.items} in ({
+        (2, 3), (4, 6),
+    }, {
+        (2, 4), (4, 6),
+    }, {
+        (2, 3), (4, 7),
+    }, {
+        (2, 4), (4, 7),
+    }, {
+        (2, 6), (4, 3),
+    }, {
+        (2, 6), (4, 4),
+    }, {
+        (2, 7), (4, 3),
+    }, {
+        (2, 7), (4, 4),
+    })
+
+
+def test_generate_schedule_preserves_locked_slots_and_fills_remaining_hours():
+    result = generate_schedule(
+        [{
+            "id": 901,
+            "class_id": 1,
+            "subject_id": 10,
+            "teacher_id": 100,
+            "weekly_periods": 2,
+        }],
+        days=2,
+        periods_per_day=2,
+        locked_items=[{
+            "assignment_id": 901,
+            "class_id": 1,
+            "subject_id": 10,
+            "teacher_id": 100,
+            "weekday": 1,
+            "period": 1,
+        }],
+    )
+
+    assert len(result.items) == 2
+    assert (1, 1) in {(item.weekday, item.period) for item in result.items}
+    assert len({(item.class_id, item.weekday, item.period) for item in result.items}) == 2
 
 
 def test_cross_class_gap_repair_relocates_a_teacher_blocker():
@@ -421,6 +1034,43 @@ def test_generate_schedule_respects_custom_forbidden_slots_and_daily_limit():
         for subject in (1, 2)
         for day in range(1, 6)
     )
+
+
+def test_generate_schedule_respects_teacher_specific_forbidden_slots():
+    result = generate_schedule(
+        [{"id": 1, "class_id": 1, "subject_id": 1, "teacher_id": 7, "weekly_periods": 6}],
+        days=6,
+        periods_per_day=8,
+        teacher_forbidden_slots={7: {
+            (1, 1), (1, 3), (1, 5),
+            (2, 1), (2, 5), (2, 7), (2, 8),
+            (3, 1), (3, 2), (3, 5),
+            (4, 1), (4, 5), (4, 6),
+            (5, 1), (5, 2), (5, 5),
+            (6, 1), (6, 3), (6, 5),
+        }},
+    )
+
+    assert result.unplaced == []
+    assert all(
+        (item.weekday, item.period) not in {
+            (1, 1), (1, 3), (1, 5), (2, 1), (2, 5), (2, 7), (2, 8),
+            (3, 1), (3, 2), (3, 5), (4, 1), (4, 5), (4, 6),
+            (5, 1), (5, 2), (5, 5), (6, 1), (6, 3), (6, 5),
+        }
+        for item in result.items
+    )
+
+
+def test_generate_schedule_never_puts_teacher_in_forbidden_first_period():
+    result = generate_schedule(
+        [{"id": 1, "class_id": 1, "subject_id": 5, "teacher_id": 701, "weekly_periods": 5}],
+        days=6,
+        periods_per_day=7,
+        teacher_forbidden_slots={701: {(day, 1) for day in range(1, 7)}},
+    )
+    assert result.unplaced == []
+    assert all(item.period != 1 for item in result.items if item.teacher_id == 701)
 
 
 def test_generate_schedule_handles_school_scale_without_timing_out():
@@ -773,3 +1423,418 @@ def test_resolve_312_exam_candidates_uses_grade_roster_and_confirmed_choices():
     assert result[101] == [1, 2, 3, 4]
     assert result[104] == [1, 2]
     assert result[108] == [3, 4]
+
+
+def test_generate_schedule_respects_subject_forbidden_slots():
+    assignments = [
+        {
+            "id": 901,
+            "class_id": 10,
+            "subject_id": 12,
+            "teacher_id": 8001,
+            "weekly_periods": 3,
+        },
+        {
+            "id": 902,
+            "class_id": 10,
+            "subject_id": 27,
+            "teacher_id": 8002,
+            "weekly_periods": 3,
+        },
+    ]
+    subject_forbidden = {12: {(1, 6), (1, 7), (2, 6), (2, 7), (3, 6), (3, 7), (4, 6), (4, 7), (5, 6), (5, 7)}}
+
+    result = generate_schedule(
+        assignments,
+        days=5,
+        periods_per_day=7,
+        subject_forbidden_slots=subject_forbidden,
+        strategy_codes=["random_tiebreak"],
+        random_seed=4,
+    )
+
+    assert result.unplaced == []
+    chinese = [item for item in result.items if item.subject_id == 12]
+    assert len(chinese) == 3
+    assert all(item.period <= 5 for item in chinese)
+
+
+def test_generate_schedule_teacher_daily_limit_overrides_default_daily_cap():
+    assignments = [
+        {
+            "id": 911 + offset,
+            "class_id": 10,
+            "subject_id": 12 + offset,
+            "teacher_id": 9001,
+            "weekly_periods": 2,
+        }
+        for offset in range(3)
+    ]
+
+    result = generate_schedule(
+        assignments,
+        days=5,
+        periods_per_day=8,
+        teacher_daily_limits={9001: 2},
+        strategy_codes=["random_tiebreak"],
+        random_seed=4,
+    )
+
+    assert result.unplaced == []
+    per_day = [sum(1 for item in result.items if item.weekday == day) for day in range(1, 6)]
+    assert max(per_day) <= 2
+
+
+def test_generate_schedule_respects_class_slot_allowed_subjects():
+    assignments = [
+        {
+            "id": 921,
+            "class_id": 10,
+            "subject_id": 23,
+            "teacher_id": 9101,
+            "weekly_periods": 2,
+        },
+        {
+            "id": 922,
+            "class_id": 10,
+            "subject_id": 27,
+            "teacher_id": 9102,
+            "weekly_periods": 4,
+        },
+    ]
+    # 班级10 的周一第2节只允许音乐(23)
+    allowed = {10: {(1, 2): {23}}}
+
+    result = generate_schedule(
+        assignments,
+        days=5,
+        periods_per_day=8,
+        class_slot_allowed_subjects=allowed,
+        strategy_codes=["random_tiebreak"],
+        random_seed=4,
+    )
+
+    assert result.unplaced == []
+    english = [item for item in result.items if item.subject_id == 27]
+    assert english
+    assert all(not (item.weekday == 1 and item.period == 2) for item in english)
+
+
+def test_evening_builder_aligns_odd_even_paired_subjects_in_the_same_slot():
+    # 规则21：物理(26)单周、历史(32)双周，共用同一晚课位
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 10, "subject_id": 26, "teacher_id": 31,
+             "weekly_periods": 6, "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 2, "class_id": 10, "subject_id": 32, "teacher_id": 32,
+             "weekly_periods": 6, "evening_periods_odd": 0, "evening_periods_even": 1},
+        ],
+        class_ids=[10],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 0, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 0, 0, 0, 0, 0, 0],
+        parity_subject_pairs=[(26, 32)],
+    )
+
+    odd = [i for i in items if i.week_parity == WeekParity.odd]
+    even = [i for i in items if i.week_parity == WeekParity.even]
+    assert [(i.subject_id, i.weekday, i.period) for i in odd] == [(26, 1, 9)]
+    assert [(i.subject_id, i.weekday, i.period) for i in even] == [(32, 1, 9)]
+
+
+def test_evening_builder_fills_all_half_pairs_without_self_study():
+    """0.5 晚课排满：物|史强制成对；其余 0.5 任意互配；不落自主学习。"""
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 10, "subject_id": 12, "teacher_id": 1,
+             "evening_periods_odd": 1, "evening_periods_even": 1},
+            {"id": 2, "class_id": 10, "subject_id": 27, "teacher_id": 2,
+             "evening_periods_odd": 1, "evening_periods_even": 1},
+            {"id": 3, "class_id": 10, "subject_id": 29, "teacher_id": 3,
+             "evening_periods_odd": 1, "evening_periods_even": 1},
+            {"id": 4, "class_id": 10, "subject_id": 26, "teacher_id": 4,
+             "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 5, "class_id": 10, "subject_id": 32, "teacher_id": 5,
+             "evening_periods_odd": 0, "evening_periods_even": 1},
+            {"id": 6, "class_id": 10, "subject_id": 28, "teacher_id": 6,
+             "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 7, "class_id": 10, "subject_id": 31, "teacher_id": 7,
+             "evening_periods_odd": 0, "evening_periods_even": 1},
+            {"id": 8, "class_id": 10, "subject_id": 33, "teacher_id": 8,
+             "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 9, "class_id": 10, "subject_id": 25, "teacher_id": 9,
+             "evening_periods_odd": 0, "evening_periods_even": 1},
+        ],
+        class_ids=[10],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        activity_subject_id=99,
+        parity_subject_pairs=[(26, 32)],
+        required_teacher_by_slot={(6, 9): {10: 3}},
+    )
+
+    by_slot: dict[tuple[int, int], dict[str, int]] = {}
+    for item in items:
+        if item.class_id != 10 or item.period < 9:
+            continue
+        bucket = by_slot.setdefault((item.weekday, item.period), {})
+        if item.week_parity == WeekParity.all:
+            bucket["all"] = item.subject_id
+        else:
+            bucket[item.week_parity.value] = item.subject_id
+
+    assert 99 not in {item.subject_id for item in items if item.period >= 9}
+    half_slots = [
+        slot for slot, parts in by_slot.items()
+        if "odd" in parts and "even" in parts
+    ]
+    assert len(half_slots) == 3
+    pairs = {(by_slot[s]["odd"], by_slot[s]["even"]) for s in half_slots}
+    assert (26, 32) in pairs  # 规则强制
+    assert {o for o, _ in pairs} == {26, 28, 33}
+    assert {e for _, e in pairs} == {32, 31, 25}
+    full = [parts["all"] for parts in by_slot.values() if "all" in parts]
+    assert sorted(full) == [12, 27, 29]
+
+
+def test_evening_builder_places_unpaired_halves_on_legal_days():
+    """未声明对课的 0.5 各自落位；对不上同一天也不会整对作废。"""
+    items = build_evening_study_items(
+        [
+            {"id": 1, "class_id": 1, "subject_id": 12, "teacher_id": 1,
+             "evening_periods_odd": 1, "evening_periods_even": 1},
+            {"id": 2, "class_id": 1, "subject_id": 33, "teacher_id": 8,
+             "evening_periods_odd": 1, "evening_periods_even": 0},
+            {"id": 3, "class_id": 1, "subject_id": 25, "teacher_id": 9,
+             "evening_periods_odd": 0, "evening_periods_even": 1},
+        ],
+        class_ids=[1],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 1, 1, 0, 0, 0, 0],
+        teacher_forbidden_slots={
+            8: {(1, 9), (2, 9)},
+            9: {(3, 9)},
+        },
+    )
+    bio = [i for i in items if i.subject_id == 33]
+    geo = [i for i in items if i.subject_id == 25]
+    assert len(bio) == 1 and bio[0].weekday == 3
+    assert len(geo) == 1 and geo[0].weekday in {1, 2}
+
+
+def test_repair_keeps_head_teacher_subject_on_required_slot():
+    """班主任保留位：整周同科或单双拼格（如单物双历），不能被挪成空自习。"""
+    assignments = [
+        {"id": 1, "class_id": 1, "subject_id": 12, "teacher_id": 100,
+         "evening_periods_odd": 1, "evening_periods_even": 1},
+        {"id": 2, "class_id": 1, "subject_id": 26, "teacher_id": 200,
+         "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 3, "class_id": 1, "subject_id": 32, "teacher_id": 201,
+         "evening_periods_odd": 0, "evening_periods_even": 1},
+    ]
+    # 周六被自习占住；修补后应落回班主任语文（整周）。
+    items = [
+        ScheduleItem(0, 1, 99, None, 6, 9, week_parity=WeekParity.odd),
+        ScheduleItem(0, 1, 99, None, 6, 9, week_parity=WeekParity.even),
+        ScheduleItem(1, 1, 12, 100, 1, 9, week_parity=WeekParity.all),
+    ]
+    repaired = repair_evening_hard_constraints(
+        items,
+        assignments=assignments,
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 1, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 1, 0],
+        parity_subject_pairs=[(26, 32)],
+        free_evening_days={},
+        required_teacher_by_slot={(6, 9): {1: 100}},
+        teacher_forbidden_slots={},
+        activity_subject_id=99,
+        anchor_items=[],
+        teacher_evening_daytime_links=[],
+    )
+    sat = [i for i in repaired if i.class_id == 1 and i.weekday == 6 and i.period == 9]
+    assert any(i.teacher_id == 100 for i in sat)
+    assert any(i.subject_id == 12 for i in sat)
+
+
+def test_repair_displaces_full_evening_to_seat_half_pair():
+    """对课缺位时，可把同班整周晚课挪开以落生|地。"""
+    assignments = [
+        {"id": 1, "class_id": 1, "subject_id": 12, "teacher_id": 1,
+         "evening_periods_odd": 1, "evening_periods_even": 1},
+        {"id": 2, "class_id": 1, "subject_id": 33, "teacher_id": 8,
+         "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 3, "class_id": 1, "subject_id": 25, "teacher_id": 9,
+         "evening_periods_odd": 0, "evening_periods_even": 1},
+    ]
+    items = [
+        ScheduleItem(1, 1, 12, 1, 1, 9, week_parity=WeekParity.all),
+        ScheduleItem(0, 1, 99, None, 2, 9, week_parity=WeekParity.all),
+    ]
+    repaired = repair_evening_hard_constraints(
+        items,
+        assignments=assignments,
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 1, 0, 0, 0, 0, 0],
+        parity_subject_pairs=[],
+        free_evening_days={},
+        required_teacher_by_slot={},
+        teacher_forbidden_slots={},
+        activity_subject_id=99,
+        anchor_items=[],
+        teacher_evening_daytime_links=[],
+    )
+    bio = [i for i in repaired if i.subject_id == 33]
+    geo = [i for i in repaired if i.subject_id == 25]
+    assert len(bio) == 1 and len(geo) == 1
+    assert bio[0].weekday == geo[0].weekday
+    chinese = [i for i in repaired if i.subject_id == 12]
+    assert len(chinese) == 1
+
+
+def test_forbidden_conflict_moves_instead_of_replacing_with_self_study():
+    """禁排冲突只挪位：空位可以自习，学科课时不能改成自习。"""
+    assignments = [
+        {
+            "id": 1, "class_id": 1, "subject_id": 25, "teacher_id": 717,
+            "evening_periods_odd": 0, "evening_periods_even": 1,
+        },
+        {
+            "id": 2, "class_id": 2, "subject_id": 10, "teacher_id": 800,
+            "evening_periods_odd": 1, "evening_periods_even": 1,
+        },
+    ]
+    forbidden = {(weekday, 9) for weekday in (1, 3, 4, 5, 6)}
+    items = build_evening_study_items(
+        assignments,
+        class_ids=[1, 2],
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 0, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 0, 0],
+        activity_subject_id=99,
+        teacher_forbidden_slots={717: forbidden},
+    )
+    repaired = repair_evening_hard_constraints(
+        items,
+        assignments=assignments,
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 1, 1, 1, 0, 0],
+        evening_daily_periods_even=[1, 1, 1, 1, 1, 0, 0],
+        parity_subject_pairs=[],
+        free_evening_days={},
+        required_teacher_by_slot={},
+        teacher_forbidden_slots={717: forbidden},
+        activity_subject_id=99,
+        anchor_items=[],
+        teacher_evening_daytime_links=[],
+    )
+    geo = [item for item in repaired if item.subject_id == 25]
+    assert len(geo) == 1
+    assert geo[0].weekday == 2
+    assert geo[0].teacher_id == 717
+    assert not any(
+        item.subject_id == 99 and item.class_id == 1 and item.week_parity in {WeekParity.even, WeekParity.all}
+        for item in repaired
+        if item.weekday == geo[0].weekday
+    )
+
+
+def _repair_kwargs(**extra):
+    base = dict(
+        first_evening_period=9,
+        evening_daily_periods_odd=[1, 1, 0, 0, 0, 0, 0],
+        evening_daily_periods_even=[1, 1, 0, 0, 0, 0, 0],
+        parity_subject_pairs=[(26, 32)],
+        free_evening_days={},
+        required_teacher_by_slot={},
+        teacher_forbidden_slots={},
+        activity_subject_id=99,
+        anchor_items=[],
+        teacher_evening_daytime_links=[],
+        self_study_candidates=None,
+    )
+    base.update(extra)
+    return base
+
+
+def test_repair_moves_complete_pair_onto_self_study_when_slot_is_legal():
+    assignments = [
+        {"id": 1, "class_id": 1, "subject_id": 26, "teacher_id": 100, "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 2, "class_id": 1, "subject_id": 32, "teacher_id": 200, "evening_periods_odd": 0, "evening_periods_even": 1},
+        {"id": 3, "class_id": 2, "subject_id": 26, "teacher_id": 100, "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 4, "class_id": 2, "subject_id": 32, "teacher_id": 201, "evening_periods_odd": 0, "evening_periods_even": 1},
+    ]
+    items = [
+        ScheduleItem(1, 1, 26, 100, 1, 9, week_parity=WeekParity.odd),
+        ScheduleItem(2, 1, 32, 200, 1, 9, week_parity=WeekParity.even),
+        ScheduleItem(0, 1, 99, None, 2, 9, week_parity=WeekParity.all),
+        ScheduleItem(0, 2, 99, None, 1, 9, week_parity=WeekParity.all),
+        ScheduleItem(9, 2, 12, 300, 2, 9, week_parity=WeekParity.all),
+    ]
+    repaired = repair_evening_hard_constraints(items, assignments=assignments, **_repair_kwargs())
+    def legs(class_id, subject_id):
+        return [item for item in repaired if item.class_id == class_id and item.subject_id == subject_id and item.period >= 9]
+    assert len(legs(1, 26)) == 1 and len(legs(1, 32)) == 1
+    assert len(legs(2, 26)) == 1 and len(legs(2, 32)) == 1
+    assert legs(1, 26)[0].weekday == legs(1, 32)[0].weekday
+    assert legs(2, 26)[0].weekday == legs(2, 32)[0].weekday
+
+
+def test_repair_can_swap_class_self_study_onto_candidate_origin_only():
+    """班级自习日只能调到候选日上的当前课位；非候选日不能占自习日。"""
+    assignments = [
+        {"id": 1, "class_id": 10, "subject_id": 26, "teacher_id": 100, "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 2, "class_id": 10, "subject_id": 32, "teacher_id": 200, "evening_periods_odd": 0, "evening_periods_even": 1},
+    ]
+    # 物史错位在周三/周四；周五自习。候选日 3/4/5，可整组落到周五并把自习调回候选日。
+    items = [
+        ScheduleItem(1, 10, 26, 100, 3, 9, week_parity=WeekParity.odd),
+        ScheduleItem(2, 10, 32, 200, 4, 9, week_parity=WeekParity.even),
+        ScheduleItem(0, 10, 99, None, 5, 9, week_parity=WeekParity.all),
+        ScheduleItem(9, 10, 12, 300, 1, 9, week_parity=WeekParity.all),
+        ScheduleItem(8, 10, 12, 301, 2, 9, week_parity=WeekParity.all),
+    ]
+    repaired = repair_evening_hard_constraints(
+        items,
+        assignments=assignments,
+        **_repair_kwargs(
+            evening_daily_periods_odd=[1, 1, 1, 1, 1, 0, 0],
+            evening_daily_periods_even=[1, 1, 1, 1, 1, 0, 0],
+            free_evening_days={10: {5}},
+            self_study_candidates={10: {3, 4, 5}},
+        ),
+    )
+    phys = [i for i in repaired if i.subject_id == 26 and i.class_id == 10]
+    hist = [i for i in repaired if i.subject_id == 32 and i.class_id == 10]
+    assert len(phys) == 1 and len(hist) == 1
+    assert phys[0].weekday == hist[0].weekday
+    assert phys[0].weekday in {3, 4, 5}
+
+
+def test_repair_does_not_steal_hours_when_no_legal_move():
+    assignments = [
+        {"id": 1, "class_id": 1, "subject_id": 26, "teacher_id": 100, "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 2, "class_id": 1, "subject_id": 32, "teacher_id": 200, "evening_periods_odd": 0, "evening_periods_even": 1},
+        {"id": 3, "class_id": 2, "subject_id": 26, "teacher_id": 100, "evening_periods_odd": 1, "evening_periods_even": 0},
+        {"id": 4, "class_id": 2, "subject_id": 32, "teacher_id": 201, "evening_periods_odd": 0, "evening_periods_even": 1},
+    ]
+    items = [
+        ScheduleItem(1, 1, 26, 100, 1, 9, week_parity=WeekParity.odd),
+        ScheduleItem(2, 1, 32, 200, 1, 9, week_parity=WeekParity.even),
+        ScheduleItem(8, 1, 12, 400, 2, 9, week_parity=WeekParity.all),
+        ScheduleItem(0, 2, 99, None, 1, 9, week_parity=WeekParity.all),
+        ScheduleItem(9, 2, 12, 300, 2, 9, week_parity=WeekParity.all),
+    ]
+    repaired = repair_evening_hard_constraints(
+        items,
+        assignments=assignments,
+        **_repair_kwargs(teacher_forbidden_slots={400: {(1, 9)}, 200: {(2, 9)}}),
+    )
+    class1_phys = [item for item in repaired if item.class_id == 1 and item.subject_id == 26]
+    class1_hist = [item for item in repaired if item.class_id == 1 and item.subject_id == 32]
+    assert len(class1_phys) == 1 and len(class1_hist) == 1
+    assert class1_phys[0].weekday == 1
+    assert class1_hist[0].weekday == 1

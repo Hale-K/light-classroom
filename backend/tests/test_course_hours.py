@@ -43,6 +43,37 @@ def test_course_hours_keep_weekday_and_saturday_dimensions_and_derive_total():
     assert item.weekly_periods == 4
 
 
+def test_zero_course_hours_are_allowed_for_unassigned_subjects():
+    item = CourseHourIn(
+        class_id=1,
+        subject_id=2,
+        academic_year="2026-2027",
+        term="1",
+        weekly_periods=0,
+        weekday_periods=0,
+        saturday_periods=0,
+        evening_periods_odd=0,
+        evening_periods_even=0,
+    )
+
+    assert item.weekday_periods == 0
+    assert item.saturday_periods == 0
+    assert item.weekly_periods == 0
+
+    plan = CourseHourPlan(
+        tenant_id=1,
+        class_id=1,
+        subject_id=2,
+        academic_year="2026-2027",
+        term="1",
+        weekday_periods=0,
+        saturday_periods=0,
+        weekly_periods=0,
+    )
+
+    assert plan.weekly_periods == 0
+
+
 def test_course_hours_can_configure_evening_subject_load_for_each_week():
     item = CourseHourIn(
         class_id=1,
@@ -57,6 +88,24 @@ def test_course_hours_can_configure_evening_subject_load_for_each_week():
 
     assert item.evening_periods_odd == 1
     assert item.evening_periods_even == 0
+    assert item.evening_parity == "odd"
+
+
+def test_course_hours_unspecified_evening_parity_keeps_both_flags():
+    item = CourseHourIn(
+        class_id=1,
+        subject_id=4,
+        academic_year="2026-2027",
+        term="1",
+        weekday_periods=3,
+        saturday_periods=1,
+        evening_periods_odd=1,
+        evening_periods_even=1,
+        evening_parity="either",
+    )
+
+    assert item.evening_parity == "either"
+    assert item.week_parity == "all"
 
 
 def test_course_hour_plan_overrides_assignment_snapshot_and_keeps_teacher():

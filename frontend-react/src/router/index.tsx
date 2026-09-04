@@ -20,6 +20,7 @@ import PersonnelView from '@/pages/personnel'
 import StaffPositionsView from '@/pages/staff-positions'
 import RolesView from '@/pages/roles'
 import PermissionsView from '@/pages/permissions'
+import RbacWorkbenchView from '@/pages/rbac'
 import GaokaoView from '@/pages/gaokao'
 import SeatingView from '@/pages/seating'
 import ExamSchedulingView from '@/pages/exam-scheduling'
@@ -34,6 +35,7 @@ import MeetingsView from '@/pages/meetings'
 import GradingWorkbench from '@/pages/grading'
 import StatsView from '@/pages/stats'
 import TeacherProfilesView from '@/pages/teacher-profiles'
+import FileCenterView from '@/pages/file-center'
 
 /** 根路由：挂载 API 鉴权 resolver（token / 学校代码 / 401 跳转） */
 function Root() {
@@ -95,11 +97,13 @@ export const router = createBrowserRouter([
           { path: 'exams', element: <ExamManage /> },
           { path: 'scans', element: <ScanManage /> },
           { path: 'scheduling', element: <SchedulingView /> },
+          { path: 'file-center', element: <FileCenterView /> },
           { path: 'students', element: <StudentsView /> },
           { path: 'classes', element: <ClassesView /> },
           { path: 'organization', element: <Navigate to="/staff?tab=organization" replace /> },
           { path: 'staff', element: <PersonnelView /> },
           { path: 'staff-positions', element: <StaffPositionsView /> },
+          { path: 'rbac', element: <RbacWorkbenchView /> },
           { path: 'roles', element: <RolesView /> },
           { path: 'permissions', element: <PermissionsView /> },
           { path: 'gaokao', element: <GaokaoView /> },

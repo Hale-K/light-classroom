@@ -12,9 +12,14 @@ from app.db.session import AsyncSessionLocal, get_session, school_code_ctx, tena
 from app.api.deps import get_current_user, get_user_permission_codes
 from app.models.org import User, Tenant, TenantConfig, Class, Student, Grade, OrganizationUnit
 from app.models.enums import BaseUserRole
-from app.services.academic_year_rollover import build_rollover_plan, next_grade_level, promoted_class_name
-from app.services.menu import build_menu
-from app.services.staff_roles import effective_menu_role, get_staff_role_codes
+from app.services.academic.rollover import build_rollover_plan, next_grade_level, promoted_class_name
+from app.services.rbac import (
+    build_menu,
+    ensure_menu_permissions,
+    load_menu_permission_map,
+    load_menus,
+)
+from app.services.org.staff_roles import effective_menu_role, get_staff_role_codes
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -161,12 +166,17 @@ async def menus(
     gaokao_mode = tenant.gaokao_mode if tenant else "3+1+2"
     role_codes = await get_staff_role_codes(session, user.id)
     permission_codes = await get_user_permission_codes(session, user.id)
+    await ensure_menu_permissions(session)
+    menu_permissions = await load_menu_permission_map(session)
+    menu_items = await load_menus(session, include_disabled=False)
     return {"code": 0, "message": "ok", "data": {
         "gaokao_mode": gaokao_mode,
         "menus": build_menu(
             effective_menu_role(user.role, role_codes),
             gaokao_mode,
             permission_codes=permission_codes,
+            menu_permissions=menu_permissions,
+            menu_items=menu_items,
         ),
     }}
 

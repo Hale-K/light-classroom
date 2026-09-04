@@ -4,11 +4,11 @@
 }
 
 .stg-grade-panel {
-  margin-top: 24px;
-  padding: 24px;
-  border: 1px solid #e7edf5;
-  border-radius: 16px;
-  background: #fff;
+  margin-top: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
 }
 
 .stg-grade-panel__header {
@@ -16,18 +16,18 @@
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 18px;
+  margin-bottom: 14px;
 }
 
 .stg-grade-panel__header h2 {
   margin: 0;
-  color: #162033;
+  color: var(--ink);
   font-size: 20px;
 }
 
 .stg-grade-panel__header p {
   margin: 6px 0 0;
-  color: #7c889b;
+  color: var(--text-2);
 }
 
 .stg-grade-panel__actions {

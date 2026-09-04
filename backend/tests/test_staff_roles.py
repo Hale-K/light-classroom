@@ -1,13 +1,12 @@
 import pytest
 
 from app.models.enums import BaseUserRole
-from app.services.staff_roles import (
+from app.services.org.staff_roles import (
     ASSIGNABLE_STAFF_ROLES,
     effective_menu_role,
     normalize_staff_roles,
 )
 from app.api.v1.staff import StaffCreateIn
-from app.api.v1.organization import get_new_teacher_ids
 
 
 def test_staff_account_can_be_created_before_position_assignment():
@@ -27,15 +26,6 @@ def test_only_school_staff_roles_can_be_assigned():
         "任教老师",
         "教导主任",
     ]
-
-
-def test_repeated_auto_allocation_only_returns_new_teachers():
-    assert get_new_teacher_ids([11, 12, 13], {11, 12}) == [13]
-    assert get_new_teacher_ids([11, 12], {11, 12}) == []
-
-
-def test_auto_allocation_does_not_exceed_requested_count():
-    assert len(get_new_teacher_ids([11, 12, 13], {11})) == 2
 
 
 def test_staff_can_hold_multiple_roles_and_duplicates_are_removed():

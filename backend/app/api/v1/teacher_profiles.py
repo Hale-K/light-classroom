@@ -5,12 +5,13 @@ from collections import defaultdict
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_tenant, get_current_user
+from app.api.v1.scheduling import _load_grid_config
 from app.db.session import get_session
-from app.models.enums import BaseUserRole
+from app.models.enums import BaseUserRole, UserStatus, WeekParity
 from app.models.org import (
     Class,
     OrganizationUnit,
@@ -23,6 +24,22 @@ from app.models.org import (
 )
 
 router = APIRouter(prefix="/teacher-profiles", tags=["教师档案"])
+
+
+def _grid_slots_per_class(grid: dict[str, Any]) -> float:
+    """一套课位结构下一周、一个班应有的课位数（单双周各记 0.5）。"""
+    daytime = sum(int(x or 0) for x in (grid.get("daily_periods") or [])[:7])
+    odd = sum(int(x or 0) for x in (grid.get("evening_daily_periods_odd") or [])[:7])
+    even = sum(int(x or 0) for x in (grid.get("evening_daily_periods_even") or [])[:7])
+    return float(daytime) + (odd + even) / 2.0
+
+
+_SCHEDULE_UNIT = func.sum(
+    case(
+        (Schedule.week_parity.in_([WeekParity.odd, WeekParity.even, "odd", "even"]), 0.5),
+        else_=1.0,
+    )
+)
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +250,7 @@ async def list_teacher_profiles(
     stmt = select(User).where(
         User.tenant_id == tenant_id,
         User.role == BaseUserRole.teacher,
+        User.status == UserStatus.active,
     )
     if keyword:
         stmt = stmt.where(User.name.contains(keyword))
@@ -304,34 +322,32 @@ async def list_teacher_profiles(
         teacher_class_ids[ta.teacher_id].add(cls.id)
 
     # 5) Schedule 已排课时 —— 同样先精确匹配，找不到就回退（不区分学年学期或只按tenant+teacher）
-    scheduled_counts: dict[int, int] = defaultdict(int)
+    scheduled_counts: dict[int, float] = defaultdict(float)
     if teacher_ids:
         sched_base = [Schedule.tenant_id == tenant_id, Schedule.teacher_id.in_(teacher_ids)]
         sched_where = list(sched_base)
         if academic_year:
             sched_where.append(Schedule.academic_year == academic_year)
         sched_where.append(Schedule.term == term)
-        sched_stmt = select(Schedule.teacher_id, func.count(Schedule.id)).where(
+        sched_stmt = select(Schedule.teacher_id, _SCHEDULE_UNIT).where(
             and_(*sched_where)
         ).group_by(Schedule.teacher_id)
-        exact_counts: dict[int, int] = {}
+        exact_counts: dict[int, float] = {}
         for tid, cnt in (await session.execute(sched_stmt)).fetchall():
             if tid is None:
                 continue
-            exact_counts[tid] = int(cnt or 0)
-        # 精确匹配为 0 的老师，直接回退不限制学年学期取所有排课记录
-        # （移除对 (academic_year or term != "1") 的门控，避免配置缺失时fallback被锁死）
+            exact_counts[tid] = float(cnt or 0)
         zero_tids = [tid for tid in teacher_ids if exact_counts.get(tid, 0) == 0]
-        fallback_counts: dict[int, int] = {}
+        fallback_counts: dict[int, float] = {}
         if zero_tids:
-            fb_sched_stmt = select(Schedule.teacher_id, func.count(Schedule.id)).where(
+            fb_sched_stmt = select(Schedule.teacher_id, _SCHEDULE_UNIT).where(
                 Schedule.tenant_id == tenant_id,
                 Schedule.teacher_id.in_(zero_tids),
             ).group_by(Schedule.teacher_id)
             for tid, cnt in (await session.execute(fb_sched_stmt)).fetchall():
                 if tid is None:
                     continue
-                fallback_counts[tid] = int(cnt or 0)
+                fallback_counts[tid] = float(cnt or 0)
         for tid in teacher_ids:
             scheduled_counts[tid] = exact_counts.get(tid, 0) or fallback_counts.get(tid, 0)
     # 同样，当 weekly_total 为 0 时，也从全部任教关系取（如果上面回退后仍有）
@@ -395,12 +411,10 @@ async def list_teacher_profiles(
                 "subject_name": subj.name,
                 "weekly_periods": ta.weekly_periods or 0,
             })
-        scheduled = scheduled_counts.get(t.id, 0)
+        scheduled = round(float(scheduled_counts.get(t.id, 0)), 1)
         ratio = 0.0
         if weekly_total > 0:
-            ratio = round(scheduled / weekly_total, 3) if weekly_total else 0.0
-            if ratio > 1:
-                ratio = 1.0
+            ratio = round(min(scheduled / weekly_total, 1.0), 3)
         rows.append({
             "teacher_id": t.id,
             "name": t.name,
@@ -418,11 +432,9 @@ async def list_teacher_profiles(
     rows.sort(key=lambda r: (0 if r["is_head_teacher"] else 1, -r["total_weekly_periods"], r["name"]))
 
     # ------------------------------------------------------------------
-    # 班级视角汇总（顶部统计卡使用口径）
-    #   目标周课 = 筛选覆盖的班级数 × 5天 × 6节 = 班级数 × 30
-    #   已排课   = 这些班级的 Schedule 记录（每一节班级课算一条）
+    # 班级视角汇总：目标 = 课位结构（含周六、晚自习）× 班级数
+    # 已排 = Schedule 折合周课时（单/双周各 0.5），不再把格子条数当节数
     # ------------------------------------------------------------------
-    # 1) 筛选班级集合：按 grade_id / cohort_entry_year 限定（与教师筛选条件一致）
     all_classes = list(class_map.values())
     # 1a) grade_id 过滤
     if grade_id is not None:
@@ -453,10 +465,11 @@ async def list_teacher_profiles(
 
     filtered_class_ids: set[int] = {c.id for c in all_classes}
     class_count = len(filtered_class_ids)
-    class_weekly_target = class_count * 5 * 6  # 5个工作日 × 每天6节 = 30节/班
+    grid = await _load_grid_config(session, tenant_id, academic_year or "", term)
+    slots_each = _grid_slots_per_class(grid)
+    class_weekly_target = round(class_count * slots_each, 1) if slots_each else class_count * 30
 
-    # 2) 这些班级的已排课节数（Schedule 记录逐条统计）
-    class_scheduled_count = 0
+    class_scheduled_count = 0.0
     if filtered_class_ids:
         sched_where = [
             Schedule.tenant_id == tenant_id,
@@ -465,19 +478,20 @@ async def list_teacher_profiles(
         ]
         if academic_year:
             sched_where.append(Schedule.academic_year == academic_year)
-        exact_rows = (await session.execute(
-            select(func.count(Schedule.id)).where(and_(*sched_where))
-        )).fetchall()
-        exact_val = int(exact_rows[0][0] or 0) if exact_rows else 0
-        if exact_val > 0:
-            class_scheduled_count = exact_val
-        else:
-            # 学年学期精确匹配为 0 时，回退到不限制学年学期（与列表页教师口径一致）
-            fb_rows = (await session.execute(select(func.count(Schedule.id)).where(
+        exact_val = (await session.execute(
+            select(_SCHEDULE_UNIT).where(and_(*sched_where))
+        )).scalar()
+        class_scheduled_count = float(exact_val or 0)
+        if class_scheduled_count <= 0:
+            fb_val = (await session.execute(select(_SCHEDULE_UNIT).where(
                 Schedule.tenant_id == tenant_id,
                 Schedule.class_id.in_(list(filtered_class_ids)),
-            ))).fetchall()
-            class_scheduled_count = int(fb_rows[0][0] or 0) if fb_rows else 0
+            ))).scalar()
+            class_scheduled_count = float(fb_val or 0)
+
+    completion = 0.0
+    if class_weekly_target > 0:
+        completion = min(100.0, round(class_scheduled_count / class_weekly_target * 100, 1))
 
     return {
         "code": 0,
@@ -494,11 +508,8 @@ async def list_teacher_profiles(
             "class_summary": {
                 "class_count": class_count,
                 "weekly_target": class_weekly_target,
-                "scheduled_lessons": class_scheduled_count,
-                "completion_ratio": round(
-                    (class_scheduled_count / class_weekly_target * 100) if class_weekly_target > 0 else 0,
-                    1,
-                ),
+                "scheduled_lessons": round(class_scheduled_count, 1),
+                "completion_ratio": completion,
             },
         },
     }

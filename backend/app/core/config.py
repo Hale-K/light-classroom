@@ -50,8 +50,16 @@ class Settings(BaseSettings):
     cos_region: str = "ap-guangzhou"
     cos_bucket: str = ""
 
-    # Celery
-    celery_broker_url: str = "redis://localhost:6379/1"
+    # MinIO（本地文件中心）
+    minio_endpoint: str = "localhost:9010"
+    minio_access_key: str = "lightclassroom"
+    minio_secret_key: str = "lightclassroom"
+    minio_bucket: str = "light-classroom"
+    minio_secure: bool = False
+    minio_public_base_url: str = "http://localhost:9010"
+
+    # Celery + RabbitMQ
+    celery_broker_url: str = "amqp://guest:guest@localhost:5672//"
     celery_result_backend: str = "redis://localhost:6379/2"
 
     # A5 限流（开发期内存实现；B4 接入 Redis 后切换为分布式计数）

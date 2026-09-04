@@ -225,7 +225,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
             </Form.Item>
           }}
         </Form.Item>
-        <Form.Item name="is_grade" label="设为年级部" valuePropName="checked" extra="开启后自动挂到「年级管理中心」下,并按年级部类型识别;师资调整、排课圈定都会认到它">
+        <Form.Item name="is_grade" label="设为年级部" valuePropName="checked" extra="开启后自动挂到「年级管理中心」下,并按年级部类型识别;排课圈定会认到它">
           <Switch
             checkedChildren="年级部"
             unCheckedChildren="普通组织"
