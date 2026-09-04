@@ -31,8 +31,6 @@ backend/backups/
 backend/scripts/_last_timetable.pkl
 docs/chrome-check-profile/
 
-# ===== 工具生成的索引（可重建的二进制图谱）=====
-.codebase-memory/
-
-# ===== 工具生成的索引（可重建的二进制图谱）=====
-.codebase-memory/
+# ===== 含学生/口令的库导出，禁止进公开仓库 =====
+db/*.sql
+!db/README-sql.md

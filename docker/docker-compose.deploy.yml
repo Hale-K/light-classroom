@@ -32,6 +32,11 @@ services:
 
   rabbitmq:
     image: docker.m.daocloud.io/library/rabbitmq:3.13-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: lightclassroom
+      RABBITMQ_DEFAULT_PASS: Ay29XrHtqDblUW4u
+    ports:
+      - "15672:15672"
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s

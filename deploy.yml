@@ -26,3 +26,25 @@ services:
     # 部署专用编排（docker/ 目录）：去 Kafka/ZK + Alembic 迁移 + 学校数据种子
     compose: docker/docker-compose.deploy.yml
     port: 8000
+
+# 交付清单：部署成功后面板自动生成给运营/老板看的访问清单
+# url 模板可用 {host}；账号密码可用 ${ENV:键名} 引用 env.file 里的值
+checklist:
+  - name: 课堂前端（师生入口）
+    url: "http://{host}"
+  - name: 平台超管登录（同一前端，超管账号）
+    url: "http://{host}"
+    username: admin
+    password: "${ENV:ADMIN_PASSWORD}"
+  - name: API 接口文档（Swagger）
+    url: "http://{host}:8000/docs"
+  - name: API 健康检查
+    url: "http://{host}:8000/health"
+  - name: RabbitMQ 管理台
+    url: "http://{host}:15672"
+    username: "${ENV:RABBITMQ_DEFAULT_USER}"
+    password: "${ENV:RABBITMQ_DEFAULT_PASS}"
+  - name: MinIO 控制台（文件中心）
+    url: "http://{host}:9011"
+    username: "${ENV:MINIO_ACCESS_KEY}"
+    password: "${ENV:MINIO_SECRET_KEY}"
