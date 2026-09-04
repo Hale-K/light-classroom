@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef } from 'react'
 import { Form, Input } from 'antd'
 import { APP_NAME } from '@/types'
 import './login-experience.css'
@@ -20,8 +20,6 @@ export default function LoginExperience({ submitting, onSubmit }: LoginExperienc
   const targetTimeRef = useRef(0)
   const previousXRef = useRef<number | null>(null)
   const seekingRef = useRef(false)
-  const [menuOpen, setMenuOpen] = useState(false)
-
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -71,8 +69,6 @@ export default function LoginExperience({ submitting, onSubmit }: LoginExperienc
     }
   }, [])
 
-  const closeMenu = () => setMenuOpen(false)
-
   return (
     <main className="login-experience" aria-label="轻课堂登录">
       <video ref={videoRef} className="login-experience__bg-video" aria-hidden="true" muted playsInline preload="auto" src={VIDEO_SRC} />
@@ -81,22 +77,11 @@ export default function LoginExperience({ submitting, onSubmit }: LoginExperienc
       <div className="login-experience__frame" aria-hidden="true"><span /><span /><span /><span /></div>
 
       <header className="login-experience__nav">
-        <a className="login-experience__brand" href="#login-card" onClick={closeMenu}>
+        <a className="login-experience__brand" href="#login-card">
           <span className="login-experience__brand-name">轻课堂<sup>®</sup></span>
           <span className="login-experience__brand-mark">✳︎</span>
         </a>
-        <nav className="login-experience__links" aria-label="主导航">
-          <a href="#login-card">排课</a><span>, </span><a href="#login-card">排考</a><span>, </span><a href="#login-card">班级</a><span>, </span><a href="#login-card">教师</a>
-        </nav>
-        <div className="login-experience__nav-actions">
-          <a className="login-experience__contact" href="#login-card">进入工作台</a>
-          <button type="button" className={`login-experience__menu-toggle${menuOpen ? ' is-open' : ''}`} aria-label={menuOpen ? '关闭菜单' : '打开菜单'} aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}><span /><span /><span /></button>
-        </div>
       </header>
-
-      <div className={`login-experience__mobile-menu${menuOpen ? ' is-open' : ''}`} aria-hidden={!menuOpen}>
-        <a href="#login-card" onClick={closeMenu}>排课</a><a href="#login-card" onClick={closeMenu}>排考</a><a href="#login-card" onClick={closeMenu}>班级</a><a href="#login-card" onClick={closeMenu}>教师</a><a href="#login-card" onClick={closeMenu}>进入工作台</a>
-      </div>
 
       <section className="login-experience__content">
         <div id="login-card" className="login-experience__card" role="group" aria-labelledby="login-form-title">

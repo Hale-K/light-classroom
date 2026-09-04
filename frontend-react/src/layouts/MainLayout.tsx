@@ -2,6 +2,7 @@ import { App, Dropdown } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '@/api'
+import AssistantDock from '@/components/AssistantDock'
 import Icon from '@/components/Icon'
 import { routeTitle } from '@/router/meta'
 import { useAuthStore, selectDisplayName } from '@/store/auth'
@@ -285,6 +286,7 @@ export default function MainLayout() {
           </div>
         </main>
       </div>
+      <AssistantDock />
     </div>
   )
 }

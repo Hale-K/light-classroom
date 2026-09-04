@@ -71,30 +71,29 @@ services:
     command: alembic upgrade head
     restart: "no"
 
-  # 一次性：首部署导入南思兔咪学校数据（幂等——库里已有 nstmy 学校则跳过）
-  db-seed:
-    image: postgres:16-alpine
-    depends_on:
-      migrate: {condition: service_completed_successfully}
-    environment:
-      PGHOST: postgres
-      PGUSER: zhiheng
-      PGPASSWORD: zhiheng
-      PGDATABASE: zhiheng
-    volumes:
-      - ../db/nstmy_tumi.sql:/seed/nstmy_tumi.sql:ro
-    command: >
-      bash -c "psql -tAc \"SELECT count(*) FROM tenant WHERE code='nstmy'\" | grep -q 1
-      && echo 'nstmy 数据已存在，跳过导入'
-      || psql -v ON_ERROR_STOP=1 -f /seed/nstmy_tumi.sql"
-    restart: "no"
+  # 学校业务数据导入：待重新导出 db/nstmy_tumi.sql 后再启用本服务（去掉下面注释即可）
+  # db-seed:
+  #   image: postgres:16-alpine
+  #   depends_on:
+  #     migrate: {condition: service_completed_successfully}
+  #   environment:
+  #     PGHOST: postgres
+  #     PGUSER: zhiheng
+  #     PGPASSWORD: zhiheng
+  #     PGDATABASE: zhiheng
+  #   volumes:
+  #     - ../db/nstmy_tumi.sql:/seed/nstmy_tumi.sql:ro
+  #   command: >
+  #     bash -c "psql -tAc \"SELECT count(*) FROM tenant WHERE code='nstmy'\" | grep -q 1
+  #     && echo 'nstmy 数据已存在，跳过导入'
+  #     || psql -v ON_ERROR_STOP=1 -f /seed/nstmy_tumi.sql"
+  #   restart: "no"
 
   api:
     build:
       context: ../backend
     depends_on:
       migrate: {condition: service_completed_successfully}
-      db-seed: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       minio: {condition: service_healthy}
@@ -113,7 +112,6 @@ services:
       context: ../backend
     depends_on:
       migrate: {condition: service_completed_successfully}
-      db-seed: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
     env_file: ../backend/.env
