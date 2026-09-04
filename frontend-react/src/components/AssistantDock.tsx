@@ -1,27 +1,30 @@
 import { useMemo, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
+import { assistantApi } from '@/api'
 import Icon from '@/components/Icon'
+import { runAssistantTool } from '@/assistant/run'
+import { CORE_TASKS, pageSnapshot, skillFor, type AssistantTask } from '@/assistant/skills'
 import { routeTitle } from '@/router/meta'
 import { useAuthStore } from '@/store/auth'
 import './assistant-dock.css'
 
 const DOCK_KEY = 'zh_assistant_dock_collapsed'
+const STAR_HINT = ['很不满意', '不满意', '一般', '满意', '非常满意']
+const RATE_KEY = 'zh_assistant_satisfaction'
 
-type Panel = 'support' | 'notice' | 'docs' | 'home' | null
+type Panel = 'support' | 'notice' | 'docs' | 'home' | 'rate' | null
 type HelpTab = 'faq' | 'guide' | 'start'
 
 function Face({ className }: { className?: string }) {
   return (
-    <svg className={className} viewBox="0 0 64 64" aria-hidden="true">
-      <circle cx="32" cy="32" r="32" fill="#d8e4f4" />
-      <circle cx="32" cy="24" r="11" fill="#3a322c" />
-      <path d="M18 58c2-14 8-22 14-22s12 8 14 22" fill="#1c1a1a" />
-      <path d="M22 58c1-10 6-16 10-16s9 6 10 16" fill="#c9d9ec" />
-      <ellipse cx="32" cy="28" rx="9" ry="10" fill="#f3c7b0" />
-      <circle cx="28.5" cy="27.5" r="1.1" fill="#2a2420" />
-      <circle cx="35.5" cy="27.5" r="1.1" fill="#2a2420" />
-      <path d="M29 32.5c1.2 1.4 4.8 1.4 6 0" fill="none" stroke="#c48a78" strokeWidth="1.1" strokeLinecap="round" />
-    </svg>
+    <img
+      className={className}
+      src="/assistant-icon.png"
+      alt=""
+      width={64}
+      height={64}
+      draggable={false}
+    />
   )
 }
 
@@ -46,16 +49,36 @@ const STARTS = [
   { q: '生产必须跑迁移', a: 'APP_ENV 不是 dev 时请 alembic upgrade head，不要靠启动建表。' },
 ]
 
-function pageTasks(pathname: string): { label: string; path: string }[] {
-  const extras = [
-    { label: '帮我打开排课工作台，核对规则后再生成', path: '/scheduling' },
-    { label: '帮我看教师档案完成度是否按课时算满', path: '/teacher-profiles' },
-    { label: '帮我去系统设置核对学年学期和网格', path: '/settings' },
-  ]
-  if (pathname.startsWith('/scheduling')) {
-    return [{ label: '当前就在排课：先看课时与规则组，冲突格会标红', path: '/scheduling' }, extras[1], extras[2]]
-  }
-  return extras
+function StarPick({
+  value,
+  onChange,
+}: {
+  value: number
+  onChange: (n: number) => void
+}) {
+  const [hover, setHover] = useState(0)
+  const shown = hover || value
+  return (
+    <div className="assist-stars" role="radiogroup" aria-label="选择星级">
+      {[1, 2, 3, 4, 5].map((n) => (
+        <button
+          key={n}
+          type="button"
+          className={`assist-star${shown >= n ? ' is-on' : ''}`}
+          aria-label={`${n} 星`}
+          aria-checked={value === n}
+          role="radio"
+          onMouseEnter={() => setHover(n)}
+          onMouseLeave={() => setHover(0)}
+          onFocus={() => setHover(n)}
+          onBlur={() => setHover(0)}
+          onClick={() => onChange(n)}
+        >
+          <Icon name="star" size={18} />
+        </button>
+      ))}
+    </div>
+  )
 }
 
 export default function AssistantDock() {
@@ -67,14 +90,20 @@ export default function AssistantDock() {
   const [noticeUnread, setNoticeUnread] = useState(true)
   const [draft, setDraft] = useState('')
   const [thread, setThread] = useState<{ role: 'user' | 'bot'; text: string }[]>([])
+  const [chatting, setChatting] = useState(false)
   const [helpTab, setHelpTab] = useState<HelpTab>('faq')
   const [helpQuery, setHelpQuery] = useState('')
   const [faqOffset, setFaqOffset] = useState(0)
   const [openFaq, setOpenFaq] = useState<string | null>(null)
   const [tipOn, setTipOn] = useState(true)
+  const [satisfaction, setSatisfaction] = useState(() => {
+    const raw = Number(localStorage.getItem(RATE_KEY) || 0)
+    return raw >= 1 && raw <= 5 ? raw : 0
+  })
 
-  const tasks = useMemo(() => pageTasks(location.pathname), [location.pathname])
-  const pageName = routeTitle(location.pathname)
+  const snap = useMemo(() => pageSnapshot(location.pathname), [location.pathname])
+  const pageName = snap.title || routeTitle(location.pathname)
+  const tasks = snap.tasks
 
   const setDockCollapsed = (next: boolean) => {
     setCollapsed(next)
@@ -88,23 +117,75 @@ export default function AssistantDock() {
 
   const replyFor = (text: string) => {
     const t = text.trim()
-    if (/排课/.test(t)) return '排课建议：先对齐课时与规则组，再点生成。生成走后台任务，浏览器里不用干等超时。'
+    const skill = skillFor(location.pathname)
+    if (/COS|CVM|腾讯云控制台/.test(t)) {
+      return `云产品请在腾讯云控制台操作。轻课堂助手只自动跳页并核对本校数据，不会改 COS / CVM。`
+    }
+    if (/排课/.test(t)) return '排课建议：先对齐课时与规则组，再点生成。生成走后台任务，浏览器里不用干等超时。我不会替你点生成。'
     if (/教师|档案/.test(t)) return '教师档案完成度按网格课时核算，停用教师不会出现在列表里。'
     if (/设置|学年/.test(t)) return '学年学期和网格结构会改排课容量，改完再生成课表。'
-    return `我还没有接大模型。当前页面是「${pageName}」，可以点上面的任务卡片先跳过去。`
+    return `还没接大模型。当前「${pageName}」能做：${skill.can.join('；')}。不能：${skill.cannot.join('；')}。点任务卡片可以跳页。`
   }
 
-  const send = (text?: string) => {
+  const send = async (text?: string) => {
     const content = (text ?? draft).trim()
-    if (!content) return
+    if (!content || chatting) return
     setDraft('')
-    setThread((prev) => [...prev, { role: 'user', text: content }, { role: 'bot', text: replyFor(content) }])
+    if (/打开排课|核对规则后再生成/.test(content)) {
+      void runTask(CORE_TASKS[0])
+      return
+    }
+    if (/教师档案|课时算满/.test(content)) {
+      void runTask(CORE_TASKS[1])
+      return
+    }
+    if (/学年学期|系统设置核对/.test(content)) {
+      void runTask(CORE_TASKS[2])
+      return
+    }
     setPanel('home')
+    const history = [...thread, { role: 'user' as const, text: content }]
+    setThread([...history, { role: 'bot', text: '正在思考…' }])
+    setChatting(true)
+    try {
+      const data = await assistantApi.chat({
+        messages: history.map((m) => ({
+          role: m.role === 'bot' ? 'assistant' : 'user',
+          content: m.text,
+        })),
+        page_title: pageName,
+        page_path: location.pathname,
+        can: snap.can,
+        cannot: snap.cannot,
+      })
+      setThread([...history, { role: 'bot', text: data.text }])
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '对话失败'
+      setThread([...history, { role: 'bot', text: msg }])
+    } finally {
+      setChatting(false)
+    }
   }
 
-  const runTask = (item: { label: string; path: string }) => {
-    send(item.label)
-    navigate(item.path)
+  const runTask = async (item: AssistantTask) => {
+    setPanel('home')
+    setThread((prev) => [...prev, { role: 'user', text: item.label }, { role: 'bot', text: '正在按现网数据操作…' }])
+    try {
+      const result = await runAssistantTool(item.tool, item.path)
+      navigate(result.path)
+      setThread((prev) => {
+        const next = [...prev]
+        next[next.length - 1] = { role: 'bot', text: result.report }
+        return next
+      })
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '操作失败'
+      setThread((prev) => {
+        const next = [...prev]
+        next[next.length - 1] = { role: 'bot', text: msg }
+        return next
+      })
+    }
   }
 
   const helpItems = helpTab === 'faq' ? FAQ : helpTab === 'guide' ? GUIDES : STARTS
@@ -165,9 +246,9 @@ export default function AssistantDock() {
               </button>
               <button
                 type="button"
-                className={`assist-dock-icon${panel === 'home' ? ' is-on' : ''}`}
-                title="提问"
-                onClick={() => toggle('home')}
+                className={`assist-dock-icon${panel === 'rate' ? ' is-on' : ''}`}
+                title="满意度"
+                onClick={() => toggle('rate')}
               >
                 <Icon name="mood" size={20} />
               </button>
@@ -263,9 +344,38 @@ export default function AssistantDock() {
         </section>
       )}
 
+      {panel === 'rate' && (
+        <section className="assist-help assist-help-slim" aria-label="满意度">
+          <header className="assist-help-head">
+            <strong>满意度</strong>
+            <button type="button" onClick={() => setPanel(null)}>
+              <Icon name="x" size={16} />
+            </button>
+          </header>
+          <p className="assist-sheet-cap">这次使用轻课堂助手，您打几星？</p>
+          <div className="assist-rate">
+            <StarPick
+              value={satisfaction}
+              onChange={(n) => {
+                setSatisfaction(n)
+                localStorage.setItem(RATE_KEY, String(n))
+              }}
+            />
+            <span>{satisfaction ? STAR_HINT[satisfaction - 1] : '点选 1～5 星'}</span>
+          </div>
+        </section>
+      )}
+
       {panel === 'home' && (
         <section className="assist-sheet" aria-label="轻课堂助手对话">
           <header className="assist-sheet-bar">
+            <div className="assist-sheet-brand">
+              <Face className="assist-sheet-face" />
+              <div>
+                <strong>轻课堂助手</strong>
+                <span>欢迎随时提问</span>
+              </div>
+            </div>
             <button type="button" title="新对话" onClick={() => setThread([])}>
               <Icon name="plus" size={16} />
             </button>
@@ -276,10 +386,9 @@ export default function AssistantDock() {
           <div className="assist-sheet-body">
             {thread.length === 0 && (
               <>
-                <Face className="assist-sheet-face" />
-                <h2 className="assist-sheet-hi">Hi，我是轻课堂助手</h2>
-                <p className="assist-sheet-hi">欢迎随时提问</p>
-                <p className="assist-sheet-cap">当前在「{pageName}」。任务点一下，我帮你跳到对应页。</p>
+                <p className="assist-sheet-cap">
+                  当前在「{pageName}」。能做：{snap.can.join('、')}。不能：{snap.cannot.join('、')}。点任务卡片可跳页。
+                </p>
                 <div className="assist-task-list">
                   {tasks.map((item) => (
                     <button key={item.path + item.label} type="button" className="assist-task" onClick={() => runTask(item)}>
@@ -301,7 +410,7 @@ export default function AssistantDock() {
           </div>
           <div className="assist-composer">
             <textarea
-              rows={3}
+              rows={2}
               value={draft}
               placeholder="排课、档案、设置，有问题都可以问"
               onChange={(e) => setDraft(e.target.value)}
@@ -320,7 +429,7 @@ export default function AssistantDock() {
             </div>
           </div>
           <footer className="assist-sheet-foot">
-            <span>回答由规则提示生成，仅供参考</span>
+            <span>自动跳页核对 · 不代跑生成、不改云</span>
             <span>{schoolCode || '—'}</span>
           </footer>
         </section>

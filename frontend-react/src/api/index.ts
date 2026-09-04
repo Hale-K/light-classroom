@@ -1090,5 +1090,16 @@ export const aiProviderApi = {
     unwrap<string[]>(http.post('/ai-providers/load-models', data)),
 }
 
+export const assistantApi = {
+  chat: (data: {
+    messages: { role: 'user' | 'assistant'; content: string }[]
+    page_title?: string
+    page_path?: string
+    can?: string[]
+    cannot?: string[]
+  }) =>
+    unwrap<{ text: string }>(http.post('/assistant/chat', data, { timeout: 120000 })),
+}
+
 export { setAuthResolver }
 export type { AuthResolver } from './http'

@@ -14,4 +14,4 @@ from app.models.practice import *  # noqa: F401,F403
 from app.models.prediction import *  # noqa: F401,F403
 from app.models.audit import *  # noqa: F401,F403
 from app.models.transfer import *  # noqa: F401,F403
-from app.models.ai_provider import *  # noqa: F401,F403
+from app.ai.models import *  # noqa: F401,F403

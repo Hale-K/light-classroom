@@ -1,5 +1,5 @@
 ﻿import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { App, Button, Checkbox, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd'
 import type { TableProps, MenuProps } from 'antd'
 import dayjs from 'dayjs'
@@ -111,6 +111,13 @@ export default function SchedulingView() {
   const [versionsLoading, setVersionsLoading] = useState(false)
 
   const [activeTab, setActiveTab] = useState<'hours' | 'slots' | 'rules' | 'assignments' | 'schedule'>('slots')
+  const [searchParams] = useSearchParams()
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (tab === 'hours' || tab === 'slots' || tab === 'rules' || tab === 'assignments' || tab === 'schedule') {
+      setActiveTab(tab)
+    }
+  }, [searchParams])
   const [resources, setResources] = useState<SchedulingResources>({
     teachers: [],
     subjects: [],
