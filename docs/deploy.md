@@ -35,9 +35,9 @@
 | 文档 | 用途 |
 |------|------|
 | 本文 | 上线清单、环境、回滚 |
-| [docs/sql/README.md](sql/README.md) | 生产建库 + 导入兔咪学校数据 |
+| [db/README-sql.md](sql/README.md) | 生产建库 + 导入兔咪学校数据 |
 | [backend/.env.example](../backend/.env.example) | 环境变量模板 |
-| [backend/docker-compose.yml](../backend/docker-compose.yml) | **开发**依赖编排（含 `--reload`，不要当生产镜像） |
+| [docker/docker-compose.yml](../docker/docker-compose.yml) | **开发**依赖编排（含 `--reload`，不要当生产镜像） |
 | [monitoring/docker-compose.yml](../monitoring/docker-compose.yml) | 指标栈；默认刮取宿主机 `:8001` |
 | [docs/ER-diagram.md](ER-diagram.md) | 表关系 |
 | [docs/specs/](specs/) | 排课 / 走班产品规格 |

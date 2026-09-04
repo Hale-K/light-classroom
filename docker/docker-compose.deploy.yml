@@ -1,0 +1,120 @@
+# 智衡后端 部署环境编排（Deploy 面板使用；文件位于 docker/ 子目录，路径相对本文件）
+# 与开发版 docker-compose.yml 的区别：
+#   - 去掉 Kafka + Zookeeper（代码中尚无任何生产/消费者，纯占位基础设施，省 ~1.5G 内存）
+#   - 新增 migrate（Alembic 建表/升级，生产必须走迁移）与 db-seed（首部署导入南思兔咪学校数据）
+#   - api 去掉 --reload 与源码挂载（用镜像内代码，生产语义）
+#   - postgres/redis/rabbitmq 不对宿主机暴露端口（仅容器网络互访，更安全）
+#   - MinIO 保留 9010/9011 对外（前端/浏览器取文件用）
+# 启动：docker compose -f docker/docker-compose.deploy.yml up -d --build
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zhiheng
+      POSTGRES_PASSWORD: zhiheng
+      POSTGRES_DB: zhiheng
+    volumes: ["pgdata:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zhiheng"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    volumes: ["redisdata:/data"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  rabbitmq:
+    image: docker.m.daocloud.io/library/rabbitmq:3.13-management-alpine
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  # 文件中心对象存储（对外 9010/9011，避开常见 9000/9001）
+  minio:
+    image: minio/minio:RELEASE.2024-05-28T17-19-04Z
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: lightclassroom
+      MINIO_ROOT_PASSWORD: lightclassroom
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    volumes: ["miniodata:/data"]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 10s
+
+  # 一次性：Alembic 建表/升级（生产必须走迁移；api/worker 等它跑完才启动）
+  migrate:
+    build:
+      context: ../backend
+    env_file: ../backend/.env
+    depends_on:
+      postgres: {condition: service_healthy}
+    command: alembic upgrade head
+    restart: "no"
+
+  # 一次性：首部署导入南思兔咪学校数据（幂等——库里已有 nstmy 学校则跳过）
+  db-seed:
+    image: postgres:16-alpine
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+    environment:
+      PGHOST: postgres
+      PGUSER: zhiheng
+      PGPASSWORD: zhiheng
+      PGDATABASE: zhiheng
+    volumes:
+      - ../db/nstmy_tumi.sql:/seed/nstmy_tumi.sql:ro
+    command: >
+      bash -c "psql -tAc \"SELECT count(*) FROM tenant WHERE code='nstmy'\" | grep -q 1
+      && echo 'nstmy 数据已存在，跳过导入'
+      || psql -v ON_ERROR_STOP=1 -f /seed/nstmy_tumi.sql"
+    restart: "no"
+
+  api:
+    build:
+      context: ../backend
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      db-seed: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    env_file: ../backend/.env
+    ports: ["8000:8000"]
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/health')\""]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+      start_period: 15s
+
+  worker:
+    build:
+      context: ../backend
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      db-seed: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+      rabbitmq: {condition: service_healthy}
+    env_file: ../backend/.env
+    command: celery -A app.workers.celery_app worker -Q scheduling,academic --concurrency=2 --loglevel=info
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:

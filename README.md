@@ -9,7 +9,7 @@
 | `monitoring/` | Prometheus + Grafana（可选） |
 | `docs/` | 业务说明与上线文档 |
 
-**上线前请先读：[部署与上线准备](docs/deploy.md)、[生产库初始化 SQL](docs/sql/README.md)。**
+**上线前请先读：[部署与上线准备](docs/deploy.md)、[生产库初始化 SQL](db/README-sql.md)。**
 
 其它文档：
 

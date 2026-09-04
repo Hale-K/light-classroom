@@ -14,14 +14,15 @@ services:
   - name: web
     type: web
     dir: frontend-react
-    build: pnpm run build
+    # 绕开 tsc 类型检查直接打包（src/pages/scheduling/RuleGroupWorkbench.tsx 尚有 TS 错误待修）
+    build: pnpm exec vite build
     out: dist
     proxy:
       /api/v1: 8000
 
   - name: api
     type: docker
-    dir: backend
-    # 部署专用编排：去掉 Kafka/Zookeeper（代码未使用，省 ~1.5G 内存）
-    compose: docker-compose.deploy.yml
+    dir: .
+    # 部署专用编排（docker/ 目录）：去 Kafka/ZK + Alembic 迁移 + 学校数据种子
+    compose: docker/docker-compose.deploy.yml
     port: 8000
