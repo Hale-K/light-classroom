@@ -277,6 +277,8 @@ def _reap_stale(job: "GenerateJob") -> None:
     else:
         message = "求解进程失去心跳（可能已中断），请重新生成"
     job.emit("error", stage="error", message=message)
+    # 释放该校的排课占位：worker 中断时 finally 不会执行，占位会泄漏导致后续生成全被挡
+    release_generate_slot(job.tenant_id)
 
 
 def touch_heartbeat(job_id: str) -> None:
