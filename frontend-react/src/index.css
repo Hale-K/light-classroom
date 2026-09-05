@@ -4262,7 +4262,6 @@ body[data-theme='tech'] .ant-card-body {
   background: var(--surface) !important;
   color: #ffffff !important;
 }
-body[data-theme='tech'] .ant-modal-content,
 body[data-theme='tech'] .ant-modal-header,
 body[data-theme='tech'] .ant-drawer-content,
 body[data-theme='tech'] .ant-drawer-header,
@@ -4271,6 +4270,16 @@ body[data-theme='tech'] .ant-dropdown-menu {
   background: var(--surface) !important;
   color: #ffffff !important;
   border-color: var(--border) !important;
+}
+/* 弹窗面板用高一级表面+可见描边，否则和近黑画布融为一体（退出确认框曾“隐形”） */
+body[data-theme='tech'] .ant-modal-content {
+  background: var(--surface-2) !important;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #ffffff !important;
+  box-shadow: 0 24px 72px rgba(0, 0, 0, 0.65) !important;
+}
+body[data-theme='tech'] .ant-modal-confirm .ant-modal-confirm-content {
+  color: #d4d4d8 !important;
 }
 body[data-theme='tech'] .ant-select-item,
 body[data-theme='tech'] .ant-dropdown-menu-item {
