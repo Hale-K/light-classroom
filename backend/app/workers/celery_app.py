@@ -1,4 +1,6 @@
 """Celery 应用：RabbitMQ 作 broker，Redis 作结果后端。"""
+import asyncio
+
 from celery import Celery
 from kombu import Queue
 from loguru import logger
@@ -37,8 +39,6 @@ celery_app.conf.update(
 
 @celery_app.task(name="scheduling.generate", queue="scheduling", acks_late=True)
 def generate_schedule_task(job_id: str, tenant_id: int, payload: dict) -> None:
-    import asyncio
-
     from app.workers.scheduling.generate import run_generate_payload
 
     payload = payload or {}
