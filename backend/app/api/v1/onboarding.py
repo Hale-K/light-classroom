@@ -1,7 +1,7 @@
-"""新手引导：排课准备度六步清单，状态全部来自本校真实数据。
+"""新手引导：教务排课准备度清单，状态全部来自本校真实数据。
 
-对齐顶栏「新手引导 N/6」：每步的完成判定与详情文案在这里统一计算，
-前端只负责展示与跳转。步骤顺序即推荐操作顺序（学年学期 → 课位 → 课时 → 任教 → 规则 → 生成）。
+每步的完成判定与详情文案在这里统一计算，前端只负责展示与跳转。
+步骤顺序即推荐操作顺序（学年学期 → 空间 → 资源分配 → 班级划分 → 课位 → 课时 → 任教 → 规则 → 生成）。
 跳过标记存 TenantConfig（学校级配置，沿用网格/规则目录的存储惯例），不建新表。
 """
 from __future__ import annotations
@@ -14,8 +14,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
-from app.models.facility import Campus
-from app.models.org import Class, CourseHourPlan, TeachingAssignment, TenantConfig
+from app.models.facility import Building, Campus, ResourceAllocationRule, Room, RoomCohortAllocation
+from app.models.org import Class, CourseHourPlan, Grade, TeachingAssignment, TenantConfig
+from app.services.org.cohort import cohort_labels_match, expected_cohort_label
 
 router = APIRouter(prefix="/onboarding", tags=["新手引导"])
 
@@ -70,6 +71,11 @@ def evaluate_steps(
     year: str | None,
     term: str,
     campus_count: int,
+    building_count: int,
+    room_count: int,
+    allocation_rule_count: int,
+    allocated_room_count: int,
+    resource_assigned_class_count: int,
     grid_configured: bool,
     grid_line: str,
     class_total: int,
@@ -82,20 +88,61 @@ def evaluate_steps(
     history_year: str | None = None,
     history_hour_classes: int = 0,
 ) -> list[dict]:
+    if campus_count == 0:
+        space_detail = "先创建校区，再逐级新增楼宇和场室"
+    elif building_count == 0:
+        space_detail = f"已有 {campus_count} 个校区，还没有楼宇；请选择校区后新增楼宇"
+    elif room_count == 0:
+        space_detail = f"已有 {campus_count} 个校区、{building_count} 栋楼宇，还没有场室；请选择楼宇后新增场室"
+    else:
+        space_detail = f"已有 {campus_count} 个校区、{building_count} 栋楼宇、{room_count} 间场室"
+
+    if not year:
+        allocation_detail = "先设置当前学年学期，再按届别分配场室"
+    elif room_count == 0:
+        allocation_detail = "先建好场室，再创建届别资源分配规则"
+    elif allocated_room_count == 0:
+        allocation_detail = "当前学期还没有教室分配给届别，请创建规则、预览并执行分配"
+    else:
+        allocation_detail = f"当前学期 {allocation_rule_count} 条规则已分配 {allocated_room_count} 间教室"
+
+    if not year:
+        class_planning_detail = "先设置当前学年学期，再检查届别资源和行政班"
+    elif allocated_room_count == 0:
+        class_planning_detail = "先完成届别资源分配，班级划分只使用已分配的教室"
+    elif class_total == 0:
+        class_planning_detail = f"已有 {allocated_room_count} 间可用教室，尚未据此生成行政班"
+    else:
+        class_planning_detail = f"{resource_assigned_class_count}/{class_total} 个行政班已绑定当前学期分配的教室"
+
     return [
-        {
-            "key": "campus",
-            "title": "创建校区",
-            "done": campus_count > 0,
-            "detail": f"已有 {campus_count} 个校区" if campus_count > 0 else "年级、班级、教室都挂在校区下，先到空间资源创建校区",
-            "path": "/campus-buildings",
-        },
         {
             "key": "year",
             "title": "核对学年学期",
             "done": bool(year),
             "detail": f"{year} 学年 · 第 {term} 学期" if year else "还没有设置当前学年学期",
             "path": "/settings",
+        },
+        {
+            "key": "space",
+            "title": "建全空间层级",
+            "done": campus_count > 0 and building_count > 0 and room_count > 0,
+            "detail": space_detail,
+            "path": "/campus-buildings?tab=resources",
+        },
+        {
+            "key": "allocation",
+            "title": "分配届别资源",
+            "done": allocation_rule_count > 0 and allocated_room_count > 0,
+            "detail": allocation_detail,
+            "path": "/campus-buildings?tab=allocation",
+        },
+        {
+            "key": "class_planning",
+            "title": "完成班级划分",
+            "done": class_total > 0 and resource_assigned_class_count == class_total,
+            "detail": class_planning_detail,
+            "path": "/campus-buildings?tab=class-planning",
         },
         {
             "key": "grid",
@@ -109,7 +156,9 @@ def evaluate_steps(
             "title": "填写班级课时",
             "done": class_total > 0 and hour_classes >= class_total,
             "detail": (
-                "还没有行政班，先到班级管理建班"
+                "先设置当前学年学期，再填写班级课时"
+                if not year
+                else "还没有行政班，请先到空间资源的“班级划分”生成班级"
                 if class_total == 0
                 else (
                     f"检测到 {history_year} 学年已有 {history_hour_classes} 个班的课时，新学期请参考原结构填写"
@@ -152,7 +201,7 @@ def evaluate_steps(
     ]
 
 
-@router.get("/status", summary="新手引导进度（排课准备六步）")
+@router.get("/status", summary="新手引导进度（教务排课准备九步）")
 async def onboarding_status(
     session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user),
@@ -176,14 +225,51 @@ async def onboarding_status(
                 + ("，含晚自习" if grid.get("enable_evening") else "")
             )
 
-    class_total = (await session.execute(
-        select(func.count()).select_from(Class).where(Class.tenant_id == tenant_id)
-    )).scalar_one()
+    class_rows = (await session.execute(
+        select(Class.id, Class.home_room_id, Class.cohort_label, Grade.level)
+        .join(Grade, Grade.id == Class.grade_id)
+        .where(Class.tenant_id == tenant_id)
+    )).all()
+    current_classes = [
+        row for row in class_rows
+        if year and cohort_labels_match(row.cohort_label, expected_cohort_label(year, row.level))
+    ]
+    current_class_ids = {row.id for row in current_classes}
+    class_total = len(current_classes)
     campus_count = (await session.execute(
         select(func.count()).select_from(Campus).where(
             Campus.tenant_id == tenant_id, Campus.status == "active",
         )
     )).scalar_one()
+    building_count = (await session.execute(
+        select(func.count()).select_from(Building).where(Building.tenant_id == tenant_id)
+    )).scalar_one()
+    room_count = (await session.execute(
+        select(func.count()).select_from(Room).where(Room.tenant_id == tenant_id)
+    )).scalar_one()
+    allocation_rule_count = 0
+    allocated_room_ids: set[int] = set()
+    resource_assigned_class_count = 0
+    if year:
+        allocation_rule_count = (await session.execute(
+            select(func.count()).select_from(ResourceAllocationRule).where(
+                ResourceAllocationRule.tenant_id == tenant_id,
+                ResourceAllocationRule.academic_year == year,
+                ResourceAllocationRule.term == term,
+                ResourceAllocationRule.status == "active",
+            )
+        )).scalar_one()
+        allocated_room_ids = set((await session.execute(
+            select(distinct(RoomCohortAllocation.room_id)).where(
+                RoomCohortAllocation.tenant_id == tenant_id,
+                RoomCohortAllocation.academic_year == year,
+                RoomCohortAllocation.term == term,
+                RoomCohortAllocation.status == "active",
+            )
+        )).scalars().all())
+        resource_assigned_class_count = sum(
+            row.home_room_id in allocated_room_ids for row in current_classes
+        )
     hour_classes = 0
     asg_teacher_ids: set[int] = set()
     asg_class_ids: set[int] = set()
@@ -193,6 +279,7 @@ async def onboarding_status(
                 CourseHourPlan.tenant_id == tenant_id,
                 CourseHourPlan.academic_year == year,
                 CourseHourPlan.term == term,
+                CourseHourPlan.class_id.in_(current_class_ids) if current_class_ids else False,
                 CourseHourPlan.weekday_periods > 0,
             )
         )).scalar_one()
@@ -249,6 +336,11 @@ async def onboarding_status(
         year=year or None,
         term=term,
         campus_count=int(campus_count or 0),
+        building_count=int(building_count or 0),
+        room_count=int(room_count or 0),
+        allocation_rule_count=int(allocation_rule_count or 0),
+        allocated_room_count=len(allocated_room_ids),
+        resource_assigned_class_count=int(resource_assigned_class_count or 0),
         grid_configured=grid_configured,
         grid_line=grid_line,
         class_total=int(class_total or 0),

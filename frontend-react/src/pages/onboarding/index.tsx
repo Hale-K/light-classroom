@@ -4,7 +4,7 @@ import { onboardingApi, type OnboardingStep } from '@/api'
 import Icon from '@/components/Icon'
 import './onboarding.css'
 
-/** 新手引导页：排课准备七步，横幅进度环 + 步骤卡片，状态来自后端真实数据。 */
+/** 新手引导页：教务排课准备九步，横幅进度环 + 步骤卡片，状态来自后端真实数据。 */
 export default function OnboardingView() {
   const navigate = useNavigate()
   const [steps, setSteps] = useState<OnboardingStep[]>([])
@@ -28,7 +28,7 @@ export default function OnboardingView() {
   }, [refresh])
 
   const doneCount = steps.filter((s) => s.done).length
-  const total = steps.length || 7
+  const total = steps.length || 9
   const allDone = loaded && steps.length > 0 && doneCount === total
   const firstPending = steps.findIndex((s) => !s.done)
   const pending = steps.filter((s) => !s.done)
@@ -51,8 +51,8 @@ export default function OnboardingView() {
     <div className="ob-page">
       <section className="ob-banner">
         <div className="ob-banner-copy">
-          <h1>七步搭好排课工作台</h1>
-          <p>核对学年学期与课位，填好课时、对好任教，配完规则，然后生成第一张课表。</p>
+          <h1>九步搭好排课工作台</h1>
+          <p>核对学年学期，建全空间并完成资源分配与班级划分，再配置课位、课时、任教和规则，最后生成课表。</p>
           <div className="ob-banner-tips">
             <span>✓ 建议按顺序完成</span>
             {historyYear && !allDone && (

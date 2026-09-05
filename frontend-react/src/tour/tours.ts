@@ -40,7 +40,7 @@ const tabPanelTarget = (containerSelector: string, label: string, ...panelSelect
 
 export const PAGE_TOURS: Record<string, TourStep[]> = {
   '/onboarding': [
-    { title: '进度总览', content: '环上的数字是七步引导的实时完成度，状态全部来自本校真实数据，做完一步自动亮一格。', target: '.ob-banner' },
+    { title: '进度总览', content: '环上的数字是九步引导的实时完成度，状态全部来自本校真实数据，做完一步自动亮一格。', target: '.ob-banner' },
     { title: '当前待办', content: '按推荐顺序排的待办卡，点「去完成」直达对应页面；完成后回来点「刷新进度」。', target: '.ob-card' },
     { title: '已完成清单', content: '做过的事不会丢，每一步的摘要都在这里（没有待办时此卡不显示）。', target: '.ob-done-card' },
   ],
