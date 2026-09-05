@@ -47,13 +47,13 @@ def generate_schedule_task(job_id: str, tenant_id: int, payload: dict) -> None:
         # 常驻事件循环：worker 进程内所有任务复用同一循环——
         # asyncio.run 每任务新建循环，会让异步引擎连接池里的 PG 连接
         # 绑在已关闭的旧循环上，第二个任务起必报 attached to a different loop
-        _worker_loop().run_until_complete(run_generate_payload(job_id, tenant_id, payload))
+        _get_worker_loop().run_until_complete(run_generate_payload(job_id, tenant_id, payload))
 
 
 _worker_loop = None
 
 
-def _worker_loop() -> asyncio.AbstractEventLoop:
+def _get_worker_loop() -> asyncio.AbstractEventLoop:
     global _worker_loop
     import asyncio
 
