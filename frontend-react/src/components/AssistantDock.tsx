@@ -13,6 +13,7 @@ import { routeTeacherMessage, type Extra } from '@/assistant/orchestrate'
 import { runAssistantTool, type JumpLink } from '@/assistant/run'
 import { assistLog, newMsgId } from '@/assistant/trace'
 import { hereOf, jumpLabel, placeLabel, samePlace } from '@/assistant/place'
+import { decideJumpReply } from '@/assistant/jump-intent'
 import { pageSnapshot, type AssistantTask } from '@/assistant/skills'
 import './assistant-dock.css'
 
@@ -326,6 +327,28 @@ export default function AssistantDock() {
         assistLog(tid, 'turn', merged.slice(0, 80))
         const hereNow = hereOf(location.pathname, location.search)
         const withTrace = (extra?: Extra & { hoursDraft?: HoursDraft }) => ({ ...extra, here: hereNow, traceId: tid })
+        const previousAnswer = [...threadRef.current].reverse().find((item) => item.role === 'bot' && item.text)
+        const jumpDecision = previousAnswer?.jumps ? decideJumpReply(merged, previousAnswer.jumps) : { kind: 'none' as const }
+        if (jumpDecision.kind === 'confirm') {
+          const target = placeLabel(jumpDecision.jump.path)
+          assistLog(tid, 'jump.confirm', jumpDecision.jump.path)
+          navigate(jumpDecision.jump.path)
+          commitThread((prev) => replaceThinkBot(prev, {
+            role: 'bot',
+            text: `好的，已为你打开「${target}」。可以继续问我这个页面怎么操作。`,
+            mid: tid,
+          }))
+          break
+        }
+        if (jumpDecision.kind === 'cancel') {
+          assistLog(tid, 'jump.cancel', hereNow)
+          commitThread((prev) => replaceThinkBot(prev, {
+            role: 'bot',
+            text: '好的，先留在当前页面。需要继续时告诉我。',
+            mid: tid,
+          }))
+          break
+        }
         const forced = forcedRef.current
         forcedRef.current = null
         if (forced) {
@@ -921,10 +944,24 @@ export default function AssistantDock() {
                       </div>
                     )}
                     {msg.role === 'bot' && msg.jumps && msg.jumps.length > 0 && i === shownThread.length - 1 && (
-                      <div className="assist-plan-actions">
+                      <div className="assist-plan-actions assist-jump-actions" aria-label="建议的下一步">
+                        <div className="assist-jump-question">
+                          <strong>需要我帮你跳转吗？</strong>
+                          <span>点击下方按钮，或直接回复“好”</span>
+                        </div>
                         {msg.jumps.map((item) => (
-                          <button key={item.path + item.label} type="button" className="is-ok" onClick={() => navigate(item.path)}>
-                            {item.label}
+                          <button
+                            key={item.path + item.label}
+                            type="button"
+                            className="assist-jump-action"
+                            aria-label={`打开「${placeLabel(item.path)}」`}
+                            onClick={() => navigate(item.path)}
+                          >
+                            <span className="assist-jump-copy">
+                              <small>{item.path.split('?')[0] === location.pathname ? '确认操作 · 切换页签' : '确认操作 · 打开页面'}</small>
+                              <strong>打开「{placeLabel(item.path)}」</strong>
+                            </span>
+                            <span className="assist-jump-arrow"><Icon name="arrow-right" size={16} /></span>
                           </button>
                         ))}
                       </div>

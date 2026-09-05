@@ -220,20 +220,20 @@ export async function runAssistantTool(
     if (!activeRules.length || !assignedRooms.length) {
       return {
         path: '',
-        jumps: [{ label: '去资源分配规则', path: '/campus-buildings?tab=allocation' }],
+        jumps: [{ label: '打开「资源分配规则」页签', path: '/campus-buildings?tab=allocation' }],
         report: `空间层级已经建立：${campuses} 个校区、${buildings} 栋楼宇、${roomCount} 间场室。下一步进入「资源分配规则」，选择目标届别和资源范围，先预览匹配结果，再执行分配。当前 ${activeRules.length} 条规则生效、${assignedRooms.length} 间教室已分配。`,
       }
     }
     if (boundRooms.length < assignedRooms.length) {
       return {
         path: '',
-        jumps: [{ label: '去班级划分', path: '/campus-buildings?tab=class-planning' }],
+        jumps: [{ label: '打开「班级划分」页签', path: '/campus-buildings?tab=class-planning' }],
         report: `已有 ${assignedRooms.length} 间教室分配给届别，其中 ${boundRooms.length} 间已绑定行政班。下一步进入「班级划分」，为剩余 ${assignedRooms.length - boundRooms.length} 间教室生成或绑定行政班，然后到班级管理补充班主任和学生名单。`,
       }
     }
     return {
       path: '',
-      jumps: [{ label: '去班级管理', path: '/classes' }],
+      jumps: [{ label: '打开「班级管理」页面', path: '/classes' }],
       report: `空间资源、届别分配和班级教室绑定已经有基础数据：${campuses} 个校区、${buildings} 栋楼宇、${roomCount} 间场室，${boundRooms.length} 间已绑定班级。下一步到「班级管理」核对班主任和学生名单，再进入排课配置。`,
     }
   }

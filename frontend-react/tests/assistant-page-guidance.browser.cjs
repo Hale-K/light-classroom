@@ -23,11 +23,12 @@ async function main() {
     await page.goto('http://127.0.0.1:5176/__assistant_page_test')
 
     const result = await page.evaluate(async () => {
-      const [{ routeTeacherMessage }, { pageGuidanceText }, { clarify }, { runAssistantTool }] = await Promise.all([
+      const [{ routeTeacherMessage }, { pageGuidanceText }, { clarify }, { runAssistantTool }, { decideJumpReply }] = await Promise.all([
         import('/src/assistant/orchestrate.ts'),
         import('/src/assistant/page-guidance.ts'),
         import('/src/assistant/clarify.ts'),
         import('/src/assistant/run.ts'),
+        import('/src/assistant/jump-intent.ts'),
       ])
       const paths = [
         '/dashboard', '/onboarding', '/settings', '/staff', '/staff-positions', '/rbac',
@@ -51,6 +52,9 @@ async function main() {
         missingGuides: paths.filter((path) => !pageGuidanceText(path)),
         spaceNext,
         progress,
+        jumpYes: decideJumpReply('好的，帮我跳转', [{ label: '打开规则', path: '/campus-buildings?tab=allocation' }]),
+        jumpNo: decideJumpReply('暂时不用', [{ label: '打开规则', path: '/campus-buildings?tab=allocation' }]),
+        jumpUnclear: decideJumpReply('规则是什么意思', [{ label: '打开规则', path: '/campus-buildings?tab=allocation' }]),
       }
     })
 
@@ -62,7 +66,10 @@ async function main() {
     assert.match(result.spaceNext.report, /选中已有校区/)
     assert.match(result.spaceNext.report, /0 栋楼宇/)
     assert.deepEqual(result.progress, ['读取空间资源现状', '判断阶段：1 个校区，0 栋楼宇，0 间场室'])
-    console.log('PASS: page-aware guidance covers all menus and space next-step tool completes without recursion')
+    assert.equal(result.jumpYes.kind, 'confirm')
+    assert.equal(result.jumpNo.kind, 'cancel')
+    assert.equal(result.jumpUnclear.kind, 'none')
+    console.log('PASS: page guidance, space next-step, and conversational jump confirmation')
   } finally {
     await browser.close()
   }

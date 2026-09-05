@@ -818,6 +818,91 @@
   border-color: #111827;
 }
 
+.assist-plan-actions.assist-jump-actions {
+  display: grid;
+  width: min(92%, 330px);
+  gap: 7px;
+  margin-top: 2px;
+}
+
+.assist-jump-question {
+  display: grid;
+  gap: 2px;
+  padding: 0 2px 2px;
+  color: #334155;
+}
+
+.assist-jump-question strong {
+  font-size: 12.5px;
+  font-weight: 700;
+}
+
+.assist-jump-question span {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.assist-plan-actions button.assist-jump-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 52px;
+  padding: 8px 9px 8px 12px;
+  border: 1px solid #93b4fa;
+  border-radius: 11px;
+  background: #eff6ff;
+  color: #17386f;
+  text-align: left;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.08);
+}
+
+.assist-plan-actions button.assist-jump-action:hover {
+  border-color: #2563eb;
+  background: #e4efff;
+  box-shadow: 0 6px 16px rgba(37, 99, 235, 0.14);
+  transform: translateY(-1px);
+}
+
+.assist-plan-actions button.assist-jump-action:focus-visible {
+  outline: 2px solid #60a5fa;
+  outline-offset: 2px;
+}
+
+.assist-jump-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.assist-jump-copy small {
+  color: #59729b;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.assist-jump-copy strong {
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.assist-jump-arrow {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+}
+
 .assist-advice {
   margin-top: 4px;
   background: #fff;
@@ -1019,6 +1104,34 @@ body[data-theme='tech'] .assist-bubble.is-bot {
 
 body[data-theme='tech'] .assist-bubble.is-bot .assist-mid-copy:hover {
   background: #e2e8f0;
+}
+
+body[data-theme='tech'] .assist-plan-actions button.assist-jump-action {
+  border-color: #31598f;
+  background: #15233a;
+  color: #e8f1ff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.22);
+}
+
+body[data-theme='tech'] .assist-jump-question {
+  color: #dbeafe;
+}
+
+body[data-theme='tech'] .assist-jump-question span {
+  color: #8fa4c2;
+}
+
+body[data-theme='tech'] .assist-plan-actions button.assist-jump-action:hover {
+  border-color: #60a5fa;
+  background: #1a2c48;
+}
+
+body[data-theme='tech'] .assist-jump-copy small {
+  color: #8fb5ed;
+}
+
+body[data-theme='tech'] .assist-jump-arrow {
+  background: #3b82f6;
 }
 
 body[data-theme='tech'] .assist-plus {
