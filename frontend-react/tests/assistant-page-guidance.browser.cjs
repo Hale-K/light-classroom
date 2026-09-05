@@ -10,13 +10,24 @@ async function main() {
       RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type; window.__vite_plugin_react_preamble_installed__ = true;
     </script></body></html>`
     await page.route('**/__assistant_page_test', route => route.fulfill({ contentType: 'text/html', body: html }))
+    await page.route('**/api/v1/facilities/overview', route => route.fulfill({
+      contentType: 'application/json',
+      body: JSON.stringify({ code: 0, message: 'ok', data: { stats: { campus_count: 1, building_count: 0, room_count: 0, multimedia_count: 0 }, campuses: [], buildings: [] } }),
+    }))
+    await page.route('**/api/v1/facilities/rooms', route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ code: 0, message: 'ok', data: [] }),
+    }))
+    await page.route('**/api/v1/facilities/allocation-rules', route => route.fulfill({
+      contentType: 'application/json', body: JSON.stringify({ code: 0, message: 'ok', data: [] }),
+    }))
     await page.goto('http://127.0.0.1:5176/__assistant_page_test')
 
     const result = await page.evaluate(async () => {
-      const [{ routeTeacherMessage }, { pageGuidanceText }, { clarify }] = await Promise.all([
+      const [{ routeTeacherMessage }, { pageGuidanceText }, { clarify }, { runAssistantTool }] = await Promise.all([
         import('/src/assistant/orchestrate.ts'),
         import('/src/assistant/page-guidance.ts'),
         import('/src/assistant/clarify.ts'),
+        import('/src/assistant/run.ts'),
       ])
       const paths = [
         '/dashboard', '/onboarding', '/settings', '/staff', '/staff-positions', '/rbac',
@@ -25,12 +36,21 @@ async function main() {
         '/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling',
         '/grading/1', '/stats/1', '/meetings', '/file-center', '/ai-providers',
       ]
+      const progress = []
+      const spaceNext = await runAssistantTool(
+        'nextStep',
+        '',
+        { here: '/campus-buildings?tab=resources', traceId: 'browser-test' },
+        line => progress.push(line),
+      )
       return {
         campusNext: routeTeacherMessage('我下一步该干什么', '/campus-buildings'),
         studentHelp: routeTeacherMessage('这个页面怎么用', '/students'),
         systemHelp: routeTeacherMessage('系统怎么用', '/dashboard'),
         spaceClarify: clarify('空间资源怎么配置'),
         missingGuides: paths.filter((path) => !pageGuidanceText(path)),
+        spaceNext,
+        progress,
       }
     })
 
@@ -39,7 +59,10 @@ async function main() {
     assert.deepEqual(result.systemHelp, { kind: 'tool', tool: 'howToUse', path: '/onboarding' })
     assert.equal(result.spaceClarify, null)
     assert.deepEqual(result.missingGuides, [])
-    console.log('PASS: page-aware assistant routing and guidance cover all teacher menus')
+    assert.match(result.spaceNext.report, /选中已有校区/)
+    assert.match(result.spaceNext.report, /0 栋楼宇/)
+    assert.deepEqual(result.progress, ['读取空间资源现状', '判断阶段：1 个校区，0 栋楼宇，0 间场室'])
+    console.log('PASS: page-aware guidance covers all menus and space next-step tool completes without recursion')
   } finally {
     await browser.close()
   }

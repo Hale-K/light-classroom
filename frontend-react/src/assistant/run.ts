@@ -173,9 +173,10 @@ export async function runAssistantTool(
 ): Promise<ToolResult> {
   const tid = extra?.traceId || '-'
   assistLog(tid, `tool.${tool}`, path || '')
+  const reportThinking = think
   const marked: ThinkFn = (line) => {
     assistLog(tid, line)
-    think?.(line)
+    reportThinking?.(line)
   }
   think = marked
   if (tool === 'pageGuide') {
