@@ -50,7 +50,7 @@ def generate_schedule_task(job_id: str, tenant_id: int, payload: dict) -> None:
         _worker_loop().run_until_complete(run_generate_payload(job_id, tenant_id, payload))
 
 
-_worker_loop: asyncio.AbstractEventLoop | None = None
+_worker_loop = None
 
 
 def _worker_loop() -> asyncio.AbstractEventLoop:
