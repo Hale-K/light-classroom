@@ -24,6 +24,7 @@ import type {
   TeachingAssignment,
 } from '@/types'
 import RuleDesigner from './RuleDesigner'
+import { setAssistantContext, clearAssistantContext } from '@/assistant/context'
 import RuleGroupWorkbench, {
   ruleGroupScopeLabel,
   type RuleGroup,
@@ -86,6 +87,11 @@ export default function SchedulingView() {
   } | null>(null)
   const [diagOpen, setDiagOpen] = useState(false)
   const [ruleCatalogEpoch, setRuleCatalogEpoch] = useState(0)
+  useEffect(() => {
+    const refreshRules = () => setRuleCatalogEpoch((n) => n + 1)
+    window.addEventListener('lc-assistant-rules-saved', refreshRules)
+    return () => window.removeEventListener('lc-assistant-rules-saved', refreshRules)
+  }, [])
   const [verifyVisible, setVerifyVisible] = useState(false)
   const lastGenerateRef = useRef<{ classIds?: number[]; ruleGroupId?: string }>({})
   const genWallClockRef = useRef<number | null>(null)
@@ -111,13 +117,18 @@ export default function SchedulingView() {
   const [versionsLoading, setVersionsLoading] = useState(false)
 
   const [activeTab, setActiveTab] = useState<'hours' | 'slots' | 'rules' | 'assignments' | 'schedule'>('slots')
-  const [searchParams] = useSearchParams()
+  const [searchParams, setSearchParams] = useSearchParams()
   useEffect(() => {
     const tab = searchParams.get('tab')
     if (tab === 'hours' || tab === 'slots' || tab === 'rules' || tab === 'assignments' || tab === 'schedule') {
       setActiveTab(tab)
+      return
     }
-  }, [searchParams])
+    const next = new URLSearchParams(searchParams)
+    next.set('tab', 'slots')
+    setSearchParams(next, { replace: true })
+  }, [searchParams, setSearchParams])
+
   const [resources, setResources] = useState<SchedulingResources>({
     teachers: [],
     subjects: [],
@@ -128,6 +139,14 @@ export default function SchedulingView() {
   const [strategies, setStrategies] = useState<ScheduleStrategyOption[]>([])
   const [calendar, setCalendar] = useState<ScheduleEntry[]>([])
   const [selectedClassId, setSelectedClassId] = useState<number>()
+  useEffect(() => {
+    const raw = searchParams.get('grade')
+    if (!raw || !resources.classes.length) return
+    const gid = Number(raw)
+    if (!Number.isFinite(gid)) return
+    const first = resources.classes.find((item) => Number(item.grade_id) === gid)
+    if (first) setSelectedClassId(first.id)
+  }, [searchParams, resources.classes])
   const [assignKeyword, setAssignKeyword] = useState('')
   const [appliedAssignKeyword, setAppliedAssignKeyword] = useState('')
   const [assignPage, setAssignPage] = useState(1)
@@ -149,6 +168,10 @@ export default function SchedulingView() {
   const [generationRuleVisible, setGenerationRuleVisible] = useState(false)
   const [generateRuleOptions, setGenerateRuleOptions] = useState<RuleGroup[]>([])
   const [selectedGenerateRuleId, setSelectedGenerateRuleId] = useState<string>()
+  useEffect(() => {
+    setAssistantContext('schedule', { academic_year: academicYear, term, class_id: selectedClassId, class_name: resources.classes.find((c) => c.id === selectedClassId)?.name })
+    return () => { clearAssistantContext('schedule'); clearAssistantContext('generation') }
+  }, [academicYear, term, selectedClassId, resources.classes])
   const [adjustmentEntry, setAdjustmentEntry] = useState<ScheduleEntry>()
   const [adjustmentOptions, setAdjustmentOptions] = useState<ScheduleAdjustmentOption[]>([])
   const [adjustmentLoading, setAdjustmentLoading] = useState(false)
@@ -870,6 +893,7 @@ export default function SchedulingView() {
         ...(ruleGroupId ? { rule_group_id: ruleGroupId } : {}),
       }
       const { job_id } = await schedulingApi.startGenerateJob(payload)
+      setAssistantContext('generation', { job_id })
       type GenerateJobResult = {
         created: number
         class_count: number
@@ -1346,7 +1370,13 @@ export default function SchedulingView() {
       <Tabs
         className="sk-tabs"
         activeKey={activeTab}
-        onChange={(key) => setActiveTab(key as 'hours' | 'slots' | 'rules' | 'assignments' | 'schedule')}
+        onChange={(key) => {
+          const tab = key as 'hours' | 'slots' | 'rules' | 'assignments' | 'schedule'
+          setActiveTab(tab)
+          const next = new URLSearchParams(searchParams)
+          next.set('tab', tab)
+          setSearchParams(next, { replace: true })
+        }}
         items={[
           {
             key: 'hours',

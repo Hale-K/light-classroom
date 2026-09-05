@@ -8,8 +8,8 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.ai.model.providers import ProbeError, load_model_ids, test_connection
 from app.ai.models import AiProvider
-from app.ai.providers import ProbeError, load_model_ids, test_connection
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 

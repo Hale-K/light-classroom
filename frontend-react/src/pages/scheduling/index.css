@@ -1803,6 +1803,20 @@
   font-weight: 700;
   line-height: 1;
 }
+.rule-group-add-btn.is-assist-pulse.ant-btn {
+  animation: rule-add-pulse 0.7s ease 0s 4;
+}
+@keyframes rule-add-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(124, 58, 237, 0.45);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(124, 58, 237, 0);
+    transform: scale(1.08);
+  }
+}
 .rule-group-workbench {
   display: grid;
   grid-template-columns: 180px 280px minmax(560px, 1fr) 340px;

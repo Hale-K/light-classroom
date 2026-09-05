@@ -10,6 +10,10 @@
 | `/dashboard` | 工作台 |
 | `/scheduling` | 排课 |
 | `/teacher-profiles` | 教师档案 |
+| `/settings` | 系统设置（学年学期） |
+| `/ai-providers` | 模型服务商（老师自填 Key） |
+
+全局停靠栏：猫头鹰助手（Agentic RAG，见 [教务助手](assistant-agent.md)）。
 
 请求头 `X-School-Code` 为当前 `tenant.code`。前端登录后会带上学校代码。
 

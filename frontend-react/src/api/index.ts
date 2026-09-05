@@ -1090,15 +1090,53 @@ export const aiProviderApi = {
     unwrap<string[]>(http.post('/ai-providers/load-models', data)),
 }
 
+export type AssistantPlan = {
+  id: string
+  status: 'pending' | 'executed' | 'cancelled'
+  summary: string
+  expires_at: string
+  result?: { text: string; path: string; count: number } | null
+}
+
+export type AssistantRun = {
+  id: string
+  status: 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
+  phase: string
+  message: string
+  elapsed_seconds: number
+  phase_elapsed_seconds: number
+  heartbeat_at: string
+  events: { phase: string; message: string; at: string }[]
+  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null } | null
+}
+
 export const assistantApi = {
-  chat: (data: {
-    messages: { role: 'user' | 'assistant'; content: string }[]
-    page_title?: string
-    page_path?: string
-    can?: string[]
-    cannot?: string[]
-  }) =>
-    unwrap<{ text: string }>(http.post('/assistant/chat', data, { timeout: 120000 })),
+  startRun: (data: Record<string, unknown>, signal?: AbortSignal) =>
+    unwrap<AssistantRun>(http.post('/assistant/runs', data, { timeout: 8000, signal })),
+  readRun: (id: string, signal?: AbortSignal) =>
+    unwrap<AssistantRun>(http.get(`/assistant/runs/${encodeURIComponent(id)}`, { timeout: 5000, signal })),
+  cancelRun: (id: string) =>
+    unwrap<AssistantRun>(http.post(`/assistant/runs/${encodeURIComponent(id)}/cancel`, {}, { timeout: 5000 })),
+  decide: (id: string, decision: 'confirm' | 'cancel') =>
+    unwrap<AssistantPlan>(http.post(`/assistant/actions/${encodeURIComponent(id)}`, { decision })),
+  chat: (
+    data: {
+      messages: { role: 'user' | 'assistant'; content: string }[]
+      page_title?: string
+      page_path?: string
+      can?: string[]
+      cannot?: string[]
+      message_id?: string
+    },
+    opts?: { signal?: AbortSignal },
+  ) =>
+    unwrap<{
+      text: string
+      message_id?: string | null
+      think?: string[]
+      choices?: { label: string; send: string }[]
+      plan?: AssistantPlan | null
+    }>(http.post('/assistant/chat', data, { timeout: 120000, signal: opts?.signal })),
 }
 
 export { setAuthResolver }

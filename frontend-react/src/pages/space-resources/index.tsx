@@ -1,11 +1,12 @@
-import { useState } from 'react'
 import { Tabs } from 'antd'
+import { useSearchParams } from 'react-router-dom'
 import PageHeader from '@/components/PageHeader'
 import CampusBuildingsView from '@/pages/campus-buildings'
 import Icon from '@/components/Icon'
 
 export default function SpaceResourcesView() {
-  const [activeTab, setActiveTab] = useState(() => new URLSearchParams(window.location.search).get('tab') || 'resources')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab = searchParams.get('tab') || 'resources'
 
   return <div className="zh-page facility-page">
     <PageHeader title="空间资源" />
@@ -13,7 +14,11 @@ export default function SpaceResourcesView() {
     <Tabs
       className="facility-tabs"
       activeKey={activeTab}
-      onChange={setActiveTab}
+      onChange={(key) => {
+        const next = new URLSearchParams(searchParams)
+        next.set('tab', key)
+        setSearchParams(next, { replace: true })
+      }}
       items={[
         {
           key: 'resources',

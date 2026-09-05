@@ -11,6 +11,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { schedulingApi } from "@/api";
+import { setAssistantContext, clearAssistantContext } from '@/assistant/context';
 import type {
   Grade,
   SchedulingResources,
@@ -3638,6 +3639,10 @@ export default function RuleGroupWorkbench({
     groups.find((item) => item.id === activeGroupId) ||
     groups[0] ||
     loadGroup();
+  useEffect(() => {
+    if (!loadingCatalog && groups.length) setAssistantContext('rules', { rule_group_id: group.id, rule_group_name: group.name });
+    return () => clearAssistantContext('rules');
+  }, [loadingCatalog, groups.length, group.id, group.name]);
   const updateActiveGroup = (
     next: RuleGroup | ((current: RuleGroup) => RuleGroup),
   ) => {
@@ -3652,6 +3657,15 @@ export default function RuleGroupWorkbench({
   const [open, setOpenState] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [typePickerOpen, setTypePickerOpen] = useState(false);
+  const [hintAdd, setHintAdd] = useState(false);
+  useEffect(() => {
+    const onHint = () => {
+      setHintAdd(true)
+      window.setTimeout(() => setHintAdd(false), 2800)
+    }
+    window.addEventListener('lc-assist-hint-rule-add', onHint)
+    return () => window.removeEventListener('lc-assist-hint-rule-add', onHint)
+  }, []);
   const [createForm, setCreateForm] = useState<{
     title: string;
     gradeId?: number;
@@ -4821,7 +4835,7 @@ export default function RuleGroupWorkbench({
                   {visibleRules.length} / {group.rules.length}
                 </Tag>
                 <Button
-                  className="rule-group-add-btn"
+                  className={`rule-group-add-btn${hintAdd ? ' is-assist-pulse' : ''}`}
                   size="small"
                   type="primary"
                   title="新增规则"

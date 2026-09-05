@@ -1,5 +1,5 @@
 import { routeTitle } from '@/router/meta'
-import type { AssistantTool } from './run'
+export type AssistantTool = 'openScheduling' | 'checkTeachers' | 'checkSettings' | 'guideGrade' | 'howToUse' | 'howToUseScheduling' | 'countSubjectTeachers' | 'proposeHours' | 'go' | 'explainRulePack' | 'executeHours'
 
 export type AssistantTask = { label: string; path: string; tool: AssistantTool }
 
@@ -22,7 +22,7 @@ const SKILLS: PageSkill[] = [
     id: 'scheduling',
     match: '/scheduling',
     can: ['打开排课并切到规则组', '读取学年学期和网格', '说明冲突格会标红'],
-    cannot: ['不会替你点生成或改格子', '不会改 COS / 云主机'],
+    cannot: ['不会改格子', '不会改 COS / 云主机'],
     tasks: [
       { label: '当前就在排课：先看课时与规则组，冲突格会标红', path: '/scheduling?tab=hours', tool: 'openScheduling' },
       CORE_TASKS[1],
@@ -56,7 +56,7 @@ const FALLBACK: PageSkill = {
   id: 'default',
   match: '/',
   can: ['打开排课 / 档案 / 设置并核对现网数据'],
-  cannot: ['不会代操作云产品', '不会替你点生成或保存设置'],
+  cannot: ['不会代操作云产品'],
   tasks: CORE_TASKS,
 }
 

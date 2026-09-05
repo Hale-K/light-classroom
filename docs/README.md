@@ -26,6 +26,7 @@
 | [ER 图集](diagrams/index.html) | 分域图（浏览器打开） |
 | [排课与座位](specs/schedule-and-seating.md) | 规格 |
 | [新高考走班](specs/new-gaokao-walk-class.md) | 规格 |
+| [教务助手](assistant-agent.md) | 猫头鹰 Agentic RAG：取说明书 / 查教务 API，不是向量搜文档 |
 
 ## 参与项目
 
