@@ -1,11 +1,12 @@
-import { authApi, orgApi, schedulingApi, teacherProfilesApi } from '@/api'
+import { authApi, facilityApi, orgApi, schedulingApi, teacherProfilesApi } from '@/api'
 import { allocateHours, type HoursDraft } from '@/assistant/hoursPlan'
 import type { ConsecutiveHint, PrepSlot } from '@/assistant/intent'
 import { placeLabel, schedTab } from '@/assistant/place'
 import { ruleGuideCopy, type RuleGuide } from '@/assistant/ruleGuide'
 import { assistLog } from '@/assistant/trace'
+import { pageGuidanceText } from '@/assistant/page-guidance'
 
-export type AssistantTool = 'openScheduling' | 'checkTeachers' | 'checkSettings' | 'guideGrade' | 'howToUse' | 'howToUseScheduling' | 'countSubjectTeachers' | 'proposeHours' | 'go' | 'explainRulePack' | 'executeHours'
+export type AssistantTool = 'openScheduling' | 'checkTeachers' | 'checkSettings' | 'guideGrade' | 'howToUse' | 'howToUseScheduling' | 'countSubjectTeachers' | 'proposeHours' | 'go' | 'explainRulePack' | 'executeHours' | 'nextStep' | 'pageGuide'
 
 export type JumpLink = { label: string; path: string }
 
@@ -177,6 +178,64 @@ export async function runAssistantTool(
     think?.(line)
   }
   think = marked
+  if (tool === 'pageGuide') {
+    const here = (extra?.here || path || '/').split('?')[0]
+    const report = pageGuidanceText(here)
+    return { path: '', report: report || '请告诉我当前要处理的教务对象，我会按页面给出操作顺序。' }
+  }
+  if (tool === 'nextStep' && (extra?.here || '').startsWith('/campus-buildings')) {
+    think?.('读取空间资源现状')
+    const [overview, rooms, rules] = await Promise.all([
+      facilityApi.overview(),
+      facilityApi.rooms(),
+      facilityApi.allocationRules(),
+    ])
+    const campuses = overview.stats.campus_count
+    const buildings = overview.stats.building_count
+    const roomCount = overview.stats.room_count
+    const activeRules = rules.filter((rule) => rule.status === 'active')
+    const assignedRooms = rooms.filter((room) => (room.cohort_allocations || []).length > 0)
+    const boundRooms = assignedRooms.filter((room) => (room.class_assignments || []).length > 0)
+    think?.(`判断阶段：${campuses} 个校区，${buildings} 栋楼宇，${roomCount} 间场室`)
+
+    if (campuses === 0) {
+      return {
+        path: '',
+        report: '下一步先点右上角「新增校区」。校区是楼宇和场室的上级；建好校区后，选中它再新增楼宇。当前还没有校区，所以后面的资源分配和班级划分暂时无法开始。',
+      }
+    }
+    if (buildings === 0) {
+      return {
+        path: '',
+        report: `下一步：\n1. 在左侧展开「学校空间」，选中已有校区。\n2. 点右上角「新增楼宇」，填写楼宇名称、编号和楼层数。\n3. 建好后选中该楼宇，再点「新增场室」。\n\n当前有 ${campuses} 个校区、0 栋楼宇、0 间场室，所以先建楼宇；资源分配规则和班级划分要等场室建好后再做。`,
+      }
+    }
+    if (roomCount === 0) {
+      return {
+        path: '',
+        report: `下一步选中左侧的一栋楼宇，再点右上角「新增场室」。填写楼层、容量、场室类型，并确认是否可用于排课、排考或会议。当前有 ${campuses} 个校区、${buildings} 栋楼宇，但还没有场室。`,
+      }
+    }
+    if (!activeRules.length || !assignedRooms.length) {
+      return {
+        path: '',
+        jumps: [{ label: '去资源分配规则', path: '/campus-buildings?tab=allocation' }],
+        report: `空间层级已经建立：${campuses} 个校区、${buildings} 栋楼宇、${roomCount} 间场室。下一步进入「资源分配规则」，选择目标届别和资源范围，先预览匹配结果，再执行分配。当前 ${activeRules.length} 条规则生效、${assignedRooms.length} 间教室已分配。`,
+      }
+    }
+    if (boundRooms.length < assignedRooms.length) {
+      return {
+        path: '',
+        jumps: [{ label: '去班级划分', path: '/campus-buildings?tab=class-planning' }],
+        report: `已有 ${assignedRooms.length} 间教室分配给届别，其中 ${boundRooms.length} 间已绑定行政班。下一步进入「班级划分」，为剩余 ${assignedRooms.length - boundRooms.length} 间教室生成或绑定行政班，然后到班级管理补充班主任和学生名单。`,
+      }
+    }
+    return {
+      path: '',
+      jumps: [{ label: '去班级管理', path: '/classes' }],
+      report: `空间资源、届别分配和班级教室绑定已经有基础数据：${campuses} 个校区、${buildings} 栋楼宇、${roomCount} 间场室，${boundRooms.length} 间已绑定班级。下一步到「班级管理」核对班主任和学生名单，再进入排课配置。`,
+    }
+  }
   if (tool === 'proposeHours') {
     think?.('分析意图：按周课时拆科目')
     think?.('核对本校网格容量')
@@ -386,12 +445,11 @@ export async function runAssistantTool(
   }
 
   if (tool === 'howToUse') {
-    const { year, term, gridLine } = await yearGridLine()
-    const dest = path || '/scheduling?tab=hours'
+    const dest = path || '/onboarding'
     return {
       path: dest,
-      jumps: [{ label: '去课时管理', path: dest }],
-      report: `排课按这个顺序：① 系统设置核对学年学期（现在 ${year} 第${term}学期，${gridLine}）；② 课时管理按班填每周节数；③ 任教关系对老师；④ 课位结构确认几天几节；⑤ 建立规则加约束；⑥ 在排课页点「生成课表」。当前不在排课页的话，先点「去课时管理」。想排某一级，直接说「我想排高一的课」。`,
+      jumps: [{ label: '去新手引导', path: dest }],
+      report: '教务系统建议按这个顺序使用：① 系统设置确认学年学期；② 人员账号、岗位权限和空间资源准备基础数据；③ 建学生、行政班、科目和教师任教；④ 完成学生选课、排课和班级排座；⑤ 配置试卷、考场、日程和监考；⑥ 扫描阅卷并查看成绩。可以打开「新手引导」看当前学校还缺哪一步，也可以在任何页面直接问“这个页面怎么用”或“我下一步做什么”。',
     }
   }
 

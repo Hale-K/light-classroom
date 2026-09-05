@@ -1,5 +1,6 @@
 import { routeTitle } from '@/router/meta'
-export type AssistantTool = 'openScheduling' | 'checkTeachers' | 'checkSettings' | 'guideGrade' | 'howToUse' | 'howToUseScheduling' | 'countSubjectTeachers' | 'proposeHours' | 'go' | 'explainRulePack' | 'executeHours'
+import { pageGuidance } from '@/assistant/page-guidance'
+export type AssistantTool = 'openScheduling' | 'checkTeachers' | 'checkSettings' | 'guideGrade' | 'howToUse' | 'howToUseScheduling' | 'countSubjectTeachers' | 'proposeHours' | 'go' | 'explainRulePack' | 'executeHours' | 'nextStep' | 'pageGuide'
 
 export type AssistantTask = { label: string; path: string; tool: AssistantTool }
 
@@ -69,6 +70,17 @@ export function skillFor(pathname: string): PageSkill {
 
 export function pageSnapshot(pathname: string) {
   const skill = skillFor(pathname)
+  const guide = pageGuidance(pathname)
+  if (guide) {
+    const guideTask: AssistantTask = { label: `告诉我${guide.title}怎么用`, path: '', tool: 'pageGuide' }
+    return {
+      path: pathname,
+      title: routeTitle(pathname),
+      can: [`说明${guide.title}的用途和操作顺序`, '结合当前页面回答下一步', ...skill.can].slice(0, 8),
+      cannot: skill.id === 'default' ? ['不会在未确认时修改教务数据'] : skill.cannot,
+      tasks: [guideTask, ...skill.tasks].slice(0, 3),
+    }
+  }
   return {
     path: pathname,
     title: routeTitle(pathname),

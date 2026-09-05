@@ -11,6 +11,7 @@ import {
   type AssistantTool,
 } from '@/assistant/run'
 import { CORE_TASKS } from '@/assistant/skills'
+import { pageGuidance } from '@/assistant/page-guidance'
 
 export type Extra = {
   grade?: string
@@ -31,14 +32,20 @@ export type Route =
 /** 教务编排：先工具，再说明书口径，再模型。不上 LangGraph。 */
 export function routeTeacherMessage(text: string, pathname: string): Route {
   const content = text.trim()
-  if (!content) return { kind: 'say', text: '请说一句排课相关的话。' }
+  if (!content) return { kind: 'say', text: '请告诉我你正在处理哪项教务工作。' }
 
-  if (isSchedulingPageHelp(content)) {
+  if (/下一步|接下来|该干什么|该做什么|先做什么|现在.*做/.test(content) && pathname.startsWith('/campus-buildings')) {
+    return { kind: 'tool', tool: 'nextStep', path: '' }
+  }
+  if (isSchedulingPageHelp(content) && (pathname.startsWith('/scheduling') || /排课/.test(content))) {
     const onPage = pathname.startsWith('/scheduling')
     return { kind: 'tool', tool: 'howToUseScheduling', path: onPage ? '' : '/scheduling?tab=hours' }
   }
   if (isHowToUse(content)) {
-    return { kind: 'tool', tool: 'howToUse', path: '/scheduling?tab=hours' }
+    return { kind: 'tool', tool: 'howToUse', path: '/onboarding' }
+  }
+  if (pageGuidance(pathname) && /这个页|这个页面|本页|这里|怎么用|如何用|怎么操作|如何操作|下一步|接下来|该干什么|该做什么|先做什么/.test(content)) {
+    return { kind: 'tool', tool: 'pageGuide', path: '' }
   }
   // 规则和本校现状交给后端工具循环，保留完整上下文与确认草稿。
   if (/规则|禁排|不能排|不排|连堂|连着上|备课|每天最多|每日上限|班主任|准备|还缺什么/.test(content)) {

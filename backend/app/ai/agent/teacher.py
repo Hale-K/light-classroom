@@ -48,10 +48,12 @@ def rule_jumps(query: str, text: str, page_path: str | None) -> list[dict]:
     return [{"label": "去规则组", "path": _RULE_JUMP_PATH}]
 
 
-def local_reply(text: str) -> str | None:
+def local_reply(text: str, page_path: str | None = None) -> str | None:
     q = (text or "").strip().rstrip("！!。.~～")
     if q.lower() in _GREET:
         return GREET_REPLY
+    if page_path and any(word in q for word in ("下一步", "接下来", "该干什么", "该做什么", "先做什么")):
+        return None
     hit = clarify(text or "")
     if hit:
         return hit.text
@@ -177,7 +179,7 @@ async def handle_teacher_turn(
         raise ChatError("请输入内容")
     last = turns[-1]
     if len(turns) == 1 and last.get("role") == "user":
-        fixed = local_reply(str(last.get("content") or ""))
+        fixed = local_reply(str(last.get("content") or ""), page_path)
         if fixed:
             logger.info("assistant.turn local id=%s", message_id or "-")
             return TeacherTurn(text=fixed)
