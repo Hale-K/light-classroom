@@ -392,7 +392,10 @@ export default function AssistantDock() {
         agentConversationRef.current = true
         const history = threadRef.current.filter((m) => m.text)
         halt()
-        const runId = resumeId || crypto.randomUUID().replaceAll('-', '')
+        // HTTP 部署（非安全上下文）下浏览器不提供 crypto.randomUUID，走 getRandomValues 回退
+        const runId = resumeId || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+          ? crypto.randomUUID().replaceAll('-', '')
+          : Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join(''))
         activeRunRef.current = runId
         sessionStorage.setItem(runStorageKey, runId)
         if (!resumeId) await assistantApi.startRun({
