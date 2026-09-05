@@ -47,6 +47,10 @@ async function main() {
       return {
         campusNext: routeTeacherMessage('我下一步该干什么', '/campus-buildings'),
         studentHelp: routeTeacherMessage('这个页面怎么用', '/students'),
+        contextualCheck: routeTeacherMessage('我想让你帮忙核对数据', '/settings'),
+        configuredRight: routeTeacherMessage('这个页面我配的对吗？', '/settings'),
+        contextualReference: routeTeacherMessage('这个是什么意思', '/settings', true),
+        isolatedReference: routeTeacherMessage('这个是什么意思', '/settings'),
         systemHelp: routeTeacherMessage('系统怎么用', '/dashboard'),
         spaceClarify: clarify('空间资源怎么配置'),
         missingGuides: paths.filter((path) => !pageGuidanceText(path)),
@@ -60,6 +64,10 @@ async function main() {
 
     assert.deepEqual(result.campusNext, { kind: 'tool', tool: 'nextStep', path: '' })
     assert.deepEqual(result.studentHelp, { kind: 'tool', tool: 'pageGuide', path: '' })
+    assert.deepEqual(result.contextualCheck, { kind: 'llm' })
+    assert.deepEqual(result.configuredRight, { kind: 'llm' })
+    assert.deepEqual(result.contextualReference, { kind: 'llm' })
+    assert.equal(result.isolatedReference.kind, 'say')
     assert.deepEqual(result.systemHelp, { kind: 'tool', tool: 'howToUse', path: '/onboarding' })
     assert.equal(result.spaceClarify, null)
     assert.deepEqual(result.missingGuides, [])

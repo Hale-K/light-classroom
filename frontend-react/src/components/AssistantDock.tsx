@@ -20,6 +20,7 @@ import './assistant-dock.css'
 const DOCK_KEY = 'zh_assistant_dock_collapsed'
 const STAR_HINT = ['很不满意', '不满意', '一般', '满意', '非常满意']
 const RATE_KEY = 'zh_assistant_satisfaction'
+const THREAD_LIMIT = 30
 
 type ChatMsg = {
   role: 'user' | 'bot'
@@ -32,6 +33,41 @@ type ChatMsg = {
   advice?: string
   choices?: { label: string; send: string; act?: () => void }[]
   think?: { done: string[]; live?: string }
+}
+
+function storedThread(key: string): ChatMsg[] {
+  try {
+    const raw = JSON.parse(localStorage.getItem(key) || '[]') as unknown
+    if (!Array.isArray(raw)) return []
+    return raw.slice(-THREAD_LIMIT).flatMap((item): ChatMsg[] => {
+      if (!item || typeof item !== 'object') return []
+      const value = item as Record<string, unknown>
+      if ((value.role !== 'user' && value.role !== 'bot') || typeof value.text !== 'string' || !value.text.trim()) return []
+      return [{
+        role: value.role,
+        text: value.text.slice(0, 8000),
+        mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
+      }]
+    })
+  } catch {
+    return []
+  }
+}
+
+function rememberThread(key: string, messages: ChatMsg[]) {
+  const safe = messages
+    .filter((message) => message.text.trim())
+    .slice(-THREAD_LIMIT)
+    .map((message) => ({
+      role: message.role,
+      text: (message.plan ? `${message.text}\n\n${message.plan.summary}` : message.text).slice(0, 8000),
+      mid: message.mid,
+    }))
+  try {
+    localStorage.setItem(key, JSON.stringify(safe))
+  } catch {
+    // Storage can be unavailable or full; the live conversation must keep working.
+  }
 }
 
 type Panel = 'support' | 'notice' | 'docs' | 'home' | 'rate' | null
@@ -154,11 +190,15 @@ function StarPick({
 export default function AssistantDock() {
   const location = useLocation()
   const navigate = useNavigate()
+  const schoolCode = useAuthStore((s) => s.schoolCode)
+  const userId = useAuthStore((s) => s.user?.id)
+  const threadStorageKey = `lc-assistant-thread:${schoolCode}:${userId ?? 'anonymous'}`
+  const runStorageKey = `lc-assistant-run:${schoolCode}:${userId ?? 'anonymous'}`
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(DOCK_KEY) === '1')
   const [panel, setPanel] = useState<Panel>(null)
   const [noticeUnread, setNoticeUnread] = useState(true)
   const [draft, setDraft] = useState('')
-  const [thread, setThread] = useState<ChatMsg[]>([])
+  const [thread, setThread] = useState<ChatMsg[]>(() => storedThread(threadStorageKey))
   const [chatting, setChatting] = useState(false)
   const [helpTab, setHelpTab] = useState<HelpTab>('faq')
   const [helpQuery, setHelpQuery] = useState('')
@@ -177,7 +217,7 @@ export default function AssistantDock() {
     document.body.dataset.theme = themeMode
     localStorage.setItem('zh_theme', themeMode)
   }, [themeMode])
-  const threadRef = useRef<ChatMsg[]>([])
+  const threadRef = useRef<ChatMsg[]>(thread)
   const busyRef = useRef(false)
   const dirtyRef = useRef(false)
   const lockMergeRef = useRef(false)
@@ -189,14 +229,11 @@ export default function AssistantDock() {
   const [runProgress, setRunProgress] = useState<AssistantRun | null>(null)
   const [connectionNote, setConnectionNote] = useState('')
   const [recoverable, setRecoverable] = useState(false)
-  const schoolCode = useAuthStore((s) => s.schoolCode)
-  const userId = useAuthStore((s) => s.user?.id)
-  const runStorageKey = `lc-assistant-run:${schoolCode}:${userId ?? 'anonymous'}`
-
   const commitThread = (updater: (prev: ChatMsg[]) => ChatMsg[]) => {
     const next = updater(threadRef.current)
     threadRef.current = next
     setThread(next)
+    rememberThread(threadStorageKey, next)
   }
 
   const confirmJumps = (result: { path?: string; jumps?: JumpLink[] }, hereNow: string): JumpLink[] => {
@@ -380,7 +417,10 @@ export default function AssistantDock() {
           })
           break
         }
-        const route = resumeId || agentConversationRef.current ? { kind: 'llm' as const } : routeTeacherMessage(merged, hereNow)
+        const hasHistory = threadRef.current.some((item) => item.role === 'bot' && Boolean(item.text))
+        const route = resumeId || agentConversationRef.current
+          ? { kind: 'llm' as const }
+          : routeTeacherMessage(merged, hereNow, hasHistory)
         assistLog(tid, 'route', route.kind === 'tool' ? `${route.tool} ${route.path}` : route.kind)
         halt()
         if (dirtyRef.current) continue
@@ -509,8 +549,10 @@ export default function AssistantDock() {
     activeRunRef.current = null
     agentConversationRef.current = false
     forcedRef.current = null
-    threadRef.current = []
-    setThread([])
+    const restored = storedThread(threadStorageKey)
+    threadRef.current = restored
+    setThread(restored)
+    agentConversationRef.current = false
     setChatting(false)
     setRecoverable(false)
     setRunProgress(null)
@@ -522,7 +564,7 @@ export default function AssistantDock() {
       loopingRef.current = false
       busyRef.current = false
     }
-  }, [runStorageKey])
+  }, [runStorageKey, threadStorageKey])
 
   const send = (text?: string) => {
     const content = (text ?? draft).trim()
@@ -588,6 +630,7 @@ export default function AssistantDock() {
     dirtyRef.current = false
     threadRef.current = []
     setThread([])
+    localStorage.removeItem(threadStorageKey)
     setDraft('')
     agentConversationRef.current = false
   }
@@ -700,11 +743,11 @@ export default function AssistantDock() {
                 </button>
                 {panel === 'support' && (
                   <div className="assist-menu" role="menu">
-                    <button type="button" onClick={() => { setPanel('home'); setThread([{ role: 'bot', text: '使用上卡住了可以说页面和操作。排课、账号、导入都可以问。' }]) }}>
+                    <button type="button" onClick={() => { setPanel('home'); commitThread(() => [{ role: 'bot', text: '使用上卡住了可以说页面和操作。排课、账号、导入都可以问。' }]) }}>
                       <strong>使用咨询</strong>
                       <span>排课、账号、导入怎么配，按当前学校说明</span>
                     </button>
-                    <button type="button" onClick={() => { setPanel('home'); setThread([{ role: 'bot', text: '生成失败或导入报错，把提示原文发过来。后台任务请看 Celery 日志。' }]) }}>
+                    <button type="button" onClick={() => { setPanel('home'); commitThread(() => [{ role: 'bot', text: '生成失败或导入报错，把提示原文发过来。后台任务请看 Celery 日志。' }]) }}>
                       <strong>故障协助</strong>
                       <span>生成超时、冲突标红、名单导入失败</span>
                     </button>
@@ -932,7 +975,7 @@ export default function AssistantDock() {
                         <button
                           type="button"
                           onClick={() =>
-                            setThread((prev) => {
+                            commitThread((prev) => {
                               const next = [...prev]
                               next[i] = { role: 'bot', text: `${msg.text}\n已取消，未写入。` }
                               return next
@@ -1003,7 +1046,7 @@ export default function AssistantDock() {
                         <button
                           type="button"
                           onClick={() =>
-                            setThread((prev) => [
+                            commitThread((prev) => [
                               ...prev,
                               {
                                 role: 'bot',

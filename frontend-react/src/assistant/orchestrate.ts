@@ -30,9 +30,13 @@ export type Route =
   | { kind: 'llm' }
 
 /** 教务编排：先工具，再说明书口径，再模型。不上 LangGraph。 */
-export function routeTeacherMessage(text: string, pathname: string): Route {
+export function routeTeacherMessage(text: string, pathname: string, hasHistory = false): Route {
   const content = text.trim()
   if (!content) return { kind: 'say', text: '请告诉我你正在处理哪项教务工作。' }
+
+  if (pageGuidance(pathname) && /核对|检查|校验|配.{0,4}对吗|配置.{0,4}(正确|有问题)|数据.{0,4}(对吗|正确|有问题)/.test(content)) {
+    return { kind: 'llm' }
+  }
 
   if (/下一步|接下来|该干什么|该做什么|先做什么|现在.*做/.test(content) && pathname.startsWith('/campus-buildings')) {
     return { kind: 'tool', tool: 'nextStep', path: '' }
@@ -114,7 +118,7 @@ export function routeTeacherMessage(text: string, pathname: string): Route {
     return { kind: 'tool', tool: 'go', path: '/classes' }
   }
   const unclear = clarify(content)
-  if (unclear) return { kind: 'say', text: unclear.text }
+  if (unclear) return hasHistory ? { kind: 'llm' } : { kind: 'say', text: unclear.text }
   const canned = matchPlaybook(content)
   if (canned) return { kind: 'say', text: canned }
   return { kind: 'llm' }

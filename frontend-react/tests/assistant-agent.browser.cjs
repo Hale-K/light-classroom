@@ -21,11 +21,13 @@ async function main() {
     let conflict = false
     let slow = false
     let lastId
+    let lastMessages = []
     const runs = new Map()
     await page.route('**/api/v1/assistant/runs', async route => {
       chatCalls++
       const body = route.request().postDataJSON()
       assert(body.messages.length <= 20)
+      lastMessages = body.messages
       lastId = body.request_id
       const run = { id: lastId, status: slow ? 'running' : 'done', phase: 'tool', message: '正在查询本校规则组', elapsed_seconds: 18, phase_elapsed_seconds: 16, heartbeat_at: new Date().toISOString(), events: [{ message: '正在查询本校规则组', phase: 'tool' }], result: { text: '请核对规则草稿。', plan } }
       runs.set(lastId, run)
@@ -51,6 +53,9 @@ async function main() {
     async function draft() {
       await page.goto('http://127.0.0.1:5176/__assistant_agent_test')
       await page.getByTitle('轻课堂助手', { exact: true }).click()
+      if (await page.locator('.assist-thread').count()) {
+        await page.getByRole('button', { name: '新对话', exact: true }).last().click()
+      }
       await page.locator('textarea').fill('帮我添加规则：数学周三第6、7节不能排课，硬约束')
       await page.getByRole('button', { name: '发送', exact: true }).click()
       await page.getByRole('button', { name: '确认保存规则' }).waitFor()
@@ -82,6 +87,19 @@ async function main() {
       return body && body.scrollHeight > body.clientHeight
         && body.scrollHeight - body.scrollTop - body.clientHeight <= 2
     })
+    const storedConversation = await page.evaluate(() => Object.entries(localStorage)
+      .find(([key]) => key.startsWith('lc-assistant-thread:'))?.[1] || '')
+    assert.match(storedConversation, /再帮我核对一次当前规则/)
+    await page.reload()
+    await page.getByTitle('轻课堂助手', { exact: true }).click()
+    await page.locator('.assist-turn.is-user').filter({ hasText: '再帮我核对一次当前规则' }).waitFor()
+    await page.locator('.assist-turn.is-bot').filter({ hasText: '请核对规则草稿。' }).last().waitFor()
+    const contextResponse = page.waitForResponse(response => response.url().endsWith('/api/v1/assistant/runs') && response.request().method() === 'POST')
+    await page.locator('textarea').fill('这个是什么意思')
+    await page.getByRole('button', { name: '发送', exact: true }).click()
+    await contextResponse
+    assert.equal(lastMessages.at(-1).content, '这个是什么意思')
+    assert(lastMessages.some(message => message.content.includes('再帮我核对一次当前规则')), 'Reloaded history must reach the next model request')
     await page.setViewportSize({ width: 390, height: 844 })
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
     assert.equal(overflow, false, 'Mobile page must not overflow')
