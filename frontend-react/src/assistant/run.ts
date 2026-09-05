@@ -235,7 +235,7 @@ export async function runAssistantTool(
         ? `${label}还没有行政班，无法写入。`
         : target > maxCap
           ? `${label}有 ${classIds.length} 个班，但总额超过网格，不提供写入。`
-          : `${label} ${classIds.length} 个班。点下方「确认写入」会按此表覆盖各班对应科目课时（晚课仍为 0）。`
+          : `${label} ${classIds.length} 个班。点下方「确认写入课时」会按此表覆盖各班对应科目课时（晚课仍为 0）。`
 
     return {
       path: grade ? `/scheduling?tab=hours&grade=${grade.id}` : '/classes',
@@ -296,7 +296,7 @@ export async function runAssistantTool(
       const copy = ruleGuideCopy(guide, onRules)
       return {
         path: '/scheduling?tab=rules',
-        jumps: onRules ? [] : [{ label: '去规则组', path: '/scheduling?tab=rules' }],
+        jumps: onRules ? [] : [{ label: '去建立规则', path: '/scheduling?tab=rules' }],
         report: copy.report,
         advice: copy.advice,
       }
@@ -305,29 +305,29 @@ export async function runAssistantTool(
     if (consecutive) {
       const here = placeLabel(extra?.here)
       const tab = schedTab(extra?.here)
-      think?.(`判断路由：当前在${here}；课时管理填节数，规则组加连堂`)
+      think?.(`判断路由：当前在${here}；课时管理填节数，建立规则加连堂`)
       const hoursNeed = consecutive.weekly
         ? `把${consecutive.subject}工作日周课时填成 ${consecutive.weekly} 节（周一到周五总量，不是规则）`
         : `把${consecutive.subject}工作日周课时填够（连堂不代替节数）`
       const routeLine =
         tab === 'hours'
-          ? `当前已在课时管理。请先在本页${hoursNeed}，再点「去规则组」。`
+          ? `当前已在课时管理。请先在本页${hoursNeed}，再点「去建立规则」。`
           : tab === 'rules'
-            ? `当前已在规则组。请先点「去课时管理」${hoursNeed}，再回到本页加组件。`
-            : `当前在「${here}」。请先跳到课时管理填节数，再跳到规则组加组件。`
+            ? `当前已在建立规则。请先点「去课时管理」${hoursNeed}，再回到本页加组件。`
+            : `当前在「${here}」。请先跳到课时管理填节数，再跳到建立规则加组件。`
       return {
         path: '/scheduling?tab=hours',
         jumps: [
           { label: tab === 'hours' ? '已在课时管理' : '去课时管理', path: '/scheduling?tab=hours' },
-          { label: tab === 'rules' ? '已在规则组' : '去规则组', path: '/scheduling?tab=rules' },
+          { label: tab === 'rules' ? '已在建立规则' : '去建立规则', path: '/scheduling?tab=rules' },
         ],
         report: routeLine,
-        advice: `建议添加规则组件：学科连堂，目标「${consecutive.subject}」，每周至少 1 天连续 2 节。规则组里已有模板「${consecutive.subject}连堂规则」。`,
+        advice: `建议添加规则组件：学科连堂，目标「${consecutive.subject}」，每周至少 1 天连续 2 节。建立规则里已有模板「${consecutive.subject}连堂规则」。`,
       }
     }
     const slots = extra?.prepSlots
     if (slots?.length) {
-      think?.(`判断路由：当前在${placeLabel(extra?.here)}；备课时段是规则组课位禁排`)
+      think?.(`判断路由：当前在${placeLabel(extra?.here)}；备课时段是建立规则课位禁排`)
       const ready = await checkPrepPreconditions(slots, think)
       if (!ready.ok) {
         return {
@@ -341,8 +341,8 @@ export async function runAssistantTool(
       const tab = schedTab(extra?.here)
       return {
         path: '/scheduling?tab=rules',
-        jumps: [{ label: tab === 'rules' ? '已在规则组' : '去规则组', path: '/scheduling?tab=rules' }],
-        report: `当前在「${placeLabel(extra?.here)}」。备课时段不排该科，不是排课时数。学年 ${ready.year} 第${ready.term}学期，${ready.gridLine}。课时和任教已齐，请到规则组添加。`,
+        jumps: [{ label: tab === 'rules' ? '已在建立规则' : '去建立规则', path: '/scheduling?tab=rules' }],
+        report: `当前在「${placeLabel(extra?.here)}」。备课时段不排该科，不是排课时数。学年 ${ready.year} 第${ready.term}学期，${ready.gridLine}。课时和任教已齐，请到建立规则添加。`,
         advice: `建议添加规则组件：课位禁排（按学科、周几、节次）。对照：\n${lines.join('\n')}\n勾选对应模板即可。`,
       }
     }
@@ -379,8 +379,8 @@ export async function runAssistantTool(
     const tab = schedTab(extra?.here)
     return {
       path: '/scheduling?tab=rules',
-      jumps: [{ label: tab === 'rules' ? '已在规则组' : '去规则组', path: '/scheduling?tab=rules' }],
-      report: `当前在「${placeLabel(extra?.here)}」。${year} 第${term}学期，${gridLine}。课时和任教已有，请到规则组按模板添加。`,
+      jumps: [{ label: tab === 'rules' ? '已在建立规则' : '去建立规则', path: '/scheduling?tab=rules' }],
+      report: `当前在「${placeLabel(extra?.here)}」。${year} 第${term}学期，${gridLine}。课时和任教已有，请到建立规则按模板添加。`,
       advice: '建议添加规则组件：课位禁排（备课）、学科连堂（数学）、课位必须班主任（周六晚）、班级无空堂、教师日上限。人名要对上档案。',
     }
   }
@@ -391,7 +391,7 @@ export async function runAssistantTool(
     return {
       path: dest,
       jumps: [{ label: '去课时管理', path: dest }],
-      report: `排课按这个顺序：① 系统设置核对学年学期（现在 ${year} 第${term}学期，${gridLine}）；② 课时管理按班填每周节数；③ 任教关系对老师；④ 课位结构确认几天几节；⑤ 规则组加约束；⑥ 在排课页点「生成课表」。当前不在排课页的话，先点「去课时管理」。想排某一级，直接说「我想排高一的课」。`,
+      report: `排课按这个顺序：① 系统设置核对学年学期（现在 ${year} 第${term}学期，${gridLine}）；② 课时管理按班填每周节数；③ 任教关系对老师；④ 课位结构确认几天几节；⑤ 建立规则加约束；⑥ 在排课页点「生成课表」。当前不在排课页的话，先点「去课时管理」。想排某一级，直接说「我想排高一的课」。`,
     }
   }
 
@@ -399,7 +399,7 @@ export async function runAssistantTool(
     const { year, term, gridLine } = await yearGridLine()
     return {
       path: path ?? '',
-      report: `这页上面一排 Tab 就是用法。现在学年 ${year} 第${term}学期，${gridLine}。①「课时管理」按班级填每周节数；②「课位结构」确认几天几节、晚自习；③「任教关系」把老师和班对上；④「规则组」看禁排和教师约束；⑤右侧「生成课表」由你点，冲突格会标红。想排某一级可以说「我想排高一的课」，我会帮你切到该年级课时。`,
+      report: `这页上面一排 Tab 就是用法。现在学年 ${year} 第${term}学期，${gridLine}。①「课时管理」按班级填每周节数；②「课位结构」确认几天几节、晚自习；③「任教关系」把老师和班对上；④「建立规则」看禁排和教师约束；⑤右侧「生成课表」由你点，冲突格会标红。想排某一级可以说「我想排高一的课」，我会帮你切到该年级课时。`,
     }
   }
 
@@ -419,7 +419,7 @@ export async function runAssistantTool(
     const names = classes.slice(0, 6).map((c) => c.name).join('、')
     return {
       path: `/scheduling?tab=hours&grade=${grade.id}`,
-      report: `按${label}来排。已打开课时管理。学年 ${year} 第${term}学期，${gridLine}。${label}现有 ${classes.length} 个班${names ? `（${names}${classes.length > 6 ? '…' : ''}）` : ''}。接下来：把该年级各班课时填齐 → 任教关系对上老师 → 课位结构确认 → 规则组过一遍 → 你点生成。`,
+      report: `按${label}来排。已打开课时管理。学年 ${year} 第${term}学期，${gridLine}。${label}现有 ${classes.length} 个班${names ? `（${names}${classes.length > 6 ? '…' : ''}）` : ''}。接下来：把该年级各班课时填齐 → 任教关系对上老师 → 课位结构确认 → 建立规则过一遍 → 你点生成。`,
     }
   }
 
@@ -443,7 +443,7 @@ export async function runAssistantTool(
       hours: `已打开课时管理。学年 ${year} 第${term}学期，${gridLine}。按班填每周节数。说「每周36节怎么安排」可以先看预览，写入还要你确认。`,
       slots: `已打开课位结构。学年 ${year} 第${term}学期，${gridLine}。几天几节、晚自习在这里保存。`,
       assignments: `已打开任教关系。学年 ${year} 第${term}学期。缺任教先补，或按课时方案自动生成（先校验再写入）。`,
-      rules: `已打开规则组。学年 ${year} 第${term}学期，${gridLine}。禁排、固定课、连堂、教师约束在这里。`,
+      rules: `已打开建立规则。学年 ${year} 第${term}学期，${gridLine}。禁排、固定课、连堂、教师约束在这里。`,
       schedule: `已打开课表。学年 ${year} 第${term}学期。冲突格会标红。`,
     }
     return {

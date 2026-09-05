@@ -4,7 +4,7 @@ import pytest
 
 from app.ai.graph.loop import run_tool_loop
 from app.ai.model.chat import ChatOutcome, ToolCallOut
-from app.ai.progress import drive_turn
+from app.ai.runs.progress import drive_turn
 
 
 @pytest.mark.asyncio

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Awaitable, Callable
 
 from app.ai.model.chat import ChatError, ChatOutcome, complete_chat_tools
-from app.ai.progress import Progress, TOOL_LABELS, report_progress
+from app.ai.runs.progress import Progress, TOOL_LABELS, report_progress
 
 logger = logging.getLogger(__name__)
 

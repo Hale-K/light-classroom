@@ -23,7 +23,7 @@ def test_when_formats_weekdays_and_periods():
 def test_playbook_returns_body_for_valid_keys():
     text = lookup_playbook('{"keys":["05-rules"]}')
     assert text.startswith("已取回的说明书")
-    assert "规则组" in text
+    assert "建立规则" in text
 
 
 def test_playbook_falls_back_to_regex_and_rejects_unknown():

@@ -73,10 +73,10 @@ export function routeTeacherMessage(text: string, pathname: string): Route {
   if (/学年学期|系统设置核对/.test(content)) {
     return { kind: 'tool', tool: CORE_TASKS[2].tool, path: CORE_TASKS[2].path }
   }
-  if (/打开规则组/.test(content) && !/哪个组件|不能排|禁排/.test(content)) {
+  if (/打开(规则组|建立规则)/.test(content) && !/哪个组件|不能排|禁排/.test(content)) {
     return { kind: 'tool', tool: 'openScheduling', path: '/scheduling?tab=rules' }
   }
-  if (/规则组|禁排|不能排|哪个组件|固定课|空堂|多班教师|班主任/.test(content)) {
+  if (/规则组|建立规则|禁排|不能排|哪个组件|固定课|空堂|多班教师|班主任/.test(content)) {
     return { kind: 'llm' }
   }
   if (/课位结构|几天几节|保存网格/.test(content)) {

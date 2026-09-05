@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass, field
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -13,11 +14,14 @@ from app.ai.model.chat import ChatError, complete_chat, resolve_chat_endpoint
 from app.ai.prompt.messages import GREET_REPLY, build_agent_messages, build_messages
 from app.ai.tools.retrieve import retrieve_skill
 from app.ai.tools.school import SCHOOL_TOOLS, execute_school_tool
-from app.ai.progress import Progress, report_progress
+from app.ai.runs.progress import Progress, report_progress
+from app.utils.answer_cache import answer_cache_key, get_cached_answer, put_cached_answer
 
 logger = logging.getLogger(__name__)
 
 _GREET = {"你好", "您好", "hi", "hello", "在吗", "在么", "嗨"}
+# 工具循环已消耗超过该秒数才失败时，不再走降级路径（降级还要两轮模型调用，必然撞总闸）。
+_FALLBACK_MAX_SPENT = 20
 
 
 @dataclass
@@ -26,6 +30,22 @@ class TeacherTurn:
     think: list[str] = field(default_factory=list)
     choices: list[dict] = field(default_factory=list)
     plan: dict | None = None
+    jumps: list[dict] = field(default_factory=list)
+
+
+_RULE_JUMP_PATH = "/scheduling?tab=rules"
+
+
+def rule_jumps(query: str, text: str, page_path: str | None) -> list[dict]:
+    """回答在讲规则配置、而当前页不在规则组时，给一个跳转按钮。"""
+    if page_path and "tab=rules" in page_path:
+        return []
+    joined = f"{query or ''}\n{text or ''}"
+    if "规则" not in joined:
+        return []
+    if not any(word in text for word in ("规则组", "组件", "禁排", "连堂", "课位", "班主任")):
+        return []
+    return [{"label": "去规则组", "path": _RULE_JUMP_PATH}]
 
 
 def local_reply(text: str) -> str | None:
@@ -58,6 +78,23 @@ async def agent_reply(
 ) -> TeacherTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
 
+    cache_key = answer_cache_key(
+        tenant_id,
+        model,
+        turns,
+        page_path=page_path,
+        can_manage_rules=can_manage_rules,
+        page_context=page_context,
+    )
+    cached = get_cached_answer(cache_key)
+    if cached:
+        logger.info("assistant.cache hit kind=%s", cached.get("kind"))
+        return TeacherTurn(
+            text=cached.get("text") or "",
+            think=[*(cached.get("think") or []), "回答缓存命中，未重跑模型"],
+            jumps=cached.get("jumps") or [],
+        )
+
     plan = None
 
     async def executor(name: str, arguments: str) -> str:
@@ -84,7 +121,9 @@ async def agent_reply(
         base_url=base_url,
         api_key=api_key,
         model=model,
-        timeout=min(timeout, 45),
+        # 单步上限 90 秒：慢服务商生成草稿 JSON 可能超过 45 秒，中途砍掉只会报废整轮；
+        # 总时长由 runs 的 RUN_TIMEOUT 兜底。
+        timeout=min(timeout, 90),
         messages=build_agent_messages(
             turns,
             page_title=page_title,
@@ -99,9 +138,23 @@ async def agent_reply(
         on_progress=on_progress,
     )
     logger.info("assistant.agent tools=%s", ",".join(s.tool for s in outcome.steps) or "-")
+    last_user = next((str(t.get("content") or "") for t in reversed(turns) if t.get("role") == "user"), "")
+    jumps = [] if plan else rule_jumps(last_user, outcome.text, page_path)
+    step_lines = [f"{step.tool}：{step.detail}" for step in outcome.steps]
+    if plan is None:
+        kind = put_cached_answer(
+            cache_key,
+            text=outcome.text,
+            think=step_lines,
+            jumps=jumps,
+            tools=[step.tool for step in outcome.steps],
+        )
+        logger.info("assistant.cache store=%s", kind or "skip")
     return TeacherTurn(
         text="规则草稿已准备，请核对下方内容后确认。" if plan else outcome.text,
-        think=[f"{step.tool}：{step.detail}" for step in outcome.steps], plan=plan,
+        think=step_lines,
+        plan=plan,
+        jumps=jumps,
     )
 
 
@@ -131,6 +184,7 @@ async def handle_teacher_turn(
     logger.info("assistant.turn llm id=%s", message_id or "-")
     await report_progress(on_progress, "preparing", "正在读取本校模型配置")
     base, key, model, timeout = await resolve_chat_endpoint(session, tenant_id)
+    started = time.monotonic()
     query = ""
     for item in reversed(turns):
         if item.get("role") == "user":
@@ -155,10 +209,12 @@ async def handle_teacher_turn(
             page_context=page_context,
         )
     except ChatError as exc:
-        logger.warning(
-            "assistant.agent fallback id=%s err=%s", message_id or "-", exc.message
-        )
-    # 降级路径：租户模型不支持工具调用（或循环失败）时，沿用目录路由 + 直接补全。
+        spent = time.monotonic() - started
+        if spent > _FALLBACK_MAX_SPENT:
+            logger.warning("assistant.agent giveup id=%s spent=%.0fs err=%s", message_id or "-", spent, exc.message)
+            raise ChatError("模型多轮调用未能在时限内完成，请重试或把要求拆成几条；未执行规则写入") from exc
+        logger.warning("assistant.agent fallback id=%s spent=%.0fs err=%s", message_id or "-", spent, exc.message)
+    # 降级路径：租户模型不支持工具调用（或快速失败）时，沿用目录路由 + 直接补全。
     await report_progress(on_progress, "fallback", "工具调用未完成，正在尝试操作说明问答；本轮尚未执行规则写入")
     retrieved = await retrieve_skill(
         query, base_url=base, api_key=key, model=model, timeout=timeout,
@@ -178,4 +234,7 @@ async def handle_teacher_turn(
             page_context=page_context,
         ),
     )
-    return TeacherTurn(text="当前模型工具调用不可用，本轮仅提供说明，未生成可执行草稿。\n" + text)
+    return TeacherTurn(
+        text="当前模型工具调用不可用，本轮仅提供说明，未生成可执行草稿。\n" + text,
+        jumps=rule_jumps(query, text, page_path),
+    )

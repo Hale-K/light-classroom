@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/api/http'
-import { assistantApi, type AssistantPlan, type AssistantRun } from '@/api'
+import { assistantApi, authApi, orgApi, schedulingApi, type AssistantPlan, type AssistantRun } from '@/api'
 import { watchAssistantRun } from '@/assistant/task'
 import { assistantPageContext } from '@/assistant/context'
 import { useAuthStore } from '@/store/auth'
 import AssistantRulePlan from '@/components/AssistantRulePlan'
+import AssistMarkdown from '@/components/AssistMarkdown'
 import Icon from '@/components/Icon'
 import { type HoursDraft } from '@/assistant/hoursPlan'
 import { routeTeacherMessage, type Extra } from '@/assistant/orchestrate'
@@ -28,7 +29,7 @@ type ChatMsg = {
   awaitRules?: boolean
   jumps?: JumpLink[]
   advice?: string
-  choices?: { label: string; send: string }[]
+  choices?: { label: string; send: string; act?: () => void }[]
   think?: { done: string[]; live?: string }
 }
 
@@ -167,6 +168,14 @@ export default function AssistantDock() {
     const raw = Number(localStorage.getItem(RATE_KEY) || 0)
     return raw >= 1 && raw <= 5 ? raw : 0
   })
+  const [themeMode, setThemeMode] = useState<'minimal' | 'tech'>(() => {
+    return localStorage.getItem('zh_theme') === 'tech' ? 'tech' : 'minimal'
+  })
+
+  useEffect(() => {
+    document.body.dataset.theme = themeMode
+    localStorage.setItem('zh_theme', themeMode)
+  }, [themeMode])
   const threadRef = useRef<ChatMsg[]>([])
   const busyRef = useRef(false)
   const dirtyRef = useRef(false)
@@ -437,6 +446,7 @@ export default function AssistantDock() {
             mid: tid,
             choices: data.choices,
             plan: data.plan ?? undefined,
+            jumps: data.jumps,
             think: { done },
           })
         })
@@ -511,6 +521,8 @@ export default function AssistantDock() {
     void runLoop()
   }
 
+  const pushMsg = (msg: ChatMsg) => commitThread((prev) => [...prev, msg])
+
   const runTask = (item: AssistantTask, extra?: Extra & { hoursDraft?: HoursDraft }) => {
     forcedRef.current = { tool: item.tool, path: item.path, extra }
     if (!busyRef.current) midRef.current = newMsgId()
@@ -551,6 +563,76 @@ export default function AssistantDock() {
     setThread([])
     setDraft('')
     agentConversationRef.current = false
+  }
+
+  // 配置规则向导：科目/年级取自本校课时与组织数据，选完再进草稿流程，不花模型调用。
+  const onRuleSubject = (subject: string, grades: string[]) => {
+    if (busyRef.current) return
+    pushMsg({ role: 'user', text: subject })
+    if (!grades.length) {
+      pushMsg({
+        role: 'bot',
+        text: '系统里还没有年级。先到行政班建好年级，再回来配规则。',
+        jumps: [{ label: '去行政班', path: '/classes' }],
+      })
+      return
+    }
+    pushMsg({
+      role: 'bot',
+      text: `第二步，${subject}的规则配给哪个年级？（之后我会问你星期节次等细节）`,
+      choices: grades.slice(0, 8).map((grade) => ({
+        label: grade,
+        send: `给${grade}的${subject}配置一条排课规则，先给我确认草稿`,
+      })),
+    })
+  }
+
+  const startRuleWizard = () => {
+    setPanel('home')
+    if (busyRef.current) return
+    if (!busyRef.current) midRef.current = newMsgId()
+    const mid = midRef.current
+    assistLog(mid, 'task', 'ruleWizard')
+    commitThread((prev) => upsertThink([...prev, { role: 'user', text: '一起配置一条排课规则', mid }], '读取本校课时科目和年级'))
+    void (async () => {
+      try {
+        const years = await authApi.academicYears()
+        const year = years.current_academic_year
+        const term = years.current_term || '1'
+        const hours = year ? await schedulingApi.courseHours({ academic_year: year, term }) : []
+        const names: string[] = []
+        for (const row of hours) {
+          if ((row.weekday_periods || 0) <= 0 || !row.subject_name) continue
+          if (!names.includes(row.subject_name)) names.push(row.subject_name)
+        }
+        const gradeNames = (await orgApi.grades()).map((g) => g.name).filter(Boolean)
+        if (!names.length) {
+          commitThread((prev) => replaceThinkBot(prev, {
+            role: 'bot',
+            text: '本校课时里还没有科目周节数。规则建立在课时之上，先到课时管理把各科每周节数填好，再回来配规则。',
+            jumps: [{ label: '去课时管理', path: '/scheduling?tab=hours' }],
+            think: { done: ['读取本校课时科目和年级'] },
+          }))
+          return
+        }
+        commitThread((prev) => replaceThinkBot(prev, {
+          role: 'bot',
+          text: `好。第一步，选科目（来自本校课时已建的 ${names.length} 门科目）：`,
+          choices: names.slice(0, 10).map((name) => ({
+            label: name,
+            send: `选${name}`,
+            act: () => onRuleSubject(name, gradeNames),
+          })),
+          think: { done: ['读取本校课时科目和年级'] },
+        }))
+      } catch {
+        commitThread((prev) => replaceThinkBot(prev, {
+          role: 'bot',
+          text: '读取本校科目和年级失败，请稍后再试。',
+          think: { done: ['读取本校课时科目和年级'] },
+        }))
+      }
+    })()
   }
 
   const helpItems = helpTab === 'faq' ? FAQ : helpTab === 'guide' ? GUIDES : STARTS
@@ -617,6 +699,15 @@ export default function AssistantDock() {
                 onClick={() => toggle('rate')}
               >
                 <Icon name="mood" size={20} />
+              </button>
+              <button
+                type="button"
+                className="assist-dock-icon"
+                title={themeMode === 'tech' ? '切换到极简主题' : '切换到科技主题'}
+                aria-label={themeMode === 'tech' ? '切换到极简主题' : '切换到科技主题'}
+                onClick={() => setThemeMode((current) => (current === 'tech' ? 'minimal' : 'tech'))}
+              >
+                <Icon name={themeMode === 'tech' ? 'dashboard' : 'sparkles'} size={20} />
               </button>
             </div>
             <button type="button" className="assist-dock-avatar" title="轻课堂助手" onClick={() => toggle('home')}>
@@ -759,7 +850,7 @@ export default function AssistantDock() {
                   <button type="button" className="assist-task" onClick={() => send('帮我检查本校排课准备情况，还缺什么？')}>
                     <Icon name="sparkles" size={16} /><span>检查排课准备情况</span><Icon name="chevron-right" size={16} />
                   </button>
-                  <button type="button" className="assist-task" onClick={() => send('帮我添加数学禁排规则，先给我确认草稿')}>
+                  <button type="button" className="assist-task" onClick={() => startRuleWizard()}>
                     <Icon name="sparkles" size={16} /><span>一起配置一条排课规则</span><Icon name="chevron-right" size={16} />
                   </button>
                   {tasks.map((item) => (
@@ -779,7 +870,7 @@ export default function AssistantDock() {
                     {msg.role === 'bot' && !msg.text && msg.think?.live ? <ThinkDial live={msg.think.live} progress={runProgress} connection={connectionNote} /> : null}
                     {msg.text ? (
                       <div className={`assist-bubble is-${msg.role}`}>
-                        {msg.text}
+                        {msg.role === 'bot' ? <AssistMarkdown text={msg.text} /> : msg.text}
                         {msg.mid ? <MidCopy id={msg.mid} /> : null}
                       </div>
                     ) : null}
@@ -812,7 +903,18 @@ export default function AssistantDock() {
                     {msg.role === 'bot' && msg.choices && msg.choices.length > 0 && i === shownThread.length - 1 && (
                       <div className="assist-plan-actions">
                         {msg.choices.map((item) => (
-                          <button key={item.send} type="button" className="is-ok" onClick={() => send(item.send)}>
+                          <button
+                            key={item.send || item.label}
+                            type="button"
+                            className="is-ok"
+                            onClick={() => {
+                              if (item.act) {
+                                item.act()
+                                return
+                              }
+                              send(item.send)
+                            }}
+                          >
                             {item.label}
                           </button>
                         ))}
@@ -828,7 +930,9 @@ export default function AssistantDock() {
                       </div>
                     )}
                     {msg.role === 'bot' && msg.advice && i === shownThread.length - 1 ? (
-                      <div className="assist-bubble is-bot assist-advice">{msg.advice}</div>
+                      <div className="assist-bubble is-bot assist-advice">
+                        <AssistMarkdown text={msg.advice} />
+                      </div>
                     ) : null}
                     {msg.role === 'bot' && msg.awaitRules && i === shownThread.length - 1 && !msg.jumps?.length && (
                       <div className="assist-plan-actions">

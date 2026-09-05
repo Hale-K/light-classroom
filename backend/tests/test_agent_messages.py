@@ -1,4 +1,5 @@
 """agent 消息构造与 OpenAI tool_calls 解析。"""
+from app.ai.agent.teacher import rule_jumps
 from app.ai.model.chat import parse_tool_calls
 from app.ai.prompt.messages import build_agent_messages, build_messages
 
@@ -36,8 +37,18 @@ def test_agent_messages_declare_tools_and_catalog():
     system = messages[0]["content"]
     assert "lookup_teachers" in system, "system 必须告诉模型可用工具"
     assert "说明书目录" in system, "lookup_playbook 依赖目录选编号"
+    assert "规则组件目录" in system, "组件名必须能对上真实目录，防止模型编名字"
     assert "当前页：排课" in system
     assert messages[1:] == turns
+
+
+def test_rule_jumps_only_when_off_rules_page():
+    answer = "在排课页「规则组」里配置，添加组件「课位教师角色」。"
+    assert rule_jumps("怎么设置周六晚课必须班主任", answer, "/settings") == [
+        {"label": "去规则组", "path": "/scheduling?tab=rules"}
+    ]
+    assert rule_jumps("怎么设置周六晚课必须班主任", answer, "/scheduling?tab=rules") == []
+    assert rule_jumps("数学老师有谁", "任教「数学」的在职教师共 3 人。", "/settings") == []
 
 
 def test_plain_messages_keep_retrieved_section():

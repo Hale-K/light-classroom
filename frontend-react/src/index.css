@@ -183,26 +183,7 @@ body {
   }
 }
 
-/* 主题切换：默认极简，科技主题只通过语义变量和布局表面生效 */
-.theme-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  height: 32px;
-  padding: 0 11px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  color: var(--text-2);
-  background: var(--surface);
-  cursor: pointer;
-  font: inherit;
-  font-size: 12px;
-  transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out), background-color 160ms var(--ease-out);
-}
-.theme-toggle:hover {
-  color: var(--blue-ink);
-  border-color: var(--blue-ink);
-}
+/* 主题切换入口在助手坞（AssistantDock）；这里只定义两套主题的语义变量 */
 
 body[data-theme='tech'] {
   /* Midnight Studio 深色科技：近黑底 + 紫罗兰主色 + 浅色文字 */
@@ -302,14 +283,6 @@ body[data-theme='tech'] .app-header-glass {
   backdrop-filter: blur(14px) saturate(1.25);
   -webkit-backdrop-filter: blur(14px) saturate(1.25);
   border-color: var(--glass-border);
-}
-body[data-theme='tech'] .theme-toggle {
-  background: #1f1f23;
-  border-color: rgba(255, 255, 255, 0.14);
-  color: #a78bfa;
-}
-body[data-theme='tech'] .theme-toggle:hover {
-  border-color: #a78bfa;
 }
 body[data-theme='tech'] .ant-btn-primary {
   background: #7c3aed;

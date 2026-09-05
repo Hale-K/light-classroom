@@ -529,7 +529,7 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-width: 92%;
+  width: 100%;
 }
 
 .assist-turn.is-user {
@@ -684,6 +684,79 @@
   border-radius: 14px 14px 14px 4px;
   background: #fff;
   color: #111827;
+}
+
+/* 助手回复 markdown 排版（AssistMarkdown 渲染结果） */
+.assist-md {
+  white-space: normal;
+}
+
+.assist-md p {
+  margin: 0 0 7px;
+}
+
+.assist-md .assist-md-title {
+  font-weight: 600;
+}
+
+.assist-md ul,
+.assist-md ol {
+  margin: 0 0 7px;
+  padding-left: 18px;
+}
+
+.assist-md li {
+  margin: 2px 0;
+}
+
+/* 任务清单（- [x] / - [ ]）：勾选框样式 */
+.assist-md ul.assist-md-tasks {
+  list-style: none;
+  padding-left: 0;
+}
+
+.assist-md ul.assist-md-tasks li {
+  position: relative;
+  padding-left: 22px;
+  margin: 4px 0;
+}
+
+.assist-md ul.assist-md-tasks li::before {
+  content: '';
+  position: absolute;
+  left: 2px;
+  top: 3.5px;
+  width: 13px;
+  height: 13px;
+  border: 1.5px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 4px;
+}
+
+.assist-md ul.assist-md-tasks li.is-done::before {
+  content: '✓';
+  background: #16a34a;
+  border-color: #16a34a;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 13px;
+  text-align: center;
+}
+
+.assist-md strong {
+  font-weight: 600;
+}
+
+.assist-md code {
+  padding: 0 4px;
+  border-radius: 4px;
+  background: rgba(17, 24, 39, 0.07);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+}
+
+.assist-md > :last-child {
+  margin-bottom: 0;
 }
 
 .assist-mid {

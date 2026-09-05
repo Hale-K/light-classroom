@@ -65,14 +65,6 @@ export default function MainLayout() {
   const logout = useAuthStore((s) => s.logout)
   const [menus, setMenus] = useState<MenuNode[]>([])
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => readCollapsedGroups())
-  const [themeMode, setThemeMode] = useState<'minimal' | 'tech'>(() => {
-    return localStorage.getItem('zh_theme') === 'tech' ? 'tech' : 'minimal'
-  })
-
-  useEffect(() => {
-    document.body.dataset.theme = themeMode
-    localStorage.setItem('zh_theme', themeMode)
-  }, [themeMode])
 
   useEffect(() => {
     authApi
@@ -269,15 +261,6 @@ export default function MainLayout() {
             </div>
             <span className="header-context">{academicTerm()}</span>
           </div>
-          <button
-            type="button"
-            className="theme-toggle"
-            aria-label={themeMode === 'tech' ? '切换到极简主题' : '切换到科技主题'}
-            onClick={() => setThemeMode((current) => (current === 'tech' ? 'minimal' : 'tech'))}
-          >
-            <Icon name={themeMode === 'tech' ? 'dashboard' : 'sparkles'} size={15} />
-            <span>{themeMode === 'tech' ? '极简主题' : '科技主题'}</span>
-          </button>
         </header>
 
         <main className="layout-main">

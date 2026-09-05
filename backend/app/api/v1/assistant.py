@@ -70,7 +70,8 @@ async def assistant_chat(
             len(turns),
         )
         permissions = await get_user_permission_codes(session, user.id)
-        async with asyncio.timeout(100):
+        from app.ai.runs.service import RUN_TIMEOUT
+        async with asyncio.timeout(RUN_TIMEOUT):
             turn = await handle_teacher_turn(
                 session,
                 tenant_id,
@@ -99,6 +100,7 @@ async def assistant_chat(
             "think": turn.think,
             "choices": turn.choices,
             "plan": turn.plan,
+            "jumps": turn.jumps,
         },
     }
 

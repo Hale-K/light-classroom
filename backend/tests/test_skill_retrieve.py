@@ -21,7 +21,7 @@ def test_parse_unrelated_is_empty():
 def test_bodies_only_for_picked_keys():
     text = retrieved_text(["05-rules"])
     assert "已取回的说明书" in text
-    assert "规则组" in text
+    assert "建立规则" in text
     assert "开课核对" not in text
 
 

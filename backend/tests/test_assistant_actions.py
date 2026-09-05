@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from pydantic import ValidationError
 
 from app.ai.actions import RuleRequest, build_rule, check_action, fingerprint
-from app.ai.models import AiAction
+from app.ai.actions.models import AiAction
 
 
 def test_rule_requires_explicit_target_time_and_priority():
@@ -98,7 +98,8 @@ def database(monkeypatch):
         return "2026", "1"
     async def grid(*args):
         return {"configured": True, "daily_periods": [7] * 5 + [0, 0]}
-    monkeypatch.setattr(actions, "_term", term)
+    from app.ai.tools import school
+    monkeypatch.setattr(school, "_term", term)
     monkeypatch.setattr(scheduling, "_load_grid_config", grid)
     group = RuleGroupDocument(id="g", name="高一规则", academic_year="2026", term="1")
     sync.add_all([

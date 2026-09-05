@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from app.ai.models import AiRun
+from app.ai.runs.models import AiRun
 from app.ai.runs import create_run, get_run
 
 

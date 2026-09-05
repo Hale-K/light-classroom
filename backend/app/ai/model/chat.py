@@ -1,14 +1,18 @@
 """ChatModel：对应 Spring AI Alibaba 的 ChatClient / DashScope ChatModel。"""
 from __future__ import annotations
 
+import logging
+import time
 from dataclasses import dataclass, field
 
 import httpx
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.models import AiProvider
+from app.ai.model.store import AiProvider
 from app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 
 class ChatError(Exception):
@@ -128,6 +132,7 @@ async def _post_chat(
     }
     if tools:
         payload["tools"] = tools
+    started = time.monotonic()
     try:
         async with httpx.AsyncClient(timeout=min(timeout, 120)) as client:
             resp = await client.post(_chat_url(base_url), headers=headers, json=payload)
@@ -136,6 +141,11 @@ async def _post_chat(
     if resp.status_code < 200 or resp.status_code >= 300:
         raise ChatError(f"模型服务 HTTP {resp.status_code}：{resp.text[:240]}")
     data = resp.json()
+    usage = data.get("usage") or {}
+    logger.info(
+        "assistant.llm model=%s ms=%d completion_tokens=%s",
+        model, int((time.monotonic() - started) * 1000), usage.get("completion_tokens"),
+    )
     try:
         message = data["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:

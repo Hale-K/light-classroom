@@ -1,4 +1,4 @@
-"""持久化助手任务状态，独立于浏览器连接。重启后标记中断，不自动重放。"""
+"""助手任务的持久化与后台执行：重启后标记中断，不自动重放。"""
 import asyncio
 from dataclasses import asdict
 from datetime import datetime, timedelta
@@ -9,13 +9,14 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from app.ai.actions import fingerprint
-from app.ai.models import AiRun
-from app.ai.progress import drive_turn
+from app.ai.runs.models import AiRun
+from app.ai.runs.progress import drive_turn
 from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 _tasks: set[asyncio.Task] = set()
-RUN_TIMEOUT = 100
+# 草稿流程至少两轮模型调用（可能再澄清一次），慢服务商下 100 秒不够；单步上限 90 秒也在此闸内。
+RUN_TIMEOUT = 180
 STALE_SECONDS = 30
 
 
@@ -123,7 +124,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
     except asyncio.CancelledError:
         await persist(status="cancelled", message="本轮已停止，未执行规则写入。")
     except TimeoutError:
-        await persist(status="timed_out", message="本轮等待超过100秒，已停止请求。请重试或拆分要求，未执行规则写入。")
+        await persist(status="timed_out", message=f"本轮等待超过{RUN_TIMEOUT}秒，已停止请求。请重试或拆分要求，未执行规则写入。")
     except Exception as exc:
         logger.exception("assistant run failed id=%s", run_id)
         message = exc.message if isinstance(exc, ChatError) else "处理失败，请重试；未执行规则写入。"

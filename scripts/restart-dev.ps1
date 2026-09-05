@@ -3,7 +3,9 @@
 #  作用：杀掉 5176（前端Vite）/ 8001（后端Uvicorn）端口上的旧进程后，
 #        分别在两个独立 PowerShell 窗口中干净启动，保证每个服务只留 1 份。
 #  用法：在 PowerShell 中直接运行  .\restart-dev.ps1
+#        加 -ShowWindows 参数可显示服务窗口；默认隐藏，日志在各服务 logs/ 下
 # =============================================================================
+param([switch]$ShowWindows)
 
 $FRONT_PORT = 5176
 $BACK_PORT  = 8001
@@ -103,6 +105,11 @@ Stop-PortOwner -Port $BACK_PORT  -AllowedProcessNames @("python","pythonw")
 # ----------- 启动后端 -----------
 Write-Banner "启动后端 FastAPI @ $BACK_PORT" Magenta
 
+# 默认隐藏窗口后台运行，日志写入 logs/；需要看窗口时加 -ShowWindows
+$winStyle = if ($ShowWindows) { "Normal" } else { "Hidden" }
+New-Item -ItemType Directory -Force -Path "$BACK_CWD\logs" | Out-Null
+New-Item -ItemType Directory -Force -Path "$FRONT_CWD\logs" | Out-Null
+
 $backCmd = @(
     "-NoExit",
     "-Command",
@@ -112,7 +119,9 @@ $backCmd = @(
 )
 
 $bp = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $backCmd -PassThru -WindowStyle Normal
+    -ArgumentList $backCmd -PassThru -WindowStyle $winStyle `
+    -RedirectStandardOutput "$BACK_CWD\logs\dev-backend.out.log" `
+    -RedirectStandardError  "$BACK_CWD\logs\dev-backend.err.log"
 
 Write-Host "后端进程已启动 PID=$($bp.Id)" -ForegroundColor Green
 
@@ -131,7 +140,9 @@ $frontCmd = @(
 )
 
 $fp = Start-Process -FilePath "powershell.exe" `
-    -ArgumentList $frontCmd -PassThru -WindowStyle Normal
+    -ArgumentList $frontCmd -PassThru -WindowStyle $winStyle `
+    -RedirectStandardOutput "$FRONT_CWD\logs\dev-frontend.out.log" `
+    -RedirectStandardError  "$FRONT_CWD\logs\dev-frontend.err.log"
 
 Write-Host "前端进程已启动 PID=$($fp.Id)" -ForegroundColor Green
 
@@ -140,4 +151,5 @@ Write-Banner "启动完成" Green
 Write-Host "前端:  http://127.0.0.1:$FRONT_PORT"
 Write-Host "后端:  http://127.0.0.1:$BACK_PORT"
 Write-Host ""
+Write-Host "服务窗口默认隐藏。日志: backend\logs\dev-backend.*.log / frontend-react\logs\dev-frontend.*.log" -ForegroundColor DarkGray
 Write-Host "后续若需重启，再次运行本脚本即可，它会自动杀掉旧进程。" -ForegroundColor DarkGray

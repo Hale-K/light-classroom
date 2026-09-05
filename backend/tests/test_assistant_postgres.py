@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker
 from sqlmodel import SQLModel
 
 from app.ai import actions
-from app.ai.models import AiAction
+from app.ai.actions.models import AiAction
 from app.core.config import settings
 from app.models.org import Subject, TenantConfig
 from app.models.audit import AuditLog
@@ -30,7 +30,8 @@ async def test_concurrent_confirmation_writes_once(monkeypatch):
         return "2026", "1"
     async def grid(*args):
         return {"configured": True, "daily_periods": [7] * 5 + [0, 0]}
-    monkeypatch.setattr(actions, "_term", term)
+    from app.ai.tools import school
+    monkeypatch.setattr(school, "_term", term)
     monkeypatch.setattr(scheduling, "_load_grid_config", grid)
     try:
         async with admin.begin() as conn:
@@ -71,7 +72,7 @@ async def test_concurrent_confirmation_writes_once(monkeypatch):
 @pytest.mark.skipif(os.getenv("ASSISTANT_POSTGRES_TEST") != "1", reason="opt-in isolated local PostgreSQL test")
 @pytest.mark.asyncio
 async def test_background_run_persists_progress_and_does_not_complete_after_cancel(monkeypatch):
-    from app.ai.models import AiRun
+    from app.ai.runs.models import AiRun
     from app.ai.runs import create_run, execute_run, get_run
     from app.ai.agent import teacher
     from app.api import deps

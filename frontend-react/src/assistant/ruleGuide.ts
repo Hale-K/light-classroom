@@ -49,7 +49,7 @@ function periodLabel(periods: number[]): string {
   return `第${periods.join('、')}节`
 }
 
-/** 把「班主任第五节不能排」对到规则组里的组件名和填法。 */
+/** 把「班主任第五节不能排」对到建立规则里的组件名和填法。 */
 export function parseRuleGuide(text: string): RuleGuide | null {
   const t = text.trim()
   if (!t) return null
@@ -87,7 +87,7 @@ export function parseRuleGuide(text: string): RuleGuide | null {
 export function ruleGuideCopy(guide: RuleGuide, onRules: boolean): { report: string; advice: string } {
   const where = onRules
     ? '当前就在规则工作台。'
-    : '先到排课「规则组」。'
+    : '先到排课「建立规则」。'
   return {
     report: `${where}用组件「${guide.template}」。`,
     advice: [

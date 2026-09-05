@@ -3,7 +3,7 @@ import { routeTitle } from '../router/meta.ts'
 const SCHED_TABS: Record<string, string> = {
   hours: '排课 · 课时管理',
   slots: '排课 · 课位结构',
-  rules: '排课 · 规则组',
+  rules: '排课 · 建立规则',
   assignments: '排课 · 任教关系',
   schedule: '排课 · 课表',
 }

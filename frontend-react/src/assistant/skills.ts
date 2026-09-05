@@ -21,10 +21,10 @@ const SKILLS: PageSkill[] = [
   {
     id: 'scheduling',
     match: '/scheduling',
-    can: ['打开排课并切到规则组', '读取学年学期和网格', '说明冲突格会标红'],
+    can: ['打开排课并切到建立规则', '读取学年学期和网格', '说明冲突格会标红'],
     cannot: ['不会改格子', '不会改 COS / 云主机'],
     tasks: [
-      { label: '当前就在排课：先看课时与规则组，冲突格会标红', path: '/scheduling?tab=hours', tool: 'openScheduling' },
+      { label: '当前就在排课：先看课时与建立规则，冲突格会标红', path: '/scheduling?tab=hours', tool: 'openScheduling' },
       CORE_TASKS[1],
       CORE_TASKS[2],
     ],
