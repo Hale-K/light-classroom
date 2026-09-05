@@ -109,7 +109,7 @@ async def health():
 
 
 # ---------- 路由挂载（按模块陆续加） ----------
-from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant
+from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(org.router, prefix="/api/v1")
@@ -131,6 +131,7 @@ app.include_router(student_import.router, prefix="/api/v1")
 app.include_router(file_center.router, prefix="/api/v1")
 app.include_router(ai_provider.router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")
+app.include_router(onboarding.router, prefix="/api/v1")
 # from app.api.v1 import exam, grading, ...
 # 待业务实现后陆续挂载：权限/组织学籍/考试试卷/扫描进卷/打分/画像诊断/巩固卷/押题/AI编排/打印
 

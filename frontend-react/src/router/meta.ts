@@ -5,6 +5,7 @@ const TITLE_MAP: Record<string, string> = {
   '/exams': '试卷库',
   '/scans': '扫描进卷',
   '/scheduling': '排课管理',
+  '/onboarding': '新手引导',
   '/file-center': '文件中心',
   '/students': '学生档案',
   '/classes': '行政班管理',

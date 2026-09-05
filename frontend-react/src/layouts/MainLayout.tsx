@@ -4,6 +4,7 @@ import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { authApi } from '@/api'
 import AssistantDock from '@/components/AssistantDock'
 import Icon from '@/components/Icon'
+import OnboardingGuide from '@/components/OnboardingGuide'
 import { routeTitle } from '@/router/meta'
 import { useAuthStore, selectDisplayName } from '@/store/auth'
 import { APP_NAME } from '@/types'
@@ -142,14 +143,6 @@ export default function MainLayout() {
           </div>
         </div>
 
-        <div className="workspace-switcher">
-          <div className="workspace-info">
-            <div className="workspace-label">当前学校</div>
-            <div className="workspace-value">{schoolCode || '—'}</div>
-          </div>
-          <Icon name="chevron-down" size={14} className="workspace-chevron" />
-        </div>
-
         <div className="menu-scroll">
           <nav className="nav" aria-label="主导航">
             {menus.map((group) => {
@@ -211,44 +204,6 @@ export default function MainLayout() {
             })}
           </nav>
         </div>
-
-        <div className="aside-bottom">
-          <Dropdown
-            trigger={['click']}
-            placement="topLeft"
-            menu={{
-              items: [
-                {
-                  key: 'settings',
-                  icon: <Icon name="settings" size={14} />,
-                  label: '系统设置',
-                },
-                { type: 'divider' },
-                {
-                  key: 'logout',
-                  icon: <Icon name="logout" size={14} />,
-                  label: '退出登录',
-                },
-              ],
-              onClick: ({ key }) => {
-                if (key === 'settings') navigate('/settings')
-                if (key === 'logout') onLogout()
-              },
-            }}
-          >
-            <button type="button" className="account-dock">
-              <span className="dock-avatar">
-                {(displayName || '师')[0]}
-                <i />
-              </span>
-              <span className="dock-copy">
-                <strong>{displayName || '未登录'}</strong>
-                <small>{roleLabel(user)}</small>
-              </span>
-              <Icon name="chevron-down" size={13} className="dock-chevron" />
-            </button>
-          </Dropdown>
-        </div>
       </aside>
 
       <div className="layout-content">
@@ -260,6 +215,69 @@ export default function MainLayout() {
               <strong>{currentTitle}</strong>
             </div>
             <span className="header-context">{academicTerm()}</span>
+          </div>
+          <div className="header-right">
+            <OnboardingGuide />
+            <Dropdown
+              trigger={['click']}
+              placement="bottomRight"
+              menu={{
+                items: [
+                  {
+                    key: 'who',
+                    disabled: true,
+                    label: (
+                      <span className="account-who">
+                        <span className="account-who-avatar">{(displayName || '师')[0]}</span>
+                        <span className="account-who-copy">
+                          <strong>{displayName || '未登录'}</strong>
+                          <small>{roleLabel(user)}</small>
+                        </span>
+                      </span>
+                    ),
+                  },
+                  {
+                    key: 'school',
+                    label: (
+                      <span className="account-school" title="点击复制学校代码">
+                        <span>当前学校</span>
+                        <code>{schoolCode || '—'}</code>
+                        <Icon name="clipboard" size={12} />
+                      </span>
+                    ),
+                  },
+                  { type: 'divider' },
+                  {
+                    key: 'settings',
+                    icon: <Icon name="settings" size={14} />,
+                    label: '系统设置',
+                  },
+                  { type: 'divider' },
+                  {
+                    key: 'logout',
+                    icon: <Icon name="logout" size={14} />,
+                    label: '退出登录',
+                  },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'school' && schoolCode) {
+                    void navigator.clipboard.writeText(schoolCode).catch(() => undefined)
+                    return
+                  }
+                  if (key === 'settings') navigate('/settings')
+                  if (key === 'logout') onLogout()
+                },
+              }}
+            >
+              <button type="button" className="account-chip">
+                <span className="account-chip-avatar">{(displayName || '师')[0]}</span>
+                <span className="account-chip-copy">
+                  <strong>{displayName || '未登录'}</strong>
+                  <small>{roleLabel(user)}</small>
+                </span>
+                <Icon name="chevron-down" size={13} />
+              </button>
+            </Dropdown>
           </div>
         </header>
 

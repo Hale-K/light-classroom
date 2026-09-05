@@ -14,6 +14,7 @@ import Dashboard from '@/pages/dashboard'
 import ExamManage from '@/pages/exam'
 import ScanManage from '@/pages/scan'
 import SchedulingView from '@/pages/scheduling'
+import OnboardingView from '@/pages/onboarding'
 import StudentsView from '@/pages/students'
 import ClassesView from '@/pages/classes'
 import PersonnelView from '@/pages/personnel'
@@ -98,6 +99,7 @@ export const router = createBrowserRouter([
           { path: 'exams', element: <ExamManage /> },
           { path: 'scans', element: <ScanManage /> },
           { path: 'scheduling', element: <SchedulingView /> },
+          { path: 'onboarding', element: <OnboardingView /> },
           { path: 'file-center', element: <FileCenterView /> },
           { path: 'ai-providers', element: <AiProvidersView /> },
           { path: 'students', element: <StudentsView /> },

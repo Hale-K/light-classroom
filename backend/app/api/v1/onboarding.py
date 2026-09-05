@@ -1,0 +1,274 @@
+"""新手引导：排课准备度六步清单，状态全部来自本校真实数据。
+
+对齐顶栏「新手引导 N/6」：每步的完成判定与详情文案在这里统一计算，
+前端只负责展示与跳转。步骤顺序即推荐操作顺序（学年学期 → 课位 → 课时 → 任教 → 规则 → 生成）。
+跳过标记存 TenantConfig（学校级配置，沿用网格/规则目录的存储惯例），不建新表。
+"""
+from __future__ import annotations
+
+from datetime import datetime
+
+from fastapi import APIRouter, Depends
+from sqlalchemy import distinct, func, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.api.deps import get_current_tenant, get_current_user
+from app.db.session import get_session
+from app.models.facility import Campus
+from app.models.org import Class, CourseHourPlan, TeachingAssignment, TenantConfig
+
+router = APIRouter(prefix="/onboarding", tags=["新手引导"])
+
+VERSION_HISTORY_KEY = "scheduling_version_history"
+GUIDE_CONFIG_KEY = "onboarding_guide"
+
+
+def _dismissed_from(raw: object) -> bool:
+    return bool(isinstance(raw, dict) and raw.get("dismissed"))
+
+
+async def _set_dismissed(session: AsyncSession, tenant_id: int, user_id: int, value: bool) -> None:
+    row = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == GUIDE_CONFIG_KEY,
+    ).with_for_update())).scalars().first()
+    payload = {"dismissed": value, "updated_at": datetime.utcnow().isoformat() + "Z"}
+    if row is None:
+        session.add(TenantConfig(
+            tenant_id=tenant_id, config_key=GUIDE_CONFIG_KEY,
+            config_value=payload, updated_by=user_id,
+        ))
+    else:
+        row.config_value = payload
+        row.updated_by = user_id
+        row.updated_at = datetime.utcnow()
+    await session.commit()
+
+
+@router.post("/dismiss", summary="跳过新手引导（全校生效）")
+async def dismiss_onboarding(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    await _set_dismissed(session, tenant_id, user.id, True)
+    return {"code": 0, "message": "ok", "data": {"dismissed": True}}
+
+
+@router.post("/reopen", summary="重新开启新手引导（全校生效）")
+async def reopen_onboarding(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    await _set_dismissed(session, tenant_id, user.id, False)
+    return {"code": 0, "message": "ok", "data": {"dismissed": False}}
+
+
+def evaluate_steps(
+    *,
+    year: str | None,
+    term: str,
+    campus_count: int,
+    grid_configured: bool,
+    grid_line: str,
+    class_total: int,
+    hour_classes: int,
+    teacher_count: int,
+    asg_class_count: int,
+    rule_group_count: int,
+    enabled_rules: int,
+    version_count: int,
+    history_year: str | None = None,
+    history_hour_classes: int = 0,
+) -> list[dict]:
+    return [
+        {
+            "key": "campus",
+            "title": "创建校区",
+            "done": campus_count > 0,
+            "detail": f"已有 {campus_count} 个校区" if campus_count > 0 else "年级、班级、教室都挂在校区下，先到空间资源创建校区",
+            "path": "/campus-buildings",
+        },
+        {
+            "key": "year",
+            "title": "核对学年学期",
+            "done": bool(year),
+            "detail": f"{year} 学年 · 第 {term} 学期" if year else "还没有设置当前学年学期",
+            "path": "/settings",
+        },
+        {
+            "key": "grid",
+            "title": "保存课位结构",
+            "done": bool(grid_configured),
+            "detail": grid_line if grid_configured else "确认一周几天、每天几节、有无晚自习",
+            "path": "/scheduling?tab=slots",
+        },
+        {
+            "key": "hours",
+            "title": "填写班级课时",
+            "done": class_total > 0 and hour_classes >= class_total,
+            "detail": (
+                "还没有行政班，先到班级管理建班"
+                if class_total == 0
+                else (
+                    f"检测到 {history_year} 学年已有 {history_hour_classes} 个班的课时，新学期请参考原结构填写"
+                    if hour_classes == 0 and history_year
+                    else f"{hour_classes}/{class_total} 个班已填周节数"
+                )
+            ),
+            "path": "/scheduling?tab=hours",
+        },
+        {
+            "key": "assignments",
+            "title": "建立任教关系",
+            "done": teacher_count > 0,
+            "detail": (
+                f"{teacher_count} 位教师覆盖 {asg_class_count} 个班" if teacher_count
+                else (
+                    f"检测到 {history_year} 学年的任教关系，新学期请重新对老师" if history_year
+                    else "还没有教师和班的对应关系"
+                )
+            ),
+            "path": "/scheduling?tab=assignments",
+        },
+        {
+            "key": "rules",
+            "title": "配置排课规则",
+            "done": enabled_rules > 0,
+            "detail": (
+                f"{rule_group_count} 个规则组 · 启用 {enabled_rules} 条规则" if rule_group_count
+                else "还没有规则组，可按模板添加禁排、连堂等"
+            ),
+            "path": "/scheduling?tab=rules",
+        },
+        {
+            "key": "generate",
+            "title": "生成第一张课表",
+            "done": version_count > 0,
+            "detail": f"已有 {version_count} 个课表版本" if version_count else "在排课页点「生成课表」，冲突格会标红",
+            "path": "/scheduling",
+        },
+    ]
+
+
+@router.get("/status", summary="新手引导进度（排课准备六步）")
+async def onboarding_status(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    from app.api.v1.scheduling import _load_grid_config, _load_rule_catalog
+    from app.api.v1.teacher_profiles import _defaults
+
+    defaults = await _defaults(session, tenant_id)
+    year = defaults.get("academic_year") or ""
+    term = str(defaults.get("term") or "1")
+
+    grid_line = "网格未配置"
+    grid_configured = False
+    if year:
+        grid = await _load_grid_config(session, tenant_id, year, term)
+        grid_configured = bool(grid.get("configured"))
+        if grid_configured:
+            grid_line = (
+                f"{grid.get('days')} 天 × {grid.get('periods_per_day')} 节"
+                + ("，含晚自习" if grid.get("enable_evening") else "")
+            )
+
+    class_total = (await session.execute(
+        select(func.count()).select_from(Class).where(Class.tenant_id == tenant_id)
+    )).scalar_one()
+    campus_count = (await session.execute(
+        select(func.count()).select_from(Campus).where(
+            Campus.tenant_id == tenant_id, Campus.status == "active",
+        )
+    )).scalar_one()
+    hour_classes = 0
+    asg_teacher_ids: set[int] = set()
+    asg_class_ids: set[int] = set()
+    if year:
+        hour_classes = (await session.execute(
+            select(func.count(distinct(CourseHourPlan.class_id))).where(
+                CourseHourPlan.tenant_id == tenant_id,
+                CourseHourPlan.academic_year == year,
+                CourseHourPlan.term == term,
+                CourseHourPlan.weekday_periods > 0,
+            )
+        )).scalar_one()
+        for tid, cid in (await session.execute(
+            select(TeachingAssignment.teacher_id, TeachingAssignment.class_id).where(
+                TeachingAssignment.tenant_id == tenant_id,
+                TeachingAssignment.academic_year == year,
+                TeachingAssignment.term == term,
+            )
+        )).all():
+            if tid is not None:
+                asg_teacher_ids.add(tid)
+            if cid is not None:
+                asg_class_ids.add(cid)
+
+    groups: list = []
+    if year:
+        groups, _active_id = await _load_rule_catalog(session, tenant_id, year, term)
+    enabled_rules = sum(1 for g in groups for r in g.rules if r.enabled)
+
+    row = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == VERSION_HISTORY_KEY,
+    ))).scalars().first()
+    raw = row.config_value if row else None
+    if isinstance(raw, list):
+        history = [v for v in raw if isinstance(v, dict)]
+    elif isinstance(raw, dict) and isinstance(raw.get("versions"), list):
+        history = [v for v in raw["versions"] if isinstance(v, dict)]
+    else:
+        history = []
+
+    # 往年课时（历史数据检测）：取最近一个有课时数据的非当前学年
+    hist = (await session.execute(
+        select(CourseHourPlan.academic_year, func.count(distinct(CourseHourPlan.class_id)))
+        .where(
+            CourseHourPlan.tenant_id == tenant_id,
+            CourseHourPlan.academic_year != (year or ""),
+            CourseHourPlan.weekday_periods > 0,
+        )
+        .group_by(CourseHourPlan.academic_year)
+        .order_by(CourseHourPlan.academic_year.desc())
+        .limit(1)
+    )).first()
+    history_year, history_hour_classes = (hist[0], int(hist[1])) if hist else (None, 0)
+
+    guide_row = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == GUIDE_CONFIG_KEY,
+    ))).scalars().first()
+    dismissed = _dismissed_from(guide_row.config_value if guide_row else None)
+
+    steps = evaluate_steps(
+        year=year or None,
+        term=term,
+        campus_count=int(campus_count or 0),
+        grid_configured=grid_configured,
+        grid_line=grid_line,
+        class_total=int(class_total or 0),
+        hour_classes=int(hour_classes or 0),
+        teacher_count=len(asg_teacher_ids),
+        asg_class_count=len(asg_class_ids),
+        rule_group_count=len(groups),
+        enabled_rules=enabled_rules,
+        version_count=len(history),
+        history_year=history_year,
+        history_hour_classes=history_hour_classes,
+    )
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "steps": steps,
+            "done_count": sum(1 for s in steps if s["done"]),
+            "total": len(steps),
+            "history_year": history_year,
+            "dismissed": dismissed,
+        },
+    }

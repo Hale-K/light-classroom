@@ -183,7 +183,32 @@ body {
   }
 }
 
-/* 主题切换入口在助手坞（AssistantDock）；这里只定义两套主题的语义变量 */
+/* 新手引导：顶栏进度胶囊 + 下拉清单；主题切换入口在助手坞（AssistantDock） */
+.guide-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text-2);
+  background: var(--surface);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  transition: color 160ms var(--ease-out), border-color 160ms var(--ease-out);
+}
+
+.guide-chip:hover {
+  color: var(--blue-ink);
+  border-color: var(--blue-ink);
+}
+
+.guide-chip.is-done {
+  color: #16a34a;
+  border-color: rgba(22, 163, 74, 0.45);
+}
 
 body[data-theme='tech'] {
   /* Midnight Studio 深色科技：近黑底 + 紫罗兰主色 + 浅色文字 */
@@ -240,11 +265,7 @@ body[data-theme='tech'] .nav-item.active,
 body[data-theme='tech'] .nav-caption,
 body[data-theme='tech'] .nav-caption-static,
 body[data-theme='tech'] .nav-group-head,
-body[data-theme='tech'] .workspace-label,
-body[data-theme='tech'] .workspace-value,
 body[data-theme='tech'] .brand-en,
-body[data-theme='tech'] .dock-copy strong,
-body[data-theme='tech'] .dock-copy small,
 body[data-theme='tech'] .breadcrumb,
 body[data-theme='tech'] .breadcrumb strong,
 body[data-theme='tech'] .header-context,
@@ -260,9 +281,7 @@ body[data-theme='tech'] .nav-caption-static,
 body[data-theme='tech'] .nav-group-head {
   color: #f4f4f5;
 }
-body[data-theme='tech'] .workspace-label,
 body[data-theme='tech'] .brand-en,
-body[data-theme='tech'] .dock-copy small,
 body[data-theme='tech'] .header-context,
 body[data-theme='tech'] .breadcrumb {
   color: #e4e4e7;
@@ -570,39 +589,6 @@ kbd {
   font-size: 11px;
 }
 
-.workspace-switcher {
-  margin: 14px 14px 10px;
-  padding: 10px 12px;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--surface-2);
-}
-.workspace-info {
-  min-width: 0;
-}
-.workspace-label {
-  font-size: 10px;
-  color: var(--text-3);
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-.workspace-value {
-  margin-top: 2px;
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 600;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.workspace-chevron {
-  color: var(--text-3);
-  flex-shrink: 0;
-}
-
 .menu-scroll {
   flex: 1;
   overflow-y: auto;
@@ -757,78 +743,119 @@ kbd {
 }
 
 /* ============================================
-   侧边栏底部用户区 aside-bottom（Codex 风格）
-   嵌在菜单内，宽度与菜单项平齐（同样 10px 边距）
+   顶栏右侧：新手引导胶囊 + 账号胶囊（原侧栏左下角用户区上移）
    ============================================ */
-.aside-bottom {
-  padding: 10px;
-  border-top: 1px solid var(--border);
-}
-.account-dock {
-  width: 100%;
+.header-right {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px 6px 6px;
+  gap: 12px;
+}
+
+.account-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 10px 0 6px;
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--surface);
+  color: var(--text-2);
   cursor: pointer;
   font: inherit;
-  text-align: left;
-  transition:
-    border-color 0.15s,
-    background 0.15s;
+  transition: border-color 0.15s, color 0.15s;
 }
-.account-dock:hover {
-  border-color: var(--ink);
-  background: var(--surface-2);
+
+.account-chip:hover {
+  border-color: var(--blue-ink);
+  color: var(--blue-ink);
 }
-.dock-avatar {
-  position: relative;
-  width: 32px;
-  height: 32px;
+
+.account-chip-avatar {
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
   border-radius: 50%;
+  background: var(--blue-ink);
   color: #fff;
-  background: var(--ink);
   font-weight: 600;
-  font-size: 13px;
+  font-size: 12px;
   flex-shrink: 0;
 }
-.dock-avatar i {
-  position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid var(--surface);
-  border-radius: 50%;
-  background: var(--green-ink);
-}
-.dock-copy {
+
+.account-chip-copy {
   display: flex;
   flex-direction: column;
   gap: 1px;
-  min-width: 0;
-  flex: 1;
+  align-items: flex-start;
+  line-height: 1.15;
 }
-.dock-copy strong {
-  color: var(--ink);
+
+.account-chip-copy strong {
+  color: var(--text-1);
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
+  max-width: 120px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.dock-copy small {
-  color: var(--text-3);
+
+.account-chip-copy small {
+  color: var(--text-2);
   font-size: 10px;
 }
-.dock-chevron {
-  color: var(--text-3);
-  flex-shrink: 0;
+
+/* 账号下拉面板里的信息行（antd 弹层始终白底，用固定色保证两主题可读） */
+.account-who {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.account-who-avatar {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--blue-ink);
+  color: #fff;
+  font-weight: 600;
+  font-size: 14px;
+}
+
+.account-who-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.account-who-copy strong {
+  font-size: 13px;
+  color: #111827;
+}
+
+.account-who-copy small {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.account-school {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #374151;
+}
+
+.account-school code {
+  padding: 1px 6px;
+  border-radius: 4px;
+  background: #f3f4f6;
+  color: #111827;
 }
 
 .layout-content {
@@ -3820,19 +3847,6 @@ body[data-theme='tech'] .st-subject-self-study {
   text-transform: uppercase;
 }
 
-/* -- 学校切换卡片 -- */
-.workspace-switcher {
-  margin: 8px 10px;
-  border-radius: 12px;
-  background: rgba(148, 163, 184, 0.10);
-  border: 1px solid var(--border-2);
-  transition: border-color 160ms var(--ease-out), background 160ms var(--ease-out);
-}
-.workspace-switcher:hover {
-  border-color: rgba(14, 165, 233, 0.35);
-  background: rgba(56, 189, 248, 0.08);
-}
-
 /* -- 胶囊导航 -- */
 .menu-scroll {
   padding: 4px 8px 8px;
@@ -3885,10 +3899,6 @@ body[data-theme='tech'] .st-subject-self-study {
 .nav-label {
   font-size: 15px;
 }
-
-/* -- 底部账号坞 -- */
-.aside-bottom { padding: 10px; border-top: 1px solid var(--border-2); }
-.account-dock { border-radius: 12px; }
 
 /* -- 英雄标题顶栏 -- */
 .layout-header {
@@ -4036,10 +4046,6 @@ body[data-theme='tech'] .ant-btn-primary {
 }
 body[data-theme='tech'] .ant-btn-primary:not(:disabled):hover {
   box-shadow: 0 6px 22px rgba(124, 58, 237, 0.5);
-}
-body[data-theme='tech'] .workspace-switcher:hover {
-  border-color: rgba(167, 139, 250, 0.4);
-  background: rgba(124, 58, 237, 0.12);
 }
 
 /* -- 科技主题：Ant Design + 业务组件暗色适配 -- */

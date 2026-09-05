@@ -1139,5 +1139,28 @@ export const assistantApi = {
     }>(http.post('/assistant/chat', data, { timeout: 120000, signal: opts?.signal })),
 }
 
+export type OnboardingStep = {
+  key: string
+  title: string
+  done: boolean
+  detail: string
+  path: string
+}
+
+export type OnboardingStatus = {
+  steps: OnboardingStep[]
+  done_count: number
+  total: number
+  history_year?: string | null
+  dismissed: boolean
+}
+
+export const onboardingApi = {
+  status: (signal?: AbortSignal) =>
+    unwrap<OnboardingStatus>(http.get('/onboarding/status', { timeout: 8000, signal })),
+  dismiss: () => unwrap<{ dismissed: boolean }>(http.post('/onboarding/dismiss', {}, { timeout: 8000 })),
+  reopen: () => unwrap<{ dismissed: boolean }>(http.post('/onboarding/reopen', {}, { timeout: 8000 })),
+}
+
 export { setAuthResolver }
 export type { AuthResolver } from './http'
