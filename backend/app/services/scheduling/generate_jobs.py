@@ -22,7 +22,7 @@ _JOB_TTL = 6 * 3600
 _MAX_JOBS = 40
 # 心跳与僵尸收割阈值：queued 超时未启动 / running 心跳超时，都明确判失败并给出原因
 _STALE_QUEUED_SECONDS = 120.0
-_STALE_RUNNING_SECONDS = 90.0
+_STALE_RUNNING_SECONDS = 150.0
 
 _jobs: dict[str, "GenerateJob"] = {}
 _gate = threading.Lock()
