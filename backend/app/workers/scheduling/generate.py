@@ -49,13 +49,24 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
 
     from app.api.v1.scheduling import GenerateIn, _execute_schedule_generation
     from app.db.session import AsyncSessionLocal, tenant_id_ctx
-    from app.services.scheduling.generate_jobs import get_or_create_job, release_generate_slot
+    from app.services.scheduling.generate_jobs import (
+        get_or_create_job,
+        release_generate_slot,
+        touch_heartbeat,
+    )
 
     current = get_or_create_job(job_id, tenant_id)
 
     async def on_progress(stage: str, message: str, **extra: Any) -> None:
         current.emit("progress", stage=stage, message=message, **extra)
 
+    async def heartbeat_loop() -> None:
+        """执行期心跳：每 5 秒刷新一次，让页面确认进程存活。"""
+        while True:
+            touch_heartbeat(job_id)
+            await asyncio.sleep(5)
+
+    beat = asyncio.create_task(heartbeat_loop())
     token = tenant_id_ctx.set(tenant_id)
     try:
         current.emit("progress", stage="validating", message="任务已排队，开始校验")
@@ -84,6 +95,7 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
                 await session.rollback()
                 current.emit("error", stage="error", message=str(exc) or "生成失败")
     finally:
+        beat.cancel()
         tenant_id_ctx.reset(token)
         release_generate_slot(tenant_id)
 
@@ -96,7 +108,7 @@ async def _run_spawned_job(
     from fastapi import HTTPException
 
     from app.db.session import AsyncSessionLocal, tenant_id_ctx
-    from app.services.scheduling.generate_jobs import get_job, release_generate_slot
+    from app.services.scheduling.generate_jobs import get_job, release_generate_slot, touch_heartbeat
 
     current = get_job(job_id)
     if current is None:
@@ -106,6 +118,12 @@ async def _run_spawned_job(
     async def on_progress(stage: str, message: str, **extra: Any) -> None:
         current.emit("progress", stage=stage, message=message, **extra)
 
+    async def heartbeat_loop() -> None:
+        while True:
+            touch_heartbeat(job_id)
+            await asyncio.sleep(5)
+
+    beat = asyncio.create_task(heartbeat_loop())
     token = tenant_id_ctx.set(tenant_id)
     try:
         current.emit("progress", stage="validating", message="任务已排队，开始校验")
@@ -129,6 +147,7 @@ async def _run_spawned_job(
                 await session.rollback()
                 current.emit("error", stage="error", message=str(exc) or "生成失败")
     finally:
+        beat.cancel()
         tenant_id_ctx.reset(token)
         release_generate_slot(tenant_id)
 

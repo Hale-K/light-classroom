@@ -20,6 +20,9 @@ from app.core.config import settings
 MAX_ACTIVE_GENERATES = 2
 _JOB_TTL = 6 * 3600
 _MAX_JOBS = 40
+# 心跳与僵尸收割阈值：queued 超时未启动 / running 心跳超时，都明确判失败并给出原因
+_STALE_QUEUED_SECONDS = 120.0
+_STALE_RUNNING_SECONDS = 90.0
 
 _jobs: dict[str, "GenerateJob"] = {}
 _gate = threading.Lock()
@@ -79,6 +82,7 @@ class GenerateJob:
     result: dict[str, Any] | None = None
     error: str | None = None
     created_at: float = field(default_factory=time.time)
+    heartbeat_at: float = field(default_factory=time.time)
     _redis_pumps: dict[int, asyncio.Task] = field(default_factory=dict, repr=False)
 
     def _snapshot(self) -> dict[str, Any]:
@@ -90,10 +94,12 @@ class GenerateJob:
             "result": self.result,
             "error": self.error,
             "created_at": self.created_at,
+            "heartbeat_at": self.heartbeat_at,
         }
 
     def emit(self, event_type: str, **payload: Any) -> None:
         event = {"type": event_type, "ts": time.time(), **payload}
+        self.heartbeat_at = time.time()
         if event_type == "progress":
             self.status = "running"
         elif event_type == "done":
@@ -230,6 +236,7 @@ def create_job(tenant_id: int) -> GenerateJob:
 def get_job(job_id: str) -> GenerateJob | None:
     job = _jobs.get(job_id)
     if job is not None:
+        _reap_stale(job)
         return job
     client = _redis()
     if client is None:
@@ -246,9 +253,46 @@ def get_job(job_id: str) -> GenerateJob | None:
         result=data.get("result"),
         error=data.get("error"),
         created_at=float(data.get("created_at") or time.time()),
+        heartbeat_at=float(data.get("heartbeat_at") or data.get("created_at") or time.time()),
     )
+    _reap_stale(job)
     _jobs[job.id] = job
     return job
+
+
+def _reap_stale(job: "GenerateJob") -> None:
+    """僵尸任务收割：queued 未启动 / running 心跳超时 → 明确判失败并持久化。
+
+    让前端看到确定性结果，而不是永远停在「已进入排课队列」。
+    """
+    if job.status not in ("queued", "running"):
+        return
+    now = time.time()
+    if job.status == "queued" and now - max(job.heartbeat_at, job.created_at) < _STALE_QUEUED_SECONDS:
+        return
+    if job.status == "running" and now - job.heartbeat_at < _STALE_RUNNING_SECONDS:
+        return
+    if job.status == "queued":
+        message = "排课进程未启动（worker 可能离线），请稍后重新生成"
+    else:
+        message = "求解进程失去心跳（可能已中断），请重新生成"
+    job.emit("error", stage="error", message=message)
+
+
+def touch_heartbeat(job_id: str) -> None:
+    """执行期心跳：仅刷新 heartbeat_at 并重写快照，不产生事件刷屏。"""
+    job = _jobs.get(job_id)
+    if job is not None:
+        job.heartbeat_at = time.time()
+    client = _redis()
+    if client is None:
+        return
+    raw = client.get(_job_key(job_id))
+    if not raw:
+        return
+    data = json.loads(raw)
+    data["heartbeat_at"] = time.time()
+    client.set(_job_key(job_id), json.dumps(data, ensure_ascii=False), ex=_JOB_TTL)
 
 
 def get_or_create_job(job_id: str, tenant_id: int) -> GenerateJob:
