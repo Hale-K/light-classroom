@@ -5,6 +5,7 @@ import { authApi } from '@/api'
 import AssistantDock from '@/components/AssistantDock'
 import Icon from '@/components/Icon'
 import OnboardingGuide from '@/components/OnboardingGuide'
+import PageTour from '@/components/PageTour'
 import { routeTitle } from '@/router/meta'
 import { useAuthStore, selectDisplayName } from '@/store/auth'
 import { APP_NAME } from '@/types'
@@ -217,6 +218,7 @@ export default function MainLayout() {
             <span className="header-context">{academicTerm()}</span>
           </div>
           <div className="header-right">
+            <PageTour />
             <OnboardingGuide />
             <Dropdown
               trigger={['click']}

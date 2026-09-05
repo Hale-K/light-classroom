@@ -205,6 +205,76 @@ body {
   border-color: var(--blue-ink);
 }
 
+/* 本页导览：问号标记 + 聚光挖孔遮罩 + 跟随步骤卡片 */
+.tour-q {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border: 1px solid currentColor;
+  border-radius: 50%;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+/* Ant Design Tour 负责目标测量和视口碰撞；这里只定义轻课堂的视觉语言。 */
+.ant-tour.lc-page-tour {
+  width: min(520px, calc(100vw - 24px));
+  --antd-arrow-background-color: #effcf4;
+}
+
+.ant-tour.lc-page-tour .ant-tour-inner {
+  border: 1px solid #2aa865;
+  border-radius: 4px;
+  background: #effcf4;
+  box-shadow: 0 14px 34px rgba(5, 8, 18, 0.3);
+}
+
+.ant-tour.lc-page-tour .ant-tour-title {
+  color: #24352b;
+  font-size: 14px;
+}
+
+.ant-tour.lc-page-tour .ant-tour-description {
+  color: #33473b;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.ant-tour.lc-page-tour .ant-tour-close {
+  color: #647269;
+}
+
+.ant-tour.lc-page-tour .ant-tour-indicator {
+  background: #d9eee1;
+}
+
+.ant-tour.lc-page-tour .ant-tour-indicator-active {
+  background: #2f6fed;
+}
+
+.ant-tour.lc-page-tour .ant-tour-next-btn {
+  border-color: #2f6fed;
+  background: #2f6fed;
+  color: #fff;
+}
+
+.ant-tour.lc-page-tour .ant-tour-prev-btn {
+  border-color: #d8e4dc;
+  background: #fff;
+  color: #526159;
+}
+
+.lc-page-tour.ant-tour-target-placeholder {
+  outline: 2px solid #ff4d5f;
+  outline-offset: 0;
+}
+
+.guide-chip:focus-visible {
+  outline: 2px solid var(--blue-ink);
+  outline-offset: 2px;
+}
+
 .guide-chip.is-done {
   color: #16a34a;
   border-color: rgba(22, 163, 74, 0.45);

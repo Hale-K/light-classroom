@@ -1,0 +1,109 @@
+const { chromium } = require('playwright')
+const assert = require('node:assert/strict')
+
+async function main() {
+  const browser = await chromium.launch({ headless: true, channel: 'chrome' })
+  try {
+    const page = await browser.newPage({ viewport: { width: 1280, height: 800 } })
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    const html = `<!doctype html><html><body><div id="root"></div><script type="module">
+      import RefreshRuntime from '/@react-refresh';
+      RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$ = () => {}; window.$RefreshSig$ = () => (type) => type; window.__vite_plugin_react_preamble_installed__ = true;
+      await import('/tests/page-tour.harness.tsx');
+    </script></body></html>`
+    await page.route('**/__page_tour_test*', route => route.fulfill({ contentType: 'text/html', body: html }))
+    await page.goto('http://127.0.0.1:5176/campus-buildings/__page_tour_test')
+
+    const trigger = page.getByRole('button', { name: '本页导览' })
+    const assertFocusContains = async selector => {
+      await page.waitForFunction(selector => {
+        const target = document.querySelector(selector)
+        const hole = document.querySelector('.ant-tour-target-placeholder')
+        if (!target || !hole) return false
+        const t = target.getBoundingClientRect()
+        const h = hole.getBoundingClientRect()
+        return h.left <= t.left && h.top <= t.top && h.right >= t.right && h.bottom >= t.bottom
+      }, selector)
+    }
+    await trigger.click()
+    const dialog = page.locator('.ant-tour:not(.ant-tour-hidden)')
+    await dialog.waitFor()
+    await page.getByText('第 1 步 · 空间功能', { exact: true }).waitFor()
+    await assertFocusContains('.facility-tabs .ant-tabs-nav-list')
+    await page.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 2 步 · 空间录入', { exact: true }).waitFor()
+    await assertFocusContains('.facility-actions')
+    const secondBox = await dialog.boundingBox()
+    assert(secondBox && secondBox.x >= 0 && secondBox.y >= 0)
+    assert(secondBox.x + secondBox.width <= 1280 && secondBox.y + secondBox.height <= 800)
+    await page.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 3 步 · 学校空间树', { exact: true }).waitFor()
+    await assertFocusContains('.facility-tree-panel')
+    await page.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 4 步 · 资源详情', { exact: true }).waitFor()
+    await assertFocusContains('.facility-directory')
+    await page.keyboard.press('Escape')
+    assert.equal(await dialog.count(), 0)
+    const triggerHandle = await trigger.elementHandle()
+    await page.waitForFunction(el => document.activeElement === el, triggerHandle)
+
+    await page.goto('http://127.0.0.1:5176/students/__page_tour_test')
+    const studentTrigger = page.getByRole('button', { name: '本页导览' })
+    await studentTrigger.click()
+    await page.getByText('第 1 步 · 学生统计', { exact: true }).waitFor()
+    await assertFocusContains('.zh-stat-strip')
+    await page.keyboard.press('Escape')
+
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto('http://127.0.0.1:5176/scheduling/__page_tour_test?tab=slots')
+    const schedulingTrigger = page.getByRole('button', { name: '本页导览' })
+    await schedulingTrigger.click()
+    const schedulingDialog = page.locator('.ant-tour:not(.ant-tour-hidden)')
+    await page.getByText('第 1 步 · 先看完整排课流程', { exact: true }).waitFor()
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 2 步 · 确定每个班的课程总量', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('tab', { name: '课时管理' }).getAttribute('aria-selected'), 'true')
+    assert.equal(new URL(page.url()).searchParams.get('tab'), '课时管理')
+    await assertFocusContains('.sk-hours-intro')
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 3 步 · 逐科核对课时方案', { exact: true }).waitFor()
+    await assertFocusContains('.sk-hours-table')
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 4 步 · 定义一周有哪些可排课位', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('tab', { name: '课位结构' }).getAttribute('aria-selected'), 'true')
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 5 步 · 把课程分配给教师和教室', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('tab', { name: '任教关系' }).getAttribute('aria-selected'), 'true')
+    await schedulingDialog.getByRole('button', { name: '上一步' }).click()
+    await page.getByText('第 4 步 · 定义一周有哪些可排课位', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('tab', { name: '课位结构' }).getAttribute('aria-selected'), 'true')
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 5 步 · 把课程分配给教师和教室', { exact: true }).waitFor()
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 6 步 · 检查任教关系是否完整', { exact: true }).waitFor()
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 7 步 · 建立可执行的排课规则', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('tab', { name: '建立规则' }).getAttribute('aria-selected'), 'true')
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 8 步 · 生成前确认范围与版本', { exact: true }).waitFor()
+    assert.equal(await page.getByRole('tab', { name: '课表' }).getAttribute('aria-selected'), 'true')
+    await schedulingDialog.getByRole('button', { name: '下一步' }).click()
+    await page.getByText('第 9 步 · 查看结果、进度和冲突原因', { exact: true }).waitFor()
+    await assertFocusContains('.sk-schedule-surface')
+    await schedulingDialog.locator('.ant-tour-footer .ant-btn-primary').click()
+    assert.equal(await schedulingDialog.count(), 0)
+
+    await page.setViewportSize({ width: 320, height: 640 })
+    await page.goto('http://127.0.0.1:5176/students/__page_tour_test')
+    await studentTrigger.click()
+    const box = await page.locator('.ant-tour:not(.ant-tour-hidden)').boundingBox()
+    assert(box && box.x >= 0 && box.x + box.width <= 320)
+    assert.deepEqual(errors, [])
+    console.log('PASS: space/student targets, scheduling tab switching, focus, Escape, mobile viewport; no browser errors')
+  } finally {
+    await browser.close()
+  }
+}
+
+main().catch(error => { console.error(error); process.exitCode = 1 })
