@@ -32,17 +32,50 @@ function SchedulingHarness() {
   )
 }
 
+const facilityTabs = ['空间资源配置', '资源分配规则', '班级划分'] as const
+type FacilityTab = typeof facilityTabs[number]
+
+function FacilityHarness() {
+  const [active, setActive] = useState<FacilityTab>('空间资源配置')
+  const [, setSearchParams] = useSearchParams()
+  const select = (tab: FacilityTab) => {
+    setActive(tab)
+    setSearchParams({ tab }, { replace: true })
+  }
+  return (
+    <main className="zh-page">
+      <div className="facility-tabs">
+        <div className="ant-tabs-nav-list" role="tablist">
+          {facilityTabs.map((tab) => <button key={tab} role="tab" aria-selected={active === tab} type="button" onClick={() => select(tab)}>{tab}</button>)}
+        </div>
+        {active === '空间资源配置' && <>
+          <div className="facility-actions"><button type="button">新增校区</button></div>
+          <div className="facility-workspace">
+            <aside className="facility-tree-panel"><div className="ant-tree-node-content-wrapper-selected">本部校区 0</div></aside>
+            <section className="facility-directory">资源详情</section>
+          </div>
+        </>}
+        {active === '资源分配规则' && <>
+          <section className="facility-allocation-intro">按届别规划教学空间</section>
+          <section className="facility-allocation-resource-list"><div className="ant-table-wrapper">分配规则列表</div></section>
+        </>}
+        {active === '班级划分' && <section className="facility-allocation-resource-list">
+          <div className="facility-resource-toolbar">班级筛选与批量操作</div>
+          <div className="facility-class-resource-grid">教室与行政班</div>
+        </section>}
+      </div>
+    </main>
+  )
+}
+
 function PageContent() {
   const location = useLocation()
   if (location.pathname.startsWith('/scheduling')) return <SchedulingHarness />
+  if (location.pathname.startsWith('/campus-buildings')) return <FacilityHarness />
   return (
     <main className="zh-page">
       <div className="chapter"><h2>空间资源</h2></div>
       <div className="zh-stat-strip"><span>学生总数 <strong>12</strong></span><span>待分班 <strong>3</strong></span></div>
-      <div className="facility-tabs"><div className="ant-tabs-nav"><div className="ant-tabs-nav-list" role="tablist">页面页签</div></div></div>
-      <div className="facility-actions" style={{ display: 'flex', justifyContent: 'flex-end' }}><button type="button">新增校区</button></div>
-      <aside className="facility-tree-panel">学校空间树</aside>
-      <section className="facility-directory">资源详情</section>
     </main>
   )
 }

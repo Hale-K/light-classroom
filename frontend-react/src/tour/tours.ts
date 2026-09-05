@@ -144,10 +144,53 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     { title: '权限范围', content: '勾选决定该角色能看到和执行的功能。保存前检查敏感写操作是否确有需要。', target: firstOf('.zh-rbac-menu-tree', '.zh-rbac-workbench') },
   ],
   '/campus-buildings': [
-    { title: '空间功能', content: '这里分为空间资源配置、资源分配规则和班级划分。切换页签后可再次打开导览。', target: '.facility-tabs .ant-tabs-nav-list' },
-    { title: '空间录入', content: '新增校区 → 楼宇 → 场室，按层级建立学校空间；排课使用的教室来自这里。', target: '.facility-actions' },
-    { title: '学校空间树', content: '左侧按校区、楼宇和楼层组织空间；选择节点后在右侧查看对应资源。', target: '.facility-tree-panel' },
-    { title: '资源详情', content: '这里维护当前节点下的场室信息、容量和使用状态。', target: '.facility-directory' },
+    {
+      title: '先看空间资源流程',
+      content: '本页按“空间资源配置 → 资源分配规则 → 班级划分”推进：先建真实空间，再把教室分给届别，最后按教室生成或绑定行政班。导览会自动切换三个页签。',
+      target: firstOf('.facility-tabs .ant-tabs-nav-list', '.facility-tabs [role="tablist"]'),
+    },
+    {
+      title: '按校区、楼宇、场室逐级创建',
+      content: '先新增校区，再选择校区新增楼宇，最后选择楼宇新增场室。场室的容量、类型以及是否允许排课、排考和会议，会被后续业务直接使用。',
+      target: tabPanelTarget('.facility-tabs', '空间资源配置', '.facility-actions'),
+      beforeEnter: switchTab('.facility-tabs', '空间资源配置'),
+    },
+    {
+      title: '从左侧选择当前空间节点',
+      content: '“学校空间”是根节点，下面依次展开校区、楼宇和楼层。点击你要维护的节点，例如“本部校区”，右侧内容和新增操作都会切换到这个范围。节点后的数字表示其当前下级资源数量。',
+      target: tabPanelTarget('.facility-tabs', '空间资源配置', '.facility-tree-panel .ant-tree-node-content-wrapper-selected', '.facility-tree-panel'),
+      beforeEnter: switchTab('.facility-tabs', '空间资源配置'),
+    },
+    {
+      title: '在右侧核对下级资源',
+      content: '这里列出当前节点直属的校区、楼宇、楼层或场室。继续点入某一行对应的树节点，可以逐层查看；场室要重点核对容量、资源标签和使用状态。',
+      target: tabPanelTarget('.facility-tabs', '空间资源配置', '.facility-directory'),
+      beforeEnter: switchTab('.facility-tabs', '空间资源配置'),
+    },
+    {
+      title: '把空间按规则分配给届别',
+      content: '分配规则可限定学年学期、目标届别、校区、楼宇、楼层、场室类型及共享方式。先预览匹配教室，确认范围正确后再执行，避免把专属资源分给错误届别。',
+      target: tabPanelTarget('.facility-tabs', '资源分配规则', '.facility-allocation-intro', '.facility-allocation-resource-list'),
+      beforeEnter: switchTab('.facility-tabs', '资源分配规则'),
+    },
+    {
+      title: '核对规则状态和匹配数量',
+      content: '每行是一条分配规则。重点检查目标届别、资源范围、共享或专属方式、匹配教室数及生效状态；需要追溯时可打开“查看资源”。',
+      target: tabPanelTarget('.facility-tabs', '资源分配规则', '.facility-allocation-resource-list .ant-table-wrapper', '.facility-allocation-resource-list'),
+      beforeEnter: switchTab('.facility-tabs', '资源分配规则'),
+    },
+    {
+      title: '从已分配教室规划行政班',
+      content: '这里只有已通过分配规则归属到届别的普通教室。可以按名称、楼宇和楼层筛选，再选择单间教室生成班级，或使用“按需生成班级”批量处理。',
+      target: tabPanelTarget('.facility-tabs', '班级划分', '.facility-resource-toolbar', '.facility-allocation-resource-list'),
+      beforeEnter: switchTab('.facility-tabs', '班级划分'),
+    },
+    {
+      title: '确认教室与行政班的绑定结果',
+      content: '每张卡显示教室位置、容量、所属届别和已绑定班级。生成或调整后，再进入班级管理补充班主任和学生名单；排课会使用这里确定的班级教室。',
+      target: tabPanelTarget('.facility-tabs', '班级划分', '.facility-class-resource-grid', '.facility-allocation-resource-list'),
+      beforeEnter: switchTab('.facility-tabs', '班级划分'),
+    },
   ],
   '/teacher-profiles': [
     { title: '教师概览', content: '这里汇总教师、班主任、目标周课和已排课时，先判断整体任教数据是否完整。', target: '.tp-header' },
