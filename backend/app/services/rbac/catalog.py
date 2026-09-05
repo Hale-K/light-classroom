@@ -6,12 +6,28 @@ from app.models.rbac import MenuPermission, Permission, RolePermission
 from app.services.rbac.seed import PERMISSION_SEED
 
 
+_schema_checked = False
+
+
 async def ensure_permission_schema(session: AsyncSession) -> None:
-    """开发库兼容：补齐 permission.sort（生产走 Alembic）。"""
-    await session.execute(
-        text("ALTER TABLE permission ADD COLUMN IF NOT EXISTS sort INTEGER NOT NULL DEFAULT 0")
-    )
-    await session.flush()
+    """开发库兼容：补齐 permission.sort（生产走 Alembic）。
+
+    ALTER 即使列已存在也要拿 permission 表的 AccessExclusiveLock，并发的 menus
+    请求同时执行会互相死锁（PostgreSQL DeadlockDetectedError）。
+    进程内只放行第一个请求，其余直接跳过。
+    """
+    global _schema_checked
+    if _schema_checked:
+        return
+    _schema_checked = True
+    try:
+        await session.execute(
+            text("ALTER TABLE permission ADD COLUMN IF NOT EXISTS sort INTEGER NOT NULL DEFAULT 0")
+        )
+        await session.flush()
+    except Exception:
+        _schema_checked = False
+        raise
 
 
 async def ensure_permissions(session: AsyncSession) -> None:

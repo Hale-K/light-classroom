@@ -17,3 +17,4 @@ from app.models.transfer import *  # noqa: F401,F403
 from app.ai.model.store import AiProvider  # noqa: F401
 from app.ai.actions.models import AiAction  # noqa: F401
 from app.ai.runs.models import AiRun  # noqa: F401
+from app.ai.conversations.models import AiConversation  # noqa: F401

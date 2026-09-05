@@ -1110,7 +1110,17 @@ export type AssistantRun = {
   result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string }[] } | null
 }
 
+export type AssistantConversation = {
+  messages: { role: 'user' | 'assistant'; content: string }[]
+  summary: string
+  updated_at?: string | null
+}
+
 export const assistantApi = {
+  conversation: () => unwrap<AssistantConversation>(http.get('/assistant/conversation', { timeout: 5000 })),
+  saveConversation: (messages: AssistantConversation['messages']) =>
+    unwrap<AssistantConversation>(http.put('/assistant/conversation', { messages }, { timeout: 5000 })),
+  clearConversation: () => unwrap<{ cleared: boolean }>(http.delete('/assistant/conversation', { timeout: 5000 })),
   startRun: (data: Record<string, unknown>, signal?: AbortSignal) =>
     unwrap<AssistantRun>(http.post('/assistant/runs', data, { timeout: 8000, signal })),
   readRun: (id: string, signal?: AbortSignal) =>

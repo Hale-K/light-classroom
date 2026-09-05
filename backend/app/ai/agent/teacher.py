@@ -77,13 +77,14 @@ async def agent_reply(
     cannot: list[str] | None = None,
     on_progress: Progress | None = None,
     page_context: dict | None = None,
+    memory_summary: str = "",
 ) -> TeacherTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
 
     cache_key = answer_cache_key(
         tenant_id,
         model,
-        turns,
+        ([{"role": "assistant", "content": memory_summary[-8000:]}] if memory_summary else []) + turns,
         page_path=page_path,
         can_manage_rules=can_manage_rules,
         page_context=page_context,
@@ -133,6 +134,7 @@ async def agent_reply(
             can=can,
             cannot=cannot,
             page_context=page_context,
+            memory_summary=memory_summary,
         ),
         tools=[*SCHOOL_TOOLS, *([PROPOSE_RULES_TOOL] if can_manage_rules else [])],
         executor=executor,
@@ -174,6 +176,7 @@ async def handle_teacher_turn(
     message_id: str | None = None,
     on_progress: Progress | None = None,
     page_context: dict | None = None,
+    memory_summary: str = "",
 ) -> TeacherTurn:
     if not turns:
         raise ChatError("请输入内容")
@@ -209,6 +212,7 @@ async def handle_teacher_turn(
             can_manage_rules=can_manage_rules,
             on_progress=on_progress,
             page_context=page_context,
+            memory_summary=memory_summary,
         )
     except ChatError as exc:
         spent = time.monotonic() - started
@@ -234,6 +238,7 @@ async def handle_teacher_turn(
             cannot=cannot,
             retrieved=retrieved,
             page_context=page_context,
+            memory_summary=memory_summary,
         ),
     )
     return TeacherTurn(

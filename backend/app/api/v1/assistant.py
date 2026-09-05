@@ -12,6 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.ai.agent.teacher import handle_teacher_turn
 from app.ai.actions import decide_action
 from app.ai.model.chat import ChatError
+from app.ai.conversations import conversation_view, delete_conversation, get_conversation, sync_conversation
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
 
@@ -43,6 +44,49 @@ class ChatIn(BaseModel):
     can: list[str] = Field(default_factory=list)
     cannot: list[str] = Field(default_factory=list)
     message_id: str | None = None
+
+
+class ConversationIn(BaseModel):
+    messages: list[ChatTurn] = Field(default_factory=list, max_length=60)
+
+
+@router.get("/conversation", summary="读取当前用户的助手会话")
+async def read_assistant_conversation(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    if user.tenant_id != tenant_id:
+        raise HTTPException(403, "学校与当前账号不一致")
+    return {"code": 0, "message": "ok", "data": conversation_view(
+        await get_conversation(session, tenant_id, user.id)
+    )}
+
+
+@router.put("/conversation", summary="同步当前用户的助手会话")
+async def save_assistant_conversation(
+    body: ConversationIn,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    if user.tenant_id != tenant_id:
+        raise HTTPException(403, "学校与当前账号不一致")
+    messages = [{"role": item.role, "content": item.content} for item in body.messages]
+    row = await sync_conversation(session, tenant_id, user.id, messages)
+    return {"code": 0, "message": "ok", "data": conversation_view(row)}
+
+
+@router.delete("/conversation", summary="开始新的助手会话")
+async def clear_assistant_conversation(
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    if user.tenant_id != tenant_id:
+        raise HTTPException(403, "学校与当前账号不一致")
+    await delete_conversation(session, tenant_id, user.id)
+    return {"code": 0, "message": "ok", "data": {"cleared": True}}
 
 
 @router.post("/chat", summary="助手对话")
@@ -122,6 +166,8 @@ async def start_assistant_run(
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
     payload = body.model_dump(exclude={"request_id"})
+    conversation = await get_conversation(session, tenant_id, user.id)
+    payload["memory_summary"] = conversation.summary if conversation else ""
     data, created = await create_run(session, body.request_id, tenant_id, user.id, payload)
     if created:
         spawn_run(body.request_id, tenant_id, user.id, payload)

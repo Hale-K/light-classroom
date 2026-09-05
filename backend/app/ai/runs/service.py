@@ -108,6 +108,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 page_title=payload.get("page_title"), page_path=payload.get("page_path"),
                 can=payload.get("can"), cannot=payload.get("cannot"),
                 page_context=payload.get("page_context"),
+                memory_summary=payload.get("memory_summary") or "",
                 message_id=payload.get("message_id"), on_progress=progress,
             ), persist, timeout=RUN_TIMEOUT)
             # A cancellation racing completion wins if it acquired this row first.

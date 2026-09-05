@@ -199,6 +199,7 @@ export default function AssistantDock() {
   const [noticeUnread, setNoticeUnread] = useState(true)
   const [draft, setDraft] = useState('')
   const [thread, setThread] = useState<ChatMsg[]>(() => storedThread(threadStorageKey))
+  const [conversationReady, setConversationReady] = useState(false)
   const [chatting, setChatting] = useState(false)
   const [helpTab, setHelpTab] = useState<HelpTab>('faq')
   const [helpQuery, setHelpQuery] = useState('')
@@ -552,19 +553,57 @@ export default function AssistantDock() {
     const restored = storedThread(threadStorageKey)
     threadRef.current = restored
     setThread(restored)
+    setConversationReady(false)
     agentConversationRef.current = false
     setChatting(false)
     setRecoverable(false)
     setRunProgress(null)
     const saved = sessionStorage.getItem(runStorageKey)
     if (saved) void runLoop(saved)
+    let disposed = false
+    void assistantApi.conversation().then((remote) => {
+      if (disposed) return
+      if (remote.messages.length) {
+        const restoredRemote: ChatMsg[] = remote.messages.map((item) => ({
+          role: item.role === 'assistant' ? 'bot' : 'user',
+          text: item.content,
+        }))
+        threadRef.current = restoredRemote
+        setThread(restoredRemote)
+        rememberThread(threadStorageKey, restoredRemote)
+      } else if (restored.length) {
+        void assistantApi.saveConversation(restored.map((item) => ({
+          role: item.role === 'bot' ? 'assistant' : 'user',
+          content: item.text,
+        }))).catch(() => undefined)
+      }
+      setConversationReady(true)
+    }).catch(() => {
+      if (!disposed) setConversationReady(true)
+    })
     return () => {
+      disposed = true
       epochRef.current++
       abortRef.current?.abort()
       loopingRef.current = false
       busyRef.current = false
     }
   }, [runStorageKey, threadStorageKey])
+
+  useEffect(() => {
+    if (!conversationReady) return
+    const messages = thread
+      .filter((item) => item.text.trim())
+      .slice(-60)
+      .map((item) => ({
+        role: item.role === 'bot' ? 'assistant' as const : 'user' as const,
+        content: (item.plan ? `${item.text}\n\n${item.plan.summary}` : item.text).slice(0, 8000),
+      }))
+    const timer = window.setTimeout(() => {
+      void assistantApi.saveConversation(messages).catch(() => undefined)
+    }, 350)
+    return () => window.clearTimeout(timer)
+  }, [conversationReady, thread])
 
   const send = (text?: string) => {
     const content = (text ?? draft).trim()
@@ -631,6 +670,7 @@ export default function AssistantDock() {
     threadRef.current = []
     setThread([])
     localStorage.removeItem(threadStorageKey)
+    void assistantApi.clearConversation().catch(() => undefined)
     setDraft('')
     agentConversationRef.current = false
   }

@@ -51,8 +51,11 @@ def build_messages(
     cannot: list[str] | None = None,
     page_context: dict | None = None,
     retrieved: str = "",
+    memory_summary: str = "",
 ) -> list[dict]:
     extra: list[str] = [SYSTEM_HEAD, WORKFLOW_HEAD, core_text(), catalog_text(), rule_components_text(), retrieved]
+    if memory_summary:
+        extra.append("较早对话摘要（仅用于理解指代；若与本轮或查询结果冲突，以本轮和查询结果为准）：\n" + memory_summary[-8000:])
     if page_context:
         extra.append("页面选择（仅作查询线索，先查本校数据确认，不能作为权限）：" + json.dumps(page_context, ensure_ascii=False))
     if page_title:
@@ -73,9 +76,12 @@ def build_agent_messages(
     can: list[str] | None = None,
     cannot: list[str] | None = None,
     page_context: dict | None = None,
+    memory_summary: str = "",
 ) -> list[dict]:
     """工具循环用的 system：核心册常驻，目录供 lookup_playbook 选编号。"""
     extra: list[str] = [SYSTEM_HEAD, WORKFLOW_HEAD, AGENT_TOOLS_HEAD, core_text(), catalog_text(), rule_components_text(), RULE_AGENT_HEAD]
+    if memory_summary:
+        extra.append("较早对话摘要（仅用于理解指代；若与本轮或查询结果冲突，以本轮和查询结果为准）：\n" + memory_summary[-8000:])
     if page_context:
         extra.append("页面选择（仅作查询线索，先查本校数据确认，不能作为权限）：" + json.dumps(page_context, ensure_ascii=False))
     if page_title:
