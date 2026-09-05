@@ -174,6 +174,19 @@ async def lookup_teachers(
         if c.head_teacher_id is not None:
             head_classes.setdefault(c.head_teacher_id, []).append(c.name)
 
+    # 班主任一览：完整列出、不受明细行数上限影响——「班主任有哪些」一类问题的答案在这里
+    head_ids = sorted({c.head_teacher_id for c in head_rows if c.head_teacher_id is not None})
+    head_names: dict[int, str] = {}
+    if head_ids:
+        head_names = dict((await session.execute(
+            select(User.id, User.name).where(User.id.in_(head_ids))
+        )).all())
+    head_pairs = [
+        f"{c.name} {head_names[c.head_teacher_id]}"
+        for c in sorted(head_rows, key=lambda c: c.name)
+        if c.head_teacher_id is not None and head_names.get(c.head_teacher_id)
+    ]
+
     taught: dict[int, set[str]] = {}
     for a in asg_rows:
         if a.teacher_id is None:
@@ -199,7 +212,12 @@ async def lookup_teachers(
     more = max(0, total - _LIST_CAP)
     tail = f"（其余 {more} 人略）" if more > 0 else ""
     head_line = f"{year or '当前学年'}第{term}学期，{scope}共 {total} 人{tail}："
-    return head_line + "\n" + "\n".join(lines[:_LIST_CAP])
+    overview = (
+        f"班主任一览（{len(head_pairs)} 个班）：{'；'.join(head_pairs)}"
+        if head_pairs
+        else "班主任一览：还没有班级设置班主任。"
+    )
+    return head_line + "\n" + overview + "\n" + "\n".join(lines[:_LIST_CAP])
 
 
 async def lookup_schedule_setup(session: AsyncSession, tenant_id: int, *, academic_year=None, term=None, class_id=None) -> str:
