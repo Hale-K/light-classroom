@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/api/http'
 import { assistantApi, authApi, orgApi, schedulingApi, type AssistantPlan, type AssistantRun } from '@/api'
@@ -215,6 +215,8 @@ export default function AssistantDock() {
   const tasks = snap.tasks
   const loopingRef = useRef(false)
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const messageBodyRef = useRef<HTMLDivElement>(null)
+  const followLatestRef = useRef(true)
   const abortRef = useRef<AbortController | null>(null)
   const abortedRef = useRef(false)
 
@@ -525,6 +527,7 @@ export default function AssistantDock() {
   const send = (text?: string) => {
     const content = (text ?? draft).trim()
     if (!content) return
+    followLatestRef.current = true
     setDraft('')
     setPanel('home')
     if (!busyRef.current) midRef.current = newMsgId()
@@ -547,6 +550,7 @@ export default function AssistantDock() {
   const pushMsg = (msg: ChatMsg) => commitThread((prev) => [...prev, msg])
 
   const runTask = (item: AssistantTask, extra?: Extra & { hoursDraft?: HoursDraft }) => {
+    followLatestRef.current = true
     forcedRef.current = { tool: item.tool, path: item.path, extra }
     if (!busyRef.current) midRef.current = newMsgId()
     const mid = midRef.current
@@ -662,6 +666,22 @@ export default function AssistantDock() {
   const rotated = helpTab === 'faq' ? [...FAQ.slice(faqOffset), ...FAQ.slice(0, faqOffset)] : helpItems
   const filtered = rotated.filter((item) => !helpQuery.trim() || item.q.includes(helpQuery.trim()) || item.a.includes(helpQuery.trim()))
   const shownThread = thread.filter((msg) => !msg.text.startsWith('已到「'))
+
+  useLayoutEffect(() => {
+    if (panel !== 'home' || !followLatestRef.current) return
+    const body = messageBodyRef.current
+    if (body) body.scrollTop = body.scrollHeight
+  }, [panel, thread, runProgress, connectionNote])
+
+  useEffect(() => {
+    if (panel !== 'home') return
+    followLatestRef.current = true
+    const frame = window.requestAnimationFrame(() => {
+      const body = messageBodyRef.current
+      if (body) body.scrollTop = body.scrollHeight
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [panel])
 
   return (
     <>
@@ -863,7 +883,14 @@ export default function AssistantDock() {
               <Icon name="x" size={16} />
             </button>
           </header>
-          <div className="assist-sheet-body">
+          <div
+            ref={messageBodyRef}
+            className="assist-sheet-body"
+            onScroll={(event) => {
+              const body = event.currentTarget
+              followLatestRef.current = body.scrollHeight - body.scrollTop - body.clientHeight <= 48
+            }}
+          >
             {shownThread.length === 0 && (
               <>
                 <p className="assist-sheet-cap">

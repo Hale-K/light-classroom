@@ -74,6 +74,14 @@ async function main() {
     await page.getByRole('button', { name: '发送', exact: true }).click()
     await page.waitForFunction(() => document.querySelectorAll('.assist-rule-plan').length === 2)
     assert.equal(chatCalls, 4, 'Follow-up must stay in agent conversation')
+    await page.locator('.assist-sheet').evaluate(element => { element.style.height = '360px' })
+    await page.locator('textarea').fill('再帮我核对一次当前规则')
+    await page.getByRole('button', { name: '发送', exact: true }).click()
+    await page.waitForFunction(() => {
+      const body = document.querySelector('.assist-sheet-body')
+      return body && body.scrollHeight > body.clientHeight
+        && body.scrollHeight - body.scrollTop - body.clientHeight <= 2
+    })
     await page.setViewportSize({ width: 390, height: 844 })
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
     assert.equal(overflow, false, 'Mobile page must not overflow')
