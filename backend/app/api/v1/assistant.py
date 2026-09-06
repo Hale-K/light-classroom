@@ -15,6 +15,7 @@ from app.ai.model.chat import ChatError
 from app.ai.conversations import conversation_view, delete_conversation, get_conversation, sync_conversation
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
+from app.models.enums import BaseUserRole
 
 logger = logging.getLogger(__name__)
 
@@ -182,6 +183,19 @@ async def read_assistant_run(
     from app.ai.runs import get_run
     data = await get_run(session, run_id, tenant_id, user.id)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/runs/{run_id}/trace", summary="查看助手诊断轨迹（学校管理员）")
+async def read_assistant_run_trace(
+    run_id: str, session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
+):
+    if user.tenant_id != tenant_id:
+        raise HTTPException(403, "学校与当前账号不一致")
+    if user.role != BaseUserRole.director:
+        raise HTTPException(403, "仅学校管理员可查看助手诊断轨迹")
+    from app.ai.runs.service import get_run_trace
+    return {"code": 0, "message": "ok", "data": await get_run_trace(session, run_id, tenant_id)}
 
 
 @router.post("/runs/{run_id}/cancel", summary="取消助手处理，不取消已提交的排课生成任务")

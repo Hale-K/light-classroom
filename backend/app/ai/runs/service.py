@@ -52,6 +52,20 @@ async def get_run(session, run_id: str, tenant_id: int, user_id: int, *, cancel=
     return run_view(run)
 
 
+async def get_run_trace(session, run_id: str, tenant_id: int) -> dict:
+    """返回诊断轨迹；调用方必须先完成学校管理员权限校验。"""
+    run = (await session.execute(select(AiRun).where(
+        AiRun.id == run_id, AiRun.tenant_id == tenant_id,
+    ))).scalars().first()
+    if run is None:
+        raise HTTPException(404, "未找到本学校的助手任务")
+    return {
+        "id": run.id,
+        "status": run.status,
+        "trace": [event for event in run.events if event.get("visibility") == "internal"],
+    }
+
+
 async def _reject_concurrent_run(session, run_id: str, tenant_id: int, user_id: int) -> None:
     """同一用户同时只放行一个在跑任务：新请求 409，防连点挤占模型调用与连接池。
 

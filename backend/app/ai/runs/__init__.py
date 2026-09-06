@@ -5,7 +5,7 @@ actions/scheduling 的服务链，造成循环导入；progress 只依赖标准�
 """
 from app.ai.runs.progress import TOOL_LABELS, Progress, drive_turn, report_progress
 
-_SERVICE_EXPORTS = ("create_run", "execute_run", "get_run", "run_view", "spawn_run")
+_SERVICE_EXPORTS = ("create_run", "execute_run", "get_run", "get_run_trace", "run_view", "spawn_run")
 
 __all__ = ["Progress", "TOOL_LABELS", "drive_turn", "report_progress", *_SERVICE_EXPORTS]
 
