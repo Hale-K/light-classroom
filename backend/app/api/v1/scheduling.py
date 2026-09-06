@@ -4,6 +4,7 @@ import logging
 import random
 import secrets
 import time
+import uuid
 from collections import defaultdict
 from dataclasses import asdict, replace
 from datetime import date, datetime
@@ -1985,6 +1986,7 @@ async def _execute_schedule_generation(
     tenant_id: int,
     *,
     on_progress=None,
+    persisted_job_id: str | None = None,
 ) -> dict:
     async def _progress(stage: str, message: str, **extra) -> None:
         if on_progress is not None:
@@ -2758,7 +2760,6 @@ async def _execute_schedule_generation(
         tenant_id=tenant_id,
     ) for item in result.items]
     session.add_all(records)
-    await session.commit()
     staffing_issues = result.staffing_issues
     if staffing_issues:
         issue_class_ids = {
@@ -2784,7 +2785,7 @@ async def _execute_schedule_generation(
             "subject_name": subject_names.get(issue["subject_id"]),
             "teacher_name": teacher_names.get(issue["teacher_id"]),
         } for issue in staffing_issues]
-    return {
+    response = {
         "created": len(records),
         "unplaced": result.unplaced,
         "class_count": len(class_ids),
@@ -2798,6 +2799,12 @@ async def _execute_schedule_generation(
         "rule_validation": rule_validation.model_dump(mode="json") if rule_validation else None,
         "can_rollback": bool(previous_rows),
     }
+    if persisted_job_id:
+        from app.services.scheduling.generate_job_store import stage_success
+
+        await stage_success(session, persisted_job_id, tenant_id, response)
+    await session.commit()
+    return response
 
 
 def _reject_generate_busy(exc: GenerateBusy) -> HTTPException:
@@ -2839,36 +2846,76 @@ async def create_schedule(
 @router.post("/generate-jobs", summary="异步提交排课生成任务")
 async def start_generate_job(
     body: GenerateIn,
+    session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
     from app.services.scheduling.generate_jobs import (
         GenerateBusy,
+        release_generate_slot,
         try_acquire_generate_slot,
     )
+    from app.services.scheduling.generate_job_store import active_job, register_job
+
+    payload = body.model_dump(mode="json")
+    existing = await active_job(session, tenant_id, body.academic_year, body.term)
+    if existing is not None:
+        return {
+            "code": 0,
+            "message": "ok",
+            "data": {"job_id": existing.id, "resumed": True},
+        }
 
     try:
         try_acquire_generate_slot(tenant_id)
     except GenerateBusy as exc:
         raise _reject_generate_busy(exc) from exc
 
-    job_id = spawn_generate_job(tenant_id, body.model_dump(mode="json"))
+    job_id = uuid.uuid4().hex
+    try:
+        await register_job(session, job_id, tenant_id, payload)
+        await session.commit()
+        spawn_generate_job(tenant_id, payload, job_id=job_id)
+    except Exception:
+        release_generate_slot(tenant_id)
+        raise
 
-    return {"code": 0, "message": "ok", "data": {"job_id": job_id}}
+    return {"code": 0, "message": "ok", "data": {"job_id": job_id, "resumed": False}}
+
+
+@router.get("/generate-jobs/active", summary="查询当前学期正在执行的排课任务")
+async def get_active_generate_job(
+    academic_year: str,
+    term: str = "1",
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    from app.services.scheduling.generate_job_store import active_job, job_snapshot
+
+    row = await active_job(session, tenant_id, academic_year, term)
+    return {"code": 0, "message": "ok", "data": job_snapshot(row) if row else None}
 
 
 @router.get("/generate-jobs/{job_id}/events", summary="SSE 订阅排课生成进度")
 async def stream_generate_job(
     job_id: str,
+    session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
     import json
 
     from fastapi.responses import StreamingResponse
-    from app.services.scheduling.generate_jobs import get_job
+    from app.models.scheduling import SchedulingGenerateJob
+    from app.services.scheduling.generate_job_store import job_snapshot
+    from app.services.scheduling.generate_jobs import get_job, restore_job
 
     job = get_job(job_id)
+    if job is None:
+        durable = await session.get(SchedulingGenerateJob, job_id)
+        if durable is not None and durable.tenant_id == tenant_id:
+            job = restore_job(job_snapshot(durable))
     if job is None or job.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="生成任务不存在")
 

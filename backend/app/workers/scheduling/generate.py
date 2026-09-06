@@ -57,7 +57,13 @@ async def run_evening_cpsat(*args, timeout: float, **kwargs) -> CpSatSolveResult
     )
 
 
-async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, Any]) -> None:
+async def run_generate_payload(
+    job_id: str,
+    tenant_id: int,
+    payload: dict[str, Any],
+    *,
+    allow_reclaim: bool = False,
+) -> None:
     from fastapi import HTTPException
 
     from app.api.v1.scheduling import GenerateIn, _execute_schedule_generation
@@ -67,11 +73,30 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
         release_generate_slot,
         touch_heartbeat,
     )
+    from app.services.scheduling.generate_job_store import (
+        claim_job,
+        record_failure,
+        record_progress,
+    )
 
     current = get_or_create_job(job_id, tenant_id)
+    claim = await claim_job(job_id, tenant_id, allow_reclaim=allow_reclaim)
+    if claim.state == "succeeded":
+        current.emit(
+            "done",
+            stage="done",
+            message="生成完成（已恢复）",
+            percent=100,
+            result=claim.result or {},
+        )
+        release_generate_slot(tenant_id)
+        return
+    if claim.state == "running":
+        return
 
     async def on_progress(stage: str, message: str, **extra: Any) -> None:
         current.emit("progress", stage=stage, message=message, **extra)
+        await record_progress(job_id, tenant_id, stage, message, **extra)
 
     heartbeat_stop = threading.Event()
     beat = threading.Thread(
@@ -87,6 +112,7 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
                     GenerateIn.model_validate(payload),
                     tenant_id,
                     on_progress=on_progress,
+                    persisted_job_id=job_id,
                 )
                 await session.commit()
                 current.emit("done", stage="done", message="生成完成", percent=100, result=data)
@@ -97,13 +123,17 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
                     message = str(detail.get("message") or detail)
                 else:
                     message = str(detail)
+                await record_failure(job_id, tenant_id, message, detail)
                 current.emit("error", stage="error", message=message, detail=detail)
             except WorkerTimeout as exc:
                 await session.rollback()
+                await record_failure(job_id, tenant_id, exc.message)
                 current.emit("error", stage="error", message=exc.message)
             except Exception as exc:
                 await session.rollback()
-                current.emit("error", stage="error", message=str(exc) or "生成失败")
+                message = str(exc) or "生成失败"
+                await record_failure(job_id, tenant_id, message)
+                current.emit("error", stage="error", message=message)
     finally:
         heartbeat_stop.set()
         beat.join(timeout=1)
@@ -162,11 +192,16 @@ async def _run_spawned_job(
         release_generate_slot(tenant_id)
 
 
-def spawn_generate_job(tenant_id: int, payload: dict[str, Any]) -> str:
+def spawn_generate_job(
+    tenant_id: int,
+    payload: dict[str, Any],
+    *,
+    job_id: str | None = None,
+) -> str:
     """优先投递 RabbitMQ；broker 不可用时回退到本进程，避免本地无 MQ 时完全不能排。"""
     from app.services.scheduling.generate_jobs import create_job
 
-    job = create_job(tenant_id)
+    job = create_job(tenant_id, job_id)
     job.emit("progress", stage="queued", message="已进入排课队列")
     try:
         from app.workers.celery_app import generate_schedule_task
@@ -184,6 +219,7 @@ def spawn_generate_job(tenant_id: int, payload: dict[str, Any]) -> str:
                 GenerateIn.model_validate(payload),
                 tenant_id,
                 on_progress=on_progress,
+                persisted_job_id=job.id,
             )
 
         asyncio.create_task(_run_spawned_job(job.id, tenant_id, _execute))

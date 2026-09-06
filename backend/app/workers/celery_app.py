@@ -37,17 +37,21 @@ celery_app.conf.update(
 )
 
 
-@celery_app.task(name="scheduling.generate", queue="scheduling", acks_late=True)
-def generate_schedule_task(job_id: str, tenant_id: int, payload: dict) -> None:
+@celery_app.task(name="scheduling.generate", queue="scheduling", acks_late=True, bind=True)
+def generate_schedule_task(self, job_id: str, tenant_id: int, payload: dict) -> None:
     from app.workers.scheduling.generate import run_generate_payload
 
     payload = payload or {}
     trace_id = str(payload.get("trace_id") or job_id)[:32]
+    delivery = self.request.delivery_info or {}
+    redelivered = bool(delivery.get("redelivered"))
     with logger.contextualize(trace_id=trace_id):
         # 常驻事件循环：worker 进程内所有任务复用同一循环——
         # asyncio.run 每任务新建循环，会让异步引擎连接池里的 PG 连接
         # 绑在已关闭的旧循环上，第二个任务起必报 attached to a different loop
-        _get_worker_loop().run_until_complete(run_generate_payload(job_id, tenant_id, payload))
+        _get_worker_loop().run_until_complete(
+            run_generate_payload(job_id, tenant_id, payload, allow_reclaim=redelivered)
+        )
 
 
 _worker_loop = None

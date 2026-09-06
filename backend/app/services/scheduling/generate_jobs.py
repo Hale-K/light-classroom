@@ -235,8 +235,8 @@ def reset_generate_slots() -> None:
         client.delete(*keys)
 
 
-def create_job(tenant_id: int) -> GenerateJob:
-    job = GenerateJob(id=uuid.uuid4().hex, tenant_id=tenant_id)
+def create_job(tenant_id: int, job_id: str | None = None) -> GenerateJob:
+    job = GenerateJob(id=job_id or uuid.uuid4().hex, tenant_id=tenant_id)
     _jobs[job.id] = job
     if len(_jobs) > _MAX_JOBS:
         oldest = sorted(_jobs.values(), key=lambda item: item.created_at)[: len(_jobs) - _MAX_JOBS]
@@ -250,6 +250,30 @@ def create_job(tenant_id: int) -> GenerateJob:
             json.dumps(job._snapshot(), ensure_ascii=False, default=str),
             ex=_JOB_TTL,
         )
+    return job
+
+
+def restore_job(snapshot: dict[str, Any]) -> GenerateJob:
+    """Rebuild the Redis/SSE projection from the durable PostgreSQL row."""
+    job = GenerateJob(
+        id=str(snapshot["job_id"]),
+        tenant_id=int(snapshot["tenant_id"]),
+        status=str(snapshot.get("status") or "queued"),
+        result=snapshot.get("result"),
+        error=str((snapshot.get("error") or {}).get("message") or "") or None,
+    )
+    event_type = "done" if job.status == "succeeded" else "error" if job.status == "error" else "progress"
+    payload: dict[str, Any] = {
+        "stage": snapshot.get("stage") or job.status,
+        "message": snapshot.get("message") or "正在恢复排课进度",
+        "percent": snapshot.get("percent") or 0,
+    }
+    if event_type == "done":
+        payload["result"] = job.result or {}
+    if event_type == "error":
+        payload["detail"] = snapshot.get("error")
+    job.emit(event_type, **payload)
+    _jobs[job.id] = job
     return job
 
 
