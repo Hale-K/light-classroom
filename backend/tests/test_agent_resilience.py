@@ -44,6 +44,14 @@ def test_provider_circuit_isolates_repeated_failure_and_recovers_after_cooldown(
     assert breaker.snapshot("p1").failures == 0
 
 
+def test_default_provider_circuit_uses_application_configuration():
+    from app.ai.resilience import provider_circuits
+    from app.core.config import settings
+
+    assert provider_circuits.failure_threshold == settings.assistant_provider_failure_threshold
+    assert provider_circuits.cooldown_seconds == settings.assistant_provider_cooldown_seconds
+
+
 def test_request_shaped_errors_do_not_isolate_provider():
     """超长/坏请求/空回答是对话或参数问题，不能把服务商隔离掉。"""
     from app.ai.resilience import ProviderCircuitBreaker

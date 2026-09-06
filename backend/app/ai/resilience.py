@@ -5,6 +5,8 @@ import threading
 import time
 from dataclasses import dataclass
 
+from app.core.config import settings
+
 
 _IMMEDIATE_ISOLATION = {"auth", "config", "quota"}
 # 计入熔断的健康类故障。请求形态类（bad_request/parse/empty/context_overflow/exhausted）
@@ -71,4 +73,7 @@ class ProviderCircuitBreaker:
             self._states.clear()
 
 
-provider_circuits = ProviderCircuitBreaker()
+provider_circuits = ProviderCircuitBreaker(
+    failure_threshold=settings.assistant_provider_failure_threshold,
+    cooldown_seconds=settings.assistant_provider_cooldown_seconds,
+)

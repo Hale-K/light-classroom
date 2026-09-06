@@ -43,6 +43,9 @@ class Settings(BaseSettings):
     llm_model: str = "deepseek-chat"
     llm_max_tokens: int = 4096
     llm_cost_limit_per_sheet: float = 0.5  # 成本红线
+    # 教务助手模型服务的进程内熔断策略。多实例部署时会由 Redis 实现接管同一接口。
+    assistant_provider_failure_threshold: int = 2
+    assistant_provider_cooldown_seconds: float = 60.0
 
     # 对象存储 COS
     cos_secret_id: str = ""
