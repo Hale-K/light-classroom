@@ -22,7 +22,7 @@ _JOB_TTL = 6 * 3600
 _MAX_JOBS = 40
 # 心跳与僵尸收割阈值：queued 超时未启动 / running 心跳超时，都明确判失败并给出原因
 _STALE_QUEUED_SECONDS = 120.0
-_STALE_RUNNING_SECONDS = float(os.environ.get("SCHEDULING_HEARTBEAT_TIMEOUT_SECONDS", "300"))
+_STALE_RUNNING_SECONDS = float(os.environ.get("SCHEDULING_HEARTBEAT_TIMEOUT_SECONDS", "900"))
 _BUSY_LEASE_SECONDS = 180
 
 _jobs: dict[str, "GenerateJob"] = {}
