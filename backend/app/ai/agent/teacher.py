@@ -12,13 +12,13 @@ from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import local_reply, rule_jumps
 from app.ai.graph.loop import run_tool_loop
 from app.ai.model.chat import ChatEndpoint, ChatError, complete_chat, resolve_chat_endpoints
-from app.ai.model.routing import ModelProviderRouter
 from app.ai.prompt.messages import build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
 from app.ai.tools.retrieve import retrieve_skill
 from app.ai.tools.school import SCHOOL_TOOLS, execute_school_tool
 from app.ai.runs.progress import Progress, report_progress
 from app.ai.runs.events import TraceCallback
+from app.ai.runtime import AssistantRuntime
 from app.utils.answer_cache import answer_cache_key, get_cached_answer, put_cached_answer
 
 logger = logging.getLogger(__name__)
@@ -70,6 +70,7 @@ async def agent_reply(
     page_context: dict | None = None,
     memory_summary: str = "",
     on_trace: TraceCallback | None = None,
+    runtime: AssistantRuntime | None = None,
 ) -> TeacherTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
 
@@ -152,7 +153,8 @@ async def agent_reply(
         outcome = await run_loop(trimmed, memory_summary[:1500])
     logger.info("assistant.agent tools=%s", ",".join(s.tool for s in outcome.steps) or "-")
     last_user = next((str(t.get("content") or "") for t in reversed(turns) if t.get("role") == "user"), "")
-    jumps = [] if plan else rule_jumps(last_user, outcome.text, page_path)
+    guide = runtime.service("ui_guide") if runtime else None
+    jumps = [] if plan else (guide.rule_jumps(last_user, outcome.text, page_path) if guide else rule_jumps(last_user, outcome.text, page_path))
     step_lines = [f"{step.tool}：{step.detail}" for step in outcome.steps]
     if plan is None:
         kind = put_cached_answer(
@@ -187,12 +189,14 @@ async def handle_teacher_turn(
     page_context: dict | None = None,
     memory_summary: str = "",
     on_trace: TraceCallback | None = None,
+    runtime: AssistantRuntime | None = None,
 ) -> TeacherTurn:
     if not turns:
         raise ChatError("请输入内容")
     last = turns[-1]
     if len(turns) == 1 and last.get("role") == "user":
-        fixed = local_reply(str(last.get("content") or ""), page_path)
+        guide = runtime.service("ui_guide") if runtime else None
+        fixed = (guide.local_reply(str(last.get("content") or ""), page_path) if guide else local_reply(str(last.get("content") or ""), page_path))
         if fixed:
             logger.info("assistant.turn local id=%s", message_id or "-")
             return TeacherTurn(text=fixed)
@@ -208,6 +212,8 @@ async def handle_teacher_turn(
     # 故障转移共享本轮总预算（runs 的 RUN_TIMEOUT）：逐 endpoint 各自计时会让
     # 慢服务商把 180 秒总闸撞爆，整轮报废成 timed_out。
     from app.ai.runs.service import RUN_TIMEOUT
+    runtime = runtime or AssistantRuntime(on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits)
+    await runtime.emit("turn.agent_started", {"agent": "teacher"})
 
 
     async def text_only_fallback(endpoint: ChatEndpoint, budget: int) -> TeacherTurn:
@@ -267,10 +273,10 @@ async def handle_teacher_turn(
             base_url=endpoint.base_url, api_key=endpoint.api_key, model=endpoint.model,
             timeout=endpoint.timeout, page_title=page_title, page_path=page_path,
             can=can, cannot=cannot, user_id=user_id, can_manage_rules=can_manage_rules,
-            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace,
+            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace, runtime=runtime,
         )
 
-    routed = await ModelProviderRouter(provider_circuits).route(
+    routed = await runtime.service("model_router").route(
         endpoints,
         total_budget_seconds=RUN_TIMEOUT,
         invoke=invoke,

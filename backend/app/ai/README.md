@@ -13,6 +13,7 @@
 | Tool / FunctionCallback | `tools/` | `retrieve_skill`（降级路径）；`school.py` 教务只读查询 |
 | 确认执行 | `actions/` | `proposal.py` 草稿生成与校验、`confirm.py` 确认后原子追加与审计、`models.py` 草稿表 |
 | 运行任务 | `runs/` | `service.py` 提交/取消/恢复、`progress.py` 阶段与心跳、`models.py` 运行表 |
+| 运行时服务入口 | `runtime.py` | 一次 Turn 的能力集合；以稳定服务名提供模型路由、页面引导和运行轨迹事件，便于后续替换 Provider、工具、记忆与 UI 能力 |
 | 会话记忆 | `conversations/` | 按学校和用户持久化最近消息，超过窗口时压缩为摘要；摘要只用于理解指代，不覆盖实时查询结果 |
 | 页面引导 | `guide.py` | 基于当前页面提供无副作用指引与跳转建议；跳转必须由前端取得老师确认后执行 |
 | MCP Client / Registry | `mcp/` | **不接协议**；远程 Tool = 本校 REST |
