@@ -11,7 +11,7 @@ from app.ai.advisor.clarify import clarify
 from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
 from app.ai.graph.loop import run_tool_loop
 from app.ai.model.chat import ChatEndpoint, ChatError, complete_chat, resolve_chat_endpoints
-from app.ai.model.routing import ProviderRoute
+from app.ai.model.routing import ModelProviderRouter
 from app.ai.prompt.messages import GREET_REPLY, build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
 from app.ai.tools.retrieve import retrieve_skill
@@ -253,7 +253,6 @@ async def handle_teacher_turn(
     # 慢服务商把 180 秒总闸撞爆，整轮报废成 timed_out。
     from app.ai.runs.service import RUN_TIMEOUT
 
-    route = ProviderRoute(endpoints, RUN_TIMEOUT, clock=time.monotonic)
 
     async def text_only_fallback(endpoint: ChatEndpoint, budget: int) -> TeacherTurn:
         await report_progress(
@@ -306,76 +305,47 @@ async def handle_teacher_turn(
             jumps=rule_jumps(query, text, page_path),
         )
 
-    last_error: ChatError | None = None
-    trail: list[str] = []
-    budget_exhausted = False
-    for index, endpoint in enumerate(endpoints):
-        is_last = index == len(endpoints) - 1
-        if not route.is_available(endpoint, provider_circuits):
-            logger.warning("assistant.provider isolated id=%s provider=%s", message_id or "-", endpoint.name)
-            await report_progress(on_progress, "isolated", f"{endpoint.name} 正在隔离期，已跳过该服务")
-            trail.append(f"{endpoint.name}隔离期跳过")
-            continue
-        if not route.can_start():
-            # 剩余预算做不完一轮有意义的处理，不再起新 endpoint，避免整轮被总闸报废。
-            budget_exhausted = True
-            break
-        try:
-            turn = await agent_reply(
-                session,
-                tenant_id,
-                turns,
-                base_url=endpoint.base_url,
-                api_key=endpoint.api_key,
-                model=endpoint.model,
-                timeout=endpoint.timeout,
-                page_title=page_title,
-                page_path=page_path,
-                can=can,
-                cannot=cannot,
-                user_id=user_id,
-                can_manage_rules=can_manage_rules,
-                on_progress=on_progress,
-                page_context=page_context,
-                memory_summary=memory_summary,
-            )
-        except ChatError as exc:
-            can_try_text_only = (
-                is_last
-                and RUN_TIMEOUT - route.remaining_seconds() <= _FALLBACK_MAX_SPENT
-                and exc.error_class in _TEXT_ONLY_FALLBACK_ERRORS
-            )
-            if can_try_text_only:
-                try:
-                    turn = await text_only_fallback(endpoint, max(10, int(route.remaining_seconds() // 2)))
-                except ChatError as fallback_error:
-                    exc = fallback_error
-                    trail.append(f"{endpoint.name}只读说明仍失败({fallback_error.error_class})")
-                else:
-                    provider_circuits.record_success(endpoint.key)
-                    return turn
-            last_error = route.last_error = exc
-            state = provider_circuits.record_failure(endpoint.key, exc.error_class)
-            trail.append(f"{endpoint.name}({exc.error_class})")
-            logger.warning(
-                "assistant.provider fail id=%s provider=%s class=%s failures=%s isolated=%s",
-                message_id or "-",
-                endpoint.name,
-                exc.error_class,
-                state.failures,
-                state.isolated,
-            )
-            if state.isolated:
-                await report_progress(on_progress, "isolated", f"{endpoint.name} 连续异常，已临时隔离")
-            if not is_last:
-                await report_progress(on_progress, "recovering", "当前模型未响应，正在切换备用模型继续处理")
-            continue
-        provider_circuits.record_success(endpoint.key)
-        if index > 0:
-            turn.think.append(f"故障恢复：已切换至备用模型「{endpoint.name}」")
+    async def invoke(endpoint: ChatEndpoint) -> TeacherTurn:
+        return await agent_reply(
+            session, tenant_id, turns,
+            base_url=endpoint.base_url, api_key=endpoint.api_key, model=endpoint.model,
+            timeout=endpoint.timeout, page_title=page_title, page_path=page_path,
+            can=can, cannot=cannot, user_id=user_id, can_manage_rules=can_manage_rules,
+            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary,
+        )
+
+    routed = await ModelProviderRouter(provider_circuits).route(
+        endpoints,
+        total_budget_seconds=RUN_TIMEOUT,
+        invoke=invoke,
+        on_progress=on_progress,
+        message_id=message_id,
+        clock=time.monotonic,
+    )
+    if routed.value is not None:
+        turn = routed.value
+        if routed.used_backup and routed.endpoint is not None:
+            turn.think.append(f"故障恢复：已切换至备用模型「{routed.endpoint.name}」")
         return turn
 
-    if budget_exhausted:
+    last_error = routed.last_error
+    trail = routed.trail
+    if last_error is not None and (
+        routed.spent_seconds <= _FALLBACK_MAX_SPENT
+        and last_error.error_class in _TEXT_ONLY_FALLBACK_ERRORS
+        and routed.endpoint is None
+        and endpoints
+    ):
+        # 只读说明只在快速失败时尝试，防止两轮额外模型调用耗尽任务总预算。
+        try:
+            turn = await text_only_fallback(endpoints[-1], max(10, int((RUN_TIMEOUT - routed.spent_seconds) // 2)))
+            provider_circuits.record_success(endpoints[-1].key)
+            return turn
+        except ChatError as fallback_error:
+            last_error = fallback_error
+            trail.append(f"{endpoints[-1].name}只读说明仍失败({fallback_error.error_class})")
+
+    if routed.budget_exhausted:
         raise ChatError("本轮处理时间已用尽，请稍后重试或把要求拆成几条；未执行规则写入", "timeout")
     if last_error is not None and last_error.error_class in _PRECISE_FAILURE_CLASSES:
         # 服务其实活着，只是本轮请求没完成：保留精确报错，"服务不可用"文案反而误导。
