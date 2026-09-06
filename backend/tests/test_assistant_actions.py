@@ -135,6 +135,8 @@ async def test_proposal_does_not_write_rules_confirm_is_idempotent_and_audited(d
     again = await decide_action(session, 1, 2, action.id, "confirm")
     assert result == again
     assert result["status"] == "executed"
+    assert result["result"]["verification"]["compiled"] is True
+    assert len(result["result"]["verification"]["rule_ids"]) == 1
     assert len(row.config_value["2026:1"]["groups"][0]["rules"]) == 1
     assert len(sync.execute(select(AuditLog)).scalars().all()) == 1
 

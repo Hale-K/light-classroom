@@ -84,7 +84,17 @@ async def decide_action(session, tenant_id: int, user_id: int, action_id: str, d
     row.updated_by = user_id
     row.updated_at = datetime.utcnow()
     action.status = "executed"
-    action.result = {"text": f"已向「{group.name}」保存 {len(rules)} 条规则。请到排课页生成课表并检查冲突。", "path": "/scheduling?tab=rules", "count": len(rules)}
+    action.result = {
+        "text": f"已向「{group.name}」保存 {len(rules)} 条规则。请到排课页生成课表并检查冲突。",
+        "path": "/scheduling?tab=rules",
+        "count": len(rules),
+        "verification": {
+            "group_id": group.id,
+            "rule_ids": [rule.id for rule in rules],
+            "group_version": updated.version,
+            "compiled": True,
+        },
+    }
     session.add(AuditLog(tenant_id=tenant_id, user_id=user_id, action="assistant.rules.confirm", resource="rule_group", old_value=old, new_value={"action_id": action.id, "group": updated.model_dump(mode="json")}))
     await session.commit()
     return action_view(action)
