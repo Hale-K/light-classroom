@@ -1,8 +1,10 @@
 """工具循环：模型给 tool_calls 就执行喂回，末步强制收口成文本。"""
 import asyncio
 
+import pytest
+
 from app.ai.graph.loop import run_tool_loop
-from app.ai.model.chat import ChatOutcome, ToolCallOut
+from app.ai.model.chat import ChatError, ChatOutcome, ToolCallOut
 
 _TOOLS = [{"type": "function", "function": {"name": "lookup_teachers", "parameters": {}}}]
 
@@ -122,3 +124,50 @@ def test_loop_converts_executor_error_into_tool_result():
     assert tool_msg["role"] == "tool"
     assert "执行失败" in tool_msg["content"]
     assert outcome.text == "查不到该教师"
+
+
+def test_final_step_hallucinated_tool_calls_are_dropped():
+    """收口轮已撤工具表，个别服务商仍返回 tool_calls：丢弃调用只收文本。"""
+
+    async def main():
+        seen: list[dict] = []
+
+        async def caller(**kwargs):
+            seen.append(kwargs)
+            if len(seen) == 1:
+                return ChatOutcome(tool_calls=[ToolCallOut(id="c", name="lookup_rules", arguments="{}")])
+            return ChatOutcome(text="只剩文本回答", tool_calls=[ToolCallOut(id="d", name="lookup_rules", arguments="{}")])
+
+        async def executor(name, arguments):
+            raise AssertionError("收口轮不应执行工具")
+
+        outcome = await run_tool_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "规则"}],
+            tools=_TOOLS, executor=executor, caller=caller, max_steps=2,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert outcome.text == "只剩文本回答"
+    assert len(seen) == 2
+
+
+def test_final_step_hallucinated_calls_with_empty_text_raise_empty():
+    async def main():
+        async def caller(**kwargs):
+            return ChatOutcome(text="", tool_calls=[ToolCallOut(id="d", name="lookup_rules", arguments="{}")])
+
+        async def executor(name, arguments):
+            raise AssertionError("收口轮不应执行工具")
+
+        with pytest.raises(ChatError) as ei:
+            await run_tool_loop(
+                base_url="http://x", api_key="k", model="m", timeout=10,
+                messages=[{"role": "user", "content": "规则"}],
+                tools=_TOOLS, executor=executor, caller=caller, max_steps=1,
+            )
+        return ei
+
+    ei = asyncio.run(main())
+    assert ei.value.error_class == "empty"

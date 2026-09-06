@@ -1,6 +1,7 @@
 """ChatModel：对应 Spring AI Alibaba 的 ChatClient / DashScope ChatModel。"""
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -16,22 +17,60 @@ logger = logging.getLogger(__name__)
 
 
 class ChatError(Exception):
-    def __init__(self, message: str):
+    """模型调用失败。message 面向用户（不含服务商原始报文），
+    error_class 供恢复与降级决策、日志分类使用。"""
+
+    def __init__(self, message: str, error_class: str = "unknown"):
+        super().__init__(message)
         self.message = message
+        self.error_class = error_class
 
 
-async def resolve_chat_endpoint(session: AsyncSession, tenant_id: int) -> tuple[str, str, str, int]:
+@dataclass(frozen=True)
+class ChatEndpoint:
+    key: str
+    name: str
+    base_url: str
+    api_key: str
+    model: str
+    timeout: int
+
+
+async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[ChatEndpoint]:
     stmt = (
         select(AiProvider)
         .where(AiProvider.tenant_id == tenant_id, AiProvider.status == 1)
         .order_by(AiProvider.is_default.desc(), AiProvider.sort, AiProvider.id)
     )
-    row = (await session.execute(stmt)).scalars().first()
-    if row and (row.base_url or "").strip() and (row.chat_model or "").strip():
-        timeout = row.timeout_seconds if row.timeout_seconds and row.timeout_seconds > 0 else 60
-        return row.base_url.strip(), (row.api_key or "").strip(), row.chat_model.strip(), timeout
+    rows = (await session.execute(stmt)).scalars().all()
+    endpoints = [
+        ChatEndpoint(
+            key=f"{tenant_id}:{row.id}",
+            name=row.name,
+            base_url=row.base_url.strip(),
+            api_key=(row.api_key or "").strip(),
+            model=row.chat_model.strip(),
+            timeout=row.timeout_seconds if row.timeout_seconds and row.timeout_seconds > 0 else 60,
+        )
+        for row in rows
+        if (row.base_url or "").strip() and (row.chat_model or "").strip()
+    ]
     if (settings.llm_base_url or "").strip() and (settings.llm_api_key or "").strip():
-        return settings.llm_base_url.strip(), settings.llm_api_key.strip(), settings.llm_model, 60
+        env_endpoint = ChatEndpoint(
+            key=f"{tenant_id}:env",
+            name="系统备用模型",
+            base_url=settings.llm_base_url.strip(),
+            api_key=settings.llm_api_key.strip(),
+            model=settings.llm_model,
+            timeout=60,
+        )
+        if not any(
+            item.base_url == env_endpoint.base_url and item.model == env_endpoint.model
+            for item in endpoints
+        ):
+            endpoints.append(env_endpoint)
+    if endpoints:
+        return endpoints
     raise ChatError("请先在「服务商管理」启用一条带对话模型的服务商，或在后端配置 LLM_API_KEY")
 
 
@@ -109,6 +148,35 @@ def _chat_url(base_url: str) -> str:
     return base + "/chat/completions"
 
 
+# 上下文超长的判别关键词：各家用语不一，取并集小写匹配（识别后由上层裁剪历史重试）。
+_CONTEXT_OVERFLOW_MARKS = (
+    "context length", "maximum context", "input length", "length of the messages",
+    "too long", "上下文长度", "输入过长", "输入长度",
+)
+# 网关类 5xx 幂等可重试；500 多为服务商内部错误，重试意义小但无害，一并纳入。
+_RETRY_STATUS = {500, 502, 503, 504}
+_RETRY_BACKOFF_SECONDS = 1.0
+
+
+def _status_error(status: int, body: str) -> ChatError:
+    """把服务商 HTTP 错误映射成面向用户的脱敏文案；原始报文只进日志。"""
+    if status == 400 and any(mark in body.lower() for mark in _CONTEXT_OVERFLOW_MARKS):
+        return ChatError("对话内容超出模型上下文长度。", "context_overflow")
+    mapped = {
+        400: ("模型服务拒绝了本次请求，请换一种问法重试。", "bad_request"),
+        401: ("模型服务商鉴权失败，请管理员检查服务商配置。", "auth"),
+        402: ("模型服务额度不足，请管理员检查服务商账户。", "quota"),
+        403: ("模型服务商拒绝访问，请管理员检查服务商配置。", "auth"),
+        404: ("模型服务地址或模型名不可用，请管理员检查服务商配置。", "config"),
+        429: ("模型服务限流中，请稍后重试。", "rate_limit"),
+    }.get(status)
+    if mapped:
+        return ChatError(*mapped)
+    if status >= 500:
+        return ChatError("模型服务暂时不可用，请稍后重试。", "unavailable")
+    return ChatError("模型服务返回异常状态，请稍后重试。", "bad_request")
+
+
 async def _post_chat(
     *,
     base_url: str,
@@ -119,8 +187,13 @@ async def _post_chat(
     temperature: float,
     max_tokens: int | None,
     tools: list[dict] | None = None,
+    transport: httpx.AsyncTransport | None = None,
 ) -> dict:
-    """发一轮对话，返回 OpenAI 兼容的 message 字典。"""
+    """发一轮对话，返回 OpenAI 兼容的 message 字典。
+
+    连接失败与网关类 5xx 幂等，退避后重试一次；读超时不重试，
+    尽快把失败交给上层按已耗时间决定走降级还是放弃。
+    """
     headers = {"Accept": "application/json", "Content-Type": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -133,14 +206,40 @@ async def _post_chat(
     if tools:
         payload["tools"] = tools
     started = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=min(timeout, 120)) as client:
-            resp = await client.post(_chat_url(base_url), headers=headers, json=payload)
-    except httpx.HTTPError as exc:
-        raise ChatError(f"模型请求失败：{exc}") from exc
+    resp: httpx.Response | None = None
+    for attempt in (1, 2):
+        try:
+            async with httpx.AsyncClient(timeout=min(timeout, 120), transport=transport) as client:
+                resp = await client.post(_chat_url(base_url), headers=headers, json=payload)
+        except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+            if attempt == 1:
+                logger.warning("assistant.llm connect fail retry model=%s err=%s", model, exc)
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+                continue
+            raise ChatError("无法连接模型服务，请检查网络或服务商地址。", "network") from exc
+        except httpx.HTTPError as exc:
+            raise ChatError("模型请求失败，请稍后重试。", "network") from exc
+        if resp.status_code in _RETRY_STATUS and attempt == 1:
+            logger.warning("assistant.llm http %s retry model=%s", resp.status_code, model)
+            await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
+            continue
+        break
+    assert resp is not None
     if resp.status_code < 200 or resp.status_code >= 300:
-        raise ChatError(f"模型服务 HTTP {resp.status_code}：{resp.text[:240]}")
-    data = resp.json()
+        body = resp.text[:400]
+        logger.warning(
+            "assistant.llm http_fail status=%s model=%s body_chars=%s",
+            resp.status_code,
+            model,
+            len(body),
+        )
+        raise _status_error(resp.status_code, body)
+    try:
+        data = resp.json()
+    except ValueError as exc:
+        raise ChatError("模型返回格式无法解析，请重试。", "parse") from exc
+    if not isinstance(data, dict):
+        raise ChatError("模型返回格式无法解析，请重试。", "parse")
     usage = data.get("usage") or {}
     logger.info(
         "assistant.llm model=%s ms=%d completion_tokens=%s",
@@ -149,9 +248,9 @@ async def _post_chat(
     try:
         message = data["choices"][0]["message"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise ChatError("模型返回格式无法解析") from exc
+        raise ChatError("模型返回格式无法解析，请重试。", "parse") from exc
     if not isinstance(message, dict):
-        raise ChatError("模型返回格式无法解析")
+        raise ChatError("模型返回格式无法解析，请重试。", "parse")
     return message
 
 
@@ -176,7 +275,7 @@ async def complete_chat(
     )
     text = _message_text(message)
     if not text:
-        raise ChatError("模型没有返回文本")
+        raise ChatError("模型没有返回文本，请重试。", "empty")
     return text
 
 
@@ -207,5 +306,5 @@ async def complete_chat_tools(
         return ChatOutcome(text=_message_text(message), tool_calls=calls)
     text = _message_text(message)
     if not text:
-        raise ChatError("模型没有返回文本")
+        raise ChatError("模型没有返回文本，请重试。", "empty")
     return ChatOutcome(text=text)

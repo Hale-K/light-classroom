@@ -50,6 +50,27 @@ async def get_run(session, run_id: str, tenant_id: int, user_id: int, *, cancel=
     return run_view(run)
 
 
+async def _reject_concurrent_run(session, run_id: str, tenant_id: int, user_id: int) -> None:
+    """同一用户同时只放行一个在跑任务：新请求 409，防连点挤占模型调用与连接池。
+
+    失联（超过 STALE_SECONDS 无心跳）的旧任务就地判中断，不挡新任务，
+    判定口径与 get_run 一致。
+    """
+    cutoff = datetime.utcnow() - timedelta(seconds=STALE_SECONDS)
+    rows = (await session.execute(select(AiRun).where(
+        AiRun.tenant_id == tenant_id, AiRun.user_id == user_id, AiRun.status == "running",
+    ).with_for_update())).scalars().all()
+    for row in rows:
+        if row.id == run_id:
+            continue
+        if row.updated_at < cutoff:
+            row.status = "interrupted"
+            row.message = "服务已失去本轮心跳，任务中断。请重新发送需求，未执行规则写入。"
+            row.updated_at = datetime.utcnow()
+        else:
+            raise HTTPException(409, "上一条助手任务还在处理中，请等它完成或先取消")
+
+
 async def create_run(session, run_id: str, tenant_id: int, user_id: int, payload: dict) -> tuple[dict, bool]:
     digest = fingerprint(payload)
     existing = await session.get(AiRun, run_id)
@@ -59,6 +80,7 @@ async def create_run(session, run_id: str, tenant_id: int, user_id: int, payload
         if existing.request_hash != digest:
             raise HTTPException(409, "任务编号已用于其他内容，请重新发送")
         return await get_run(session, run_id, tenant_id, user_id), False
+    await _reject_concurrent_run(session, run_id, tenant_id, user_id)
     run = AiRun(id=run_id, tenant_id=tenant_id, user_id=user_id, request_hash=digest)
     session.add(run)
     try:
@@ -127,7 +149,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
     except TimeoutError:
         await persist(status="timed_out", message=f"本轮等待超过{RUN_TIMEOUT}秒，已停止请求。请重试或拆分要求，未执行规则写入。")
     except Exception as exc:
-        logger.exception("assistant run failed id=%s", run_id)
+        logger.exception("assistant run failed id=%s class=%s", run_id, getattr(exc, "error_class", "-"))
         message = exc.message if isinstance(exc, ChatError) else "处理失败，请重试；未执行规则写入。"
         await persist(status="failed", message=message[:300])
 

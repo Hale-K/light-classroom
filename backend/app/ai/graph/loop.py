@@ -76,6 +76,7 @@ async def run_tool_loop(
     convo = list(messages)
     steps: list[AgentStep] = []
     for index in range(max_steps):
+        final = index == max_steps - 1
         await report_progress(on_progress, "model", "正在等待模型理解需求" if index == 0 else "正在等待模型整理查询结果")
         outcome = await call(
             base_url=base_url,
@@ -83,9 +84,19 @@ async def run_tool_loop(
             model=model,
             timeout=timeout,
             messages=convo,
-            tools=None if index == max_steps - 1 else tools,
+            tools=None if final else tools,
             temperature=temperature,
         )
+        if final and outcome.tool_calls:
+            # 个别服务商在撤掉工具表的收口轮仍幻觉出 tool_calls：丢弃调用只收文本，
+            # 避免把最后一轮浪费在执行不存在的工具上。
+            logger.warning(
+                "assistant.loop final step tool_calls ignored model=%s names=%s",
+                model, [tc.name for tc in outcome.tool_calls],
+            )
+            if not (outcome.text or "").strip():
+                raise ChatError("模型没有返回文本，请重试。", "empty")
+            return AgentOutcome(text=outcome.text, steps=steps)
         if not outcome.tool_calls:
             return AgentOutcome(text=outcome.text, steps=steps)
         convo.append(_assistant_msg(outcome))
@@ -104,4 +115,4 @@ async def run_tool_loop(
             )
             if stop_when and stop_when():
                 return AgentOutcome(text="", steps=steps)
-    raise ChatError("模型没有给出回答")
+    raise ChatError("模型多轮调用未能完成回答，请重试或把要求拆成几条。", "exhausted")
