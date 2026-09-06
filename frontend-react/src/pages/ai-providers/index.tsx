@@ -8,13 +8,13 @@ import TableCard from '@/components/TableCard'
 import EmptyState from '@/components/EmptyState'
 
 const PROVIDER_PRESETS = [
-  { value: 'OLLAMA', label: 'Ollama（本地）', defaultBaseUrl: 'http://127.0.0.1:11434' },
-  { value: 'OPENAI', label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com/v1' },
-  { value: 'DEEPSEEK', label: 'DeepSeek', defaultBaseUrl: 'https://api.deepseek.com/v1' },
-  { value: 'MOONSHOT', label: 'Kimi (Moonshot)', defaultBaseUrl: 'https://api.moonshot.cn/v1' },
-  { value: 'SILICONFLOW', label: '硅基流动 SiliconFlow', defaultBaseUrl: 'https://api.siliconflow.cn/v1' },
-  { value: 'ZHIPU', label: '智谱 GLM', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4' },
-  { value: 'HUNYUAN', label: '腾讯混元', defaultBaseUrl: 'https://api.hunyuan.cloud.tencent.com/v1' },
+  { value: 'OLLAMA', label: 'Ollama（本地）', defaultBaseUrl: 'http://127.0.0.1:11434', helpUrl: 'https://docs.ollama.com/windows', helpLabel: '查看 Ollama 安装说明', keyOptional: true },
+  { value: 'OPENAI', label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com/v1', helpUrl: 'https://platform.openai.com/api-keys' },
+  { value: 'DEEPSEEK', label: 'DeepSeek', defaultBaseUrl: 'https://api.deepseek.com/v1', helpUrl: 'https://platform.deepseek.com/api_keys' },
+  { value: 'MOONSHOT', label: 'Kimi (Moonshot)', defaultBaseUrl: 'https://api.moonshot.cn/v1', helpUrl: 'https://platform.moonshot.cn/console/api-keys' },
+  { value: 'SILICONFLOW', label: '硅基流动 SiliconFlow', defaultBaseUrl: 'https://api.siliconflow.cn/v1', helpUrl: 'https://cloud.siliconflow.cn/account/ak' },
+  { value: 'ZHIPU', label: '智谱 GLM', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', helpUrl: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys' },
+  { value: 'HUNYUAN', label: '腾讯混元', defaultBaseUrl: 'https://api.hunyuan.cloud.tencent.com/v1', helpUrl: 'https://console.cloud.tencent.com/hunyuan/api-key' },
 ]
 
 const MODEL_CATEGORIES = [
@@ -59,6 +59,8 @@ export default function AiProvidersView() {
   const [testingId, setTestingId] = useState<number | null>(null)
   const [modelOptions, setModelOptions] = useState<Categorized>({})
   const [form] = Form.useForm<AiProviderForm & { is_default: boolean }>()
+  const selectedProviderType = Form.useWatch('provider_type', form)
+  const selectedProvider = PROVIDER_PRESETS.find((item) => item.value === selectedProviderType)
 
   const load = async () => {
     setLoading(true)
@@ -308,7 +310,27 @@ export default function AiProvidersView() {
                     <Form.Item name="base_url" label="Base URL" extra="选类型会带默认地址，不对再改" rules={[{ required: true }]}>
                       <Input />
                     </Form.Item>
-                    <Form.Item name="api_key" label="API Key" extra={editing ? '留空表示不改原密钥' : 'Ollama 可不填；云端必填'}>
+                    <Form.Item
+                      name="api_key"
+                      label="API Key"
+                      extra={
+                        <Space size={4} wrap>
+                          <span>{editing ? '留空表示不改原密钥' : selectedProvider?.keyOptional ? '本地 Ollama 不需要 API Key' : '云端服务商需要 API Key'}</span>
+                          {selectedProvider?.helpUrl ? (
+                            <Button
+                              type="link"
+                              size="small"
+                              href={selectedProvider.helpUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{ padding: 0, height: 'auto' }}
+                            >
+                              {selectedProvider.helpLabel || `获取 ${selectedProvider.label} API Key`}
+                            </Button>
+                          ) : null}
+                        </Space>
+                      }
+                    >
                       <Input.Password autoComplete="new-password" placeholder={editing ? '已保存，留空不改动' : '输入 API Key'} />
                     </Form.Item>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, padding: '8px 12px', border: '1px dashed #d9d9d9', borderRadius: 6, background: '#fafafa' }}>
