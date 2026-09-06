@@ -95,6 +95,7 @@ from app.workers.scheduling.generate import (
     WorkerTimeout,
     run_daytime_cpsat,
     run_evening_cpsat,
+    solver_worker_count,
     spawn_generate_job,
 )
 
@@ -2245,7 +2246,7 @@ async def _execute_schedule_generation(
                         gap_fill_subject_ids=gap_fill_ids or None,
                         gap_fill_late_from_period=gap_fill_late_from,
                         random_seed=seed,
-                        num_search_workers=8,
+                        num_search_workers=solver_worker_count(),
                         max_time_seconds=max_solve,
                         polish_seconds=150.0,
                         on_progress=_solver_progress,
@@ -2419,7 +2420,7 @@ async def _execute_schedule_generation(
                         ),
                         random_seed=seed,
                         max_time_seconds=100.0,
-                        num_search_workers=8,
+                        num_search_workers=solver_worker_count(),
                         timeout=145,
                     )
                 except WorkerTimeout as exc:
@@ -2590,7 +2591,7 @@ async def _execute_schedule_generation(
                 )
             ),
             max_time_seconds=30.0,
-            num_search_workers=8,
+            num_search_workers=solver_worker_count(),
         )
         if evening_result.status not in ("OPTIMAL", "FEASIBLE"):
             raise HTTPException(

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import threading
 from collections.abc import Awaitable, Callable
 from typing import Any
@@ -20,16 +21,67 @@ class WorkerTimeout(Exception):
         self.message = f"{label}超时已中止，请收紧规则后重试"
 
 
+def solver_worker_count(available_cpus: int | None = None) -> int:
+    """Bound CP-SAT parallelism and leave one CPU available for progress/heartbeats."""
+    override = os.environ.get("SCHEDULING_CP_SAT_WORKERS")
+    if override:
+        try:
+            return max(1, min(8, int(override)))
+        except ValueError:
+            logger.warning(f"忽略无效的 SCHEDULING_CP_SAT_WORKERS={override!r}")
+    if available_cpus is None:
+        process_cpu_count = getattr(os, "process_cpu_count", None)
+        available_cpus = process_cpu_count() if process_cpu_count else os.cpu_count()
+    cpus = max(1, int(available_cpus or 1))
+    return max(1, min(8, cpus - 1))
+
+
 def _heartbeat_sync_loop(job_id: str, stop: threading.Event) -> None:
-    """专用线程执行心跳：CPU 打满时也不会被饿死（asyncio 协程会被求解线程挤掉）。"""
+    """Use a dedicated thread so solver callbacks cannot block the Redis heartbeat."""
     from app.services.scheduling.generate_jobs import touch_heartbeat
 
+    consecutive_failures = 0
     while not stop.is_set():
         try:
             touch_heartbeat(job_id)
-        except Exception:
-            pass
+            consecutive_failures = 0
+        except Exception as exc:
+            consecutive_failures += 1
+            if consecutive_failures == 1 or consecutive_failures % 12 == 0:
+                logger.bind(
+                    event="scheduling_redis_heartbeat_failed",
+                    job_id=job_id,
+                    consecutive_failures=consecutive_failures,
+                ).warning(f"排课 Redis 心跳刷新失败: {exc}")
         stop.wait(5)
+
+
+async def _durable_heartbeat_loop(
+    job_id: str,
+    tenant_id: int,
+    stop: asyncio.Event,
+) -> None:
+    """Keep restart recovery state current while the solver runs in its worker thread."""
+    from app.services.scheduling.generate_job_store import record_heartbeat
+
+    consecutive_failures = 0
+    while not stop.is_set():
+        try:
+            await record_heartbeat(job_id, tenant_id)
+            consecutive_failures = 0
+        except Exception as exc:
+            consecutive_failures += 1
+            if consecutive_failures == 1 or consecutive_failures % 12 == 0:
+                logger.bind(
+                    event="scheduling_db_heartbeat_failed",
+                    job_id=job_id,
+                    tenant_id=tenant_id,
+                    consecutive_failures=consecutive_failures,
+                ).warning(f"排课数据库心跳刷新失败: {exc}")
+        try:
+            await asyncio.wait_for(stop.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            pass
 
 
 async def run_in_thread(fn, /, *args, timeout: float, label: str, **kwargs):
@@ -102,6 +154,10 @@ async def run_generate_payload(
     beat = threading.Thread(
         target=_heartbeat_sync_loop, args=(job_id, heartbeat_stop), daemon=True)
     beat.start()
+    durable_heartbeat_stop = asyncio.Event()
+    durable_heartbeat = asyncio.create_task(
+        _durable_heartbeat_loop(job_id, tenant_id, durable_heartbeat_stop)
+    )
     token = tenant_id_ctx.set(tenant_id)
     try:
         current.emit("progress", stage="validating", message="任务已排队，开始校验")
@@ -135,6 +191,8 @@ async def run_generate_payload(
                 await record_failure(job_id, tenant_id, message)
                 current.emit("error", stage="error", message=message)
     finally:
+        durable_heartbeat_stop.set()
+        await durable_heartbeat
         heartbeat_stop.set()
         beat.join(timeout=1)
         tenant_id_ctx.reset(token)
@@ -150,19 +208,42 @@ async def _run_spawned_job(
 
     from app.db.session import AsyncSessionLocal, tenant_id_ctx
     from app.services.scheduling.generate_jobs import get_job, release_generate_slot, touch_heartbeat
+    from app.services.scheduling.generate_job_store import (
+        claim_job,
+        record_failure,
+        record_progress,
+    )
 
     current = get_job(job_id)
     if current is None:
         release_generate_slot(tenant_id)
         return
+    claim = await claim_job(job_id, tenant_id)
+    if claim.state == "succeeded":
+        current.emit(
+            "done",
+            stage="done",
+            message="生成完成（已恢复）",
+            percent=100,
+            result=claim.result or {},
+        )
+        release_generate_slot(tenant_id)
+        return
+    if claim.state == "running":
+        return
 
     async def on_progress(stage: str, message: str, **extra: Any) -> None:
         current.emit("progress", stage=stage, message=message, **extra)
+        await record_progress(job_id, tenant_id, stage, message, **extra)
 
     heartbeat_stop = threading.Event()
     beat = threading.Thread(
         target=_heartbeat_sync_loop, args=(job_id, heartbeat_stop), daemon=True)
     beat.start()
+    durable_heartbeat_stop = asyncio.Event()
+    durable_heartbeat = asyncio.create_task(
+        _durable_heartbeat_loop(job_id, tenant_id, durable_heartbeat_stop)
+    )
     token = tenant_id_ctx.set(tenant_id)
     try:
         current.emit("progress", stage="validating", message="任务已排队，开始校验")
@@ -178,14 +259,20 @@ async def _run_spawned_job(
                     message = str(detail.get("message") or detail)
                 else:
                     message = str(detail)
+                await record_failure(job_id, tenant_id, message, detail)
                 current.emit("error", stage="error", message=message, detail=detail)
             except WorkerTimeout as exc:
                 await session.rollback()
+                await record_failure(job_id, tenant_id, exc.message)
                 current.emit("error", stage="error", message=exc.message)
             except Exception as exc:
                 await session.rollback()
-                current.emit("error", stage="error", message=str(exc) or "生成失败")
+                message = str(exc) or "生成失败"
+                await record_failure(job_id, tenant_id, message)
+                current.emit("error", stage="error", message=message)
     finally:
+        durable_heartbeat_stop.set()
+        await durable_heartbeat
         heartbeat_stop.set()
         beat.join(timeout=1)
         tenant_id_ctx.reset(token)

@@ -17,7 +17,9 @@ class JobClaim:
     result: dict | None = None
 
 
-_RUNNING_RECOVERY_AFTER = timedelta(seconds=150)
+_RUNNING_RECOVERY_AFTER = timedelta(
+    seconds=float(os.environ.get("SCHEDULING_HEARTBEAT_TIMEOUT_SECONDS", "300"))
+)
 
 
 def should_recover(row, *, now: datetime | None = None) -> bool:
@@ -121,6 +123,18 @@ async def stage_success(session, job_id: str, tenant_id: int, result: dict) -> b
     return True
 
 
+async def stage_heartbeat(session, job_id: str, tenant_id: int) -> bool:
+    """Refresh a running durable job without changing its visible progress."""
+    row = await session.get(SchedulingGenerateJob, job_id)
+    if row is None or row.tenant_id != tenant_id or row.status != "running":
+        return False
+    now = datetime.utcnow()
+    row.heartbeat_at = now
+    row.updated_at = now
+    session.add(row)
+    return True
+
+
 async def claim_job(job_id: str, tenant_id: int, *, allow_reclaim: bool = False) -> JobClaim:
     """Claim a durable job, or return its already committed result.
 
@@ -183,6 +197,16 @@ async def record_progress(job_id: str, tenant_id: int, stage: str, message: str,
         row.updated_at = datetime.utcnow()
         session.add(row)
         await session.commit()
+
+
+async def record_heartbeat(job_id: str, tenant_id: int) -> None:
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return
+    from app.db.session import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        if await stage_heartbeat(session, job_id, tenant_id):
+            await session.commit()
 
 
 async def record_failure(job_id: str, tenant_id: int, message: str, detail=None) -> None:

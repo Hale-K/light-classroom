@@ -1,6 +1,45 @@
 import pytest
 
 
+def test_solver_workers_leave_capacity_for_heartbeat(monkeypatch):
+    from app.workers.scheduling.generate import solver_worker_count
+
+    monkeypatch.delenv("SCHEDULING_CP_SAT_WORKERS", raising=False)
+    assert solver_worker_count(1) == 1
+    assert solver_worker_count(2) == 1
+    assert solver_worker_count(4) == 3
+    assert solver_worker_count(16) == 8
+
+
+def test_heartbeat_recreates_a_missing_redis_progress_snapshot(monkeypatch):
+    from app.services.scheduling import generate_jobs
+
+    writes = {}
+
+    class FakePipeline:
+        def set(self, key, value, **kwargs):
+            writes[key] = value
+            return self
+
+        def execute(self):
+            return None
+
+    class FakeRedis:
+        def get(self, key):
+            return None
+
+        def pipeline(self):
+            return FakePipeline()
+
+    job = generate_jobs.GenerateJob(id="job-recover", tenant_id=7, status="running")
+    monkeypatch.setitem(generate_jobs._jobs, job.id, job)
+    monkeypatch.setattr(generate_jobs, "_redis", lambda: FakeRedis())
+
+    generate_jobs.touch_heartbeat(job.id)
+
+    assert f"lc:sched:job:{job.id}" in writes
+
+
 @pytest.mark.asyncio
 async def test_two_sequential_jobs_stop_heartbeat_and_release_school_slot(monkeypatch):
     from app.db import session as db_session
