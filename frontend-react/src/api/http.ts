@@ -24,6 +24,7 @@ export interface AuthResolver {
   getAdminToken: () => string | null
   getSchoolCode: () => string
   onUnauthorized: () => void
+  onForbidden?: () => void
 }
 function readSchoolCode(): string {
   const c = (localStorage.getItem('zh_school_code') || '').trim()
@@ -40,6 +41,7 @@ let resolver: AuthResolver = {
     localStorage.removeItem('zh_user')
     window.location.href = '/login'
   },
+  onForbidden: undefined,
 }
 export function setAuthResolver(r: AuthResolver) {
   resolver = { ...resolver, ...r }
@@ -114,8 +116,13 @@ function createHttp(baseURL: string): AxiosInstance {
       const traceId = readTraceId(error?.response?.headers, error?.response?.data)
         || error?.config?.headers?.['X-Trace-Id']
       if (status === 401) {
+        const detail = normalizeErrorDetail(error?.response?.data?.detail)
         resolver.onUnauthorized()
-        throw new ApiError('登录已失效，请重新登录', 401, 401, traceId)
+        throw new ApiError(detail || '登录已失效，请重新登录', 401, 401, traceId)
+      }
+      if (status === 403 && !isAdminUrl(error?.config?.url)) {
+        // 后端返回权限不足（学校端），统一跳 /403 页面
+        resolver.onForbidden?.()
       }
       const msg =
         normalizeErrorDetail(error?.response?.data?.detail) ||

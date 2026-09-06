@@ -609,7 +609,7 @@ kbd {
 }
 .layout-aside,
 .admin-aside {
-  width: 350px;
+  width: 240px;
   flex-shrink: 0;
   background: var(--glass);
   backdrop-filter: blur(18px) saturate(1.35);
@@ -3871,7 +3871,7 @@ body[data-theme='tech'] .st-subject-self-study {
   gap: 0;
 }
 .layout-aside {
-  width: 350px;
+  width: 240px;
   border-radius: 0;
   border: none;
   border-right: 1px solid var(--glass-border);

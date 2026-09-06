@@ -61,15 +61,18 @@ def test_role_access_is_restricted_to_its_school():
 
 
 def test_permission_codes_drive_the_non_admin_menu():
-    paths = menu_paths(build_menu(
+    groups = build_menu(
         "teacher",
         "3+1+2",
-        permission_codes={"dashboard:view", "scheduling:view"},
+        permission_codes={"dashboard:view", "teacher_menu:courses"},
         menu_permissions=MENU_PERMISSION_SEED,
         menu_items=seed_menu_items(),
-    ))
+    )
 
-    assert paths == {"/dashboard", "/scheduling"}
+    assert [group["key"] for group in groups] == ["teacher-workbench"]
+    assert [child["title"] for child in groups[0]["children"]] == [
+        "课程",
+    ]
 
 
 def test_menu_preview_ignores_director_bypass_and_uses_permission_codes_only():
@@ -101,4 +104,4 @@ def test_build_menu_respects_injected_db_menu_permission_map():
         menu_items=seed_menu_items(),
     ))
 
-    assert paths == {"/dashboard", "/meetings"}
+    assert paths == set()

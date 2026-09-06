@@ -18,6 +18,9 @@ export default function SubjectManagementView() {
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<SubjectInfo | null>(null)
+  const [keyword, setKeyword] = useState('')
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [form] = Form.useForm<SubjectFormValues>()
 
   const load = async () => {
@@ -32,6 +35,10 @@ export default function SubjectManagementView() {
   }
 
   useEffect(() => { void load() }, [])
+
+  const filtered = keyword.trim()
+    ? subjects.filter((s) => s.name.includes(keyword.trim()))
+    : subjects
 
   const openCreate = () => {
     setEditing(null)
@@ -103,13 +110,30 @@ export default function SubjectManagementView() {
           <p>维护本校排课、任教关系和晚自习会使用的科目。系统公共科目可直接使用，本校自定义科目只对当前学校生效。</p>
         </div>
         <div className="subject-actions">
+          <Input.Search
+            allowClear
+            placeholder="搜索科目名称"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            onSearch={setKeyword}
+            style={{ width: 220 }}
+          />
           <Button onClick={() => void load()} loading={loading}>刷新</Button>
           <Button type="primary" onClick={openCreate}>新增科目</Button>
         </div>
       </div>
-      <div className="subject-note"><strong>{subjects.length}</strong><span>个可用科目</span><i /> <span>科目基础资料不包含班级课时，课时在课程方案中维护。</span></div>
       <div className="subject-surface">
-        <Table<SubjectInfo> rowKey="id" loading={loading} columns={columns} dataSource={subjects} pagination={{ pageSize: 12, showSizeChanger: false }} locale={{ emptyText: '暂无科目，请新增本校科目' }} />
+        <Table<SubjectInfo> rowKey="id" loading={loading} columns={columns} dataSource={filtered}
+          pagination={{
+            current: page,
+            pageSize,
+            total: filtered.length,
+            onChange: (p, s) => { setPage(p); setPageSize(s) },
+            showSizeChanger: true,
+            showTotal: (total) => `共 ${total} 个`,
+          }}
+          locale={{ emptyText: '暂无科目，请新增本校科目' }}
+        />
       </div>
       <Modal title={editing ? '编辑本校科目' : '新增本校科目'} open={open} centered onCancel={close} onOk={() => form.submit()} okText="保存" cancelText="取消" confirmLoading={saving}>
         <Form form={form} layout="vertical" onFinish={submit}>

@@ -38,6 +38,12 @@ import StatsView from '@/pages/stats'
 import TeacherProfilesView from '@/pages/teacher-profiles'
 import FileCenterView from '@/pages/file-center'
 import AiProvidersView from '@/pages/ai-providers'
+import TeacherModulePlaceholder from '@/pages/dashboard/TeacherModulePlaceholder'
+import TeacherCourses from '@/pages/dashboard/TeacherCourses'
+import TeacherPreparation from '@/pages/teacher/TeacherPreparation'
+import TeacherClasses from '@/pages/teacher/TeacherClasses'
+import TeacherStudents from '@/pages/teacher/TeacherStudents'
+import ForbiddenPage from '@/pages/Forbidden'
 
 /** 根路由：挂载 API 鉴权 resolver（token / 学校代码 / 401 跳转） */
 function Root() {
@@ -62,6 +68,10 @@ function Root() {
         useAuthStore.getState().logout()
         navigate('/login', { replace: true })
       },
+      onForbidden: () => {
+        const from = window.location.pathname + window.location.search
+        navigate('/403', { replace: true, state: { from } })
+      },
     })
   }, [navigate])
   return <Outlet />
@@ -74,6 +84,7 @@ export const router = createBrowserRouter([
       { path: '/login', element: <Login /> },
       // 平台超管后台（创建学校）
       { path: '/admin/login', element: <AdminLogin /> },
+      { path: '/403', element: <ForbiddenPage /> },
       {
         path: '/admin',
         element: (
@@ -99,6 +110,10 @@ export const router = createBrowserRouter([
           { path: 'exams', element: <ExamManage /> },
           { path: 'scans', element: <ScanManage /> },
           { path: 'scheduling', element: <SchedulingView /> },
+          { path: 'teacher-courses', element: <TeacherCourses /> },
+          { path: 'teacher-preparation', element: <TeacherPreparation /> },
+          { path: 'teacher-classes', element: <TeacherClasses /> },
+          { path: 'teacher-students', element: <TeacherStudents /> },
           { path: 'onboarding', element: <OnboardingView /> },
           { path: 'file-center', element: <FileCenterView /> },
           { path: 'ai-providers', element: <AiProvidersView /> },
@@ -125,6 +140,8 @@ export const router = createBrowserRouter([
           { path: 'grading/:paperId', element: <GradingWorkbench /> },
           { path: 'stats/:paperId', element: <StatsView /> },
           { path: 'teacher-profiles', element: <TeacherProfilesView /> },
+          { path: 'teacher-grades', element: <TeacherModulePlaceholder icon="chart" title="成绩" description="成绩汇总功能正在接入，阅卷成绩仍可从作业与试卷页面查看。" /> },
+          { path: 'teacher-notices', element: <TeacherModulePlaceholder icon="message" title="通知" description="当前暂无新的教学通知。" /> },
         ],
       },
     ],

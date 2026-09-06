@@ -520,18 +520,6 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     : null
   return <div className={embedded ? 'facility-pane' : 'zh-page facility-page'}>
     {embedded ? <div className="facility-subhead facility-subhead-actions">{actions}</div> : <PageHeader title="空间资源" extra={actions} />}
-    {focus === 'allocation' && <section className="facility-allocation-intro" aria-labelledby="facility-allocation-title">
-      <div className="facility-allocation-copy">
-        <span className="facility-eyebrow">COHORT RESOURCE PLAN</span>
-        <h2 id="facility-allocation-title">按届别规划教学空间</h2>
-        <p>先定义校区、楼宇、楼层、容量和场室类型等条件，预览匹配结果后，再执行划分给指定届别。普通教室可共享，专属资源可避免跨届冲突。</p>
-      </div>
-      <div className="facility-allocation-steps" aria-label="资源分配流程">
-        <div><b>01</b><span>生成规则</span><small>选择届别与楼层范围</small></div>
-        <div><b>02</b><span>预览匹配</span><small>确认可分配场室数量</small></div>
-        <div><b>03</b><span>执行划分</span><small>写入届别资源关系</small></div>
-      </div>
-    </section>}
     {focus === 'resources' && <div className="facility-stats">
       {[['校区', data?.stats.campus_count ?? 0], ['教学楼及楼宇', data?.stats.building_count ?? 0], ['场室总数', data?.stats.room_count ?? 0], ['多媒体场室', data?.stats.multimedia_count ?? 0]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
     </div>}
@@ -556,7 +544,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     </div>}
     {(focus === 'allocation' || focus === 'class-planning') && <section className="facility-allocation-resource-list">
       <div className="facility-resource-toolbar">
-        <header className="facility-resource-list-head"><div><strong>{focus === 'class-planning' ? '按资源生成行政班' : '资源分配规则'}</strong><span>{focus === 'class-planning' ? '只有已分配给届别的教室，才能生成对应行政班。' : '每一行是一条资源分配规则；执行后再到资源详情查看具体教室。'}</span></div>{focus === 'allocation' && <Button type="primary" onClick={() => { setViewAllocationRule(undefined); setRuleOpen(true) }}>新建分配规则</Button>}</header>
+        {focus === 'allocation' && <header className="facility-resource-list-head"><div><strong>资源分配规则</strong><span>每一行是一条资源分配规则；执行后再到资源详情查看具体教室。</span></div><Button type="primary" onClick={() => { setViewAllocationRule(undefined); setRuleOpen(true) }}>新建分配规则</Button></header>}
         {focus === 'class-planning' && <div className="facility-resource-filters">
         <>
           <Input allowClear value={resourceKeyword} placeholder="搜索教室名称、编号或楼宇" onChange={(event) => setResourceKeyword(event.target.value)} onPressEnter={handleResourceSearch} />

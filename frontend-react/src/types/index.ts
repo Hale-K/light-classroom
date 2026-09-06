@@ -36,6 +36,8 @@ export interface StaffAccount {
   roles: Array<StaffRoleCode | "school_admin">;
   is_school_admin: boolean;
   teacher_level?: string | null;
+  frozen?: boolean;
+  freeze_reason?: string | null;
 }
 
 export interface StaffDirectory {
@@ -1028,6 +1030,10 @@ export interface AdminSchool {
   gaokao_mode: "3+1+2" | "3+3" | "traditional";
   created_at: string;
   admin_phone?: string | null;
+  admin_status?: string | null;
+  frozen?: boolean | null;
+  freeze_reason?: string | null;
+  last_login_at?: string | null;
 }
 
 export type GaokaoMode = "3+1+2" | "3+3" | "traditional";

@@ -1,40 +1,84 @@
-/** 路由 -> 页面标题（面包屑 / 顶栏使用，与 Vue 版 route.meta.title 对齐） */
-const TITLE_MAP: Record<string, string> = {
-  '/dashboard': '工作台',
-  '/ai-providers': '服务商管理',
-  '/exams': '试卷库',
-  '/scans': '扫描进卷',
-  '/scheduling': '排课管理',
-  '/onboarding': '新手引导',
-  '/file-center': '文件中心',
-  '/students': '学生档案',
-  '/classes': '行政班管理',
-  '/organization': '组织机构',
-  '/staff': '人员账号',
-  '/staff-positions': '岗位与权限',
-  '/rbac': '角色与权限',
-  '/roles': '角色与权限',
-  '/permissions': '角色与权限',
-  '/gaokao': '学生选课',
-  '/seating': '班级排座',
-  '/exam-scheduling': '排考管理',
-  '/exam-rooms': '考场管理',
-  '/exam-venues': '考场安排',
-  '/exam-calendar': '考试日程',
-  '/exam-invigilators': '监考教师',
-  '/settings': '系统设置',
-  '/subjects': '科目管理',
-  '/campus-buildings': '空间资源',
-  '/rooms': '场室资源',
-  '/meetings': '会议管理',
-  '/stats': '成绩统计',
-  '/teacher-profiles': '教师档案',
+/** 路由元数据中心：每个路由的页面标题 + 允许访问的角色。
+ * 未在此表出现的路由：允许所有登录用户访问（除非 ROLES_MAP 另有规则）。
+ *
+ * 角色键使用 user.roles 数组中的值：
+ *   director         校长 / 学校创建者
+ *   school_admin     学校管理员
+ *   academic_director 教导主任
+ *   head_teacher     班主任
+ *   teacher          任课教师
+ */
+
+export interface RouteMeta {
+  /** 页面标题（面包屑 / 顶栏） */
+  title: string
+  /** 允许访问的角色，undefined = 所有登录用户可访问 */
+  roles?: string[]
 }
 
-/** 取当前路由标题：精确匹配，否则按前缀匹配动态路由（grading/:paperId 等） */
+export const ROUTE_META: Record<string, RouteMeta> = {
+  // —— 工作台 & 教师端（所有登录用户） ——
+  '/dashboard': { title: '工作台' },
+  '/teacher-courses': { title: '课程' },
+  '/teacher-profiles': { title: '教师档案' },
+  '/teacher-grades': { title: '成绩' },
+  '/teacher-notices': { title: '通知' },
+  '/students': { title: '学生档案' },
+  '/file-center': { title: '文件中心' },
+  '/grading': { title: '打分工作台' },
+  '/teacher-preparation': { title: '备课' },
+  '/teacher-classes': { title: '我的班级' },
+  '/teacher-students': { title: '我的学生' },
+  '/stats': { title: '成绩统计' },
+  '/onboarding': { title: '新手引导' },
+  '/seating': { title: '班级排座', roles: ['head_teacher', 'academic_director', 'school_admin', 'director'] },
+  '/classes': { title: '行政班管理', roles: ['head_teacher', 'academic_director', 'school_admin', 'director'] },
+
+  // —— 教导主任+（含校长、管理员） ——
+  '/scheduling': { title: '排课管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exams': { title: '试卷库', roles: ['academic_director', 'school_admin', 'director'] },
+  '/scans': { title: '扫描进卷', roles: ['academic_director', 'school_admin', 'director'] },
+  '/subjects': { title: '科目管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/campus-buildings': { title: '空间资源', roles: ['academic_director', 'school_admin', 'director'] },
+  '/gaokao': { title: '学生选课', roles: ['academic_director', 'school_admin', 'director'] },
+  '/meetings': { title: '会议管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/staff': { title: '人员账号', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exam-scheduling': { title: '排考管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exam-rooms': { title: '考场管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exam-venues': { title: '考场安排', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exam-calendar': { title: '考试日程', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exam-invigilators': { title: '监考教师', roles: ['academic_director', 'school_admin', 'director'] },
+
+  // —— 校长 / 超管专属 ——
+  '/rbac': { title: '角色与权限', roles: ['director'] },
+  '/roles': { title: '角色与权限', roles: ['director'] },
+  '/permissions': { title: '角色与权限', roles: ['director'] },
+  '/settings': { title: '系统设置', roles: ['director'] },
+  '/staff-positions': { title: '岗位与权限', roles: ['director', 'school_admin'] },
+}
+
+/**
+ * 取当前路由元数据：精确匹配优先，否则按前缀匹配动态路由（grading/:paperId 等）。
+ * 找不到则返回默认值。
+ */
+export function getRouteMeta(path: string): RouteMeta {
+  if (ROUTE_META[path]) return ROUTE_META[path]
+  // 子路径匹配：/foo/bar 也算 /foo
+  for (const [prefix, meta] of Object.entries(ROUTE_META)) {
+    if (path.startsWith(prefix + '/')) return meta
+  }
+  // 动态路由兜底
+  if (path.startsWith('/grading')) return { title: '打分工作台' }
+  if (path.startsWith('/stats')) return { title: '成绩统计' }
+  return { title: '工作台' }
+}
+
+/** 取路由标题，等价于之前的 routeTitle */
 export function routeTitle(path: string): string {
-  if (TITLE_MAP[path]) return TITLE_MAP[path]
-  if (path.startsWith('/grading')) return '打分工作台'
-  if (path.startsWith('/stats')) return '成绩统计'
-  return '工作台'
+  return getRouteMeta(path).title
+}
+
+/** 取某路径要求的角色列表，undefined = 不限角色 */
+export function routeRoles(path: string): string[] | undefined {
+  return getRouteMeta(path).roles
 }

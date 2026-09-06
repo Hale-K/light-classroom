@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
-import { App, Button, Form, Input, Modal, Radio, Select, Table } from 'antd'
+import { App, Button, Form, Input, Modal, Radio, Select, Switch, Table, Tooltip } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import DictTag from '@/components/DictTag'
@@ -84,6 +84,7 @@ export default function AdminSchools() {
   const createSchool = useAdminStore((s) => s.createSchool)
   const updateSchool = useAdminStore((s) => s.updateSchool)
   const resetPassword = useAdminStore((s) => s.resetPassword)
+  const toggleAdminStatus = useAdminStore((s) => s.toggleAdminStatus)
 
   const [loading, setLoading] = useState(false)
 
@@ -223,6 +224,16 @@ export default function AdminSchools() {
     }
   }
 
+  const onToggleFrozen = async (row: AdminSchool, checked: boolean) => {
+    try {
+      await toggleAdminStatus(row.id)
+      message.success(checked ? `已冻结「${row.name}」管理员账号` : `已解冻「${row.name}」管理员账号`)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '操作失败')
+      await fetchSchools()
+    }
+  }
+
   const columns: ColumnsType<AdminSchool> = [
     { title: '学校名称', dataIndex: 'name', key: 'name', minWidth: 200 },
     { title: '学校代码', dataIndex: 'code', key: 'code', width: 150 },
@@ -250,12 +261,27 @@ export default function AdminSchools() {
       render: (value) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—'),
     },
     {
+      title: '最后登录',
+      dataIndex: 'last_login_at',
+      key: 'last_login_at',
+      minWidth: 170,
+      render: (value) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—'),
+    },
+    {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 200,
       fixed: 'right',
       render: (_, row) => (
         <>
+          <Tooltip title={row.frozen ? '点击解冻' : '点击冻结管理员账号'}>
+            <Switch
+              checked={!!row.frozen}
+              onChange={(checked) => void onToggleFrozen(row, checked)}
+              checkedChildren="冻结"
+              unCheckedChildren="正常"
+            />
+          </Tooltip>
           <Button type="link" size="small" style={{ paddingInline: 6 }} onClick={() => openEdit(row)}>
             编辑
           </Button>
@@ -350,7 +376,7 @@ export default function AdminSchools() {
             showSizeChanger: true,
             showTotal: (total) => `共 ${total} 所`,
           }}
-          scroll={{ x: 1080 }}
+          scroll={{ x: 1280 }}
           locale={{
             emptyText: (
               <EmptyState

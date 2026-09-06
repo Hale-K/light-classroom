@@ -37,6 +37,7 @@ interface AdminState {
     admin_phone?: string
   }) => Promise<void>
   resetPassword: (id: number, password: string) => Promise<void>
+  toggleAdminStatus: (id: number) => Promise<void>
   logout: () => void
 }
 
@@ -74,6 +75,10 @@ export const useAdminStore = create<AdminState>()((set, get) => ({
   },
   async resetPassword(id, password) {
     await adminApi.resetPassword(id, password)
+  },
+  async toggleAdminStatus(id) {
+    await adminApi.toggleAdminStatus(id)
+    await get().loadSchools()
   },
   logout() {
     localStorage.removeItem(ADMIN_TOKEN_KEY)

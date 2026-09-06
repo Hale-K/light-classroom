@@ -16,3 +16,4 @@ class PlatformAdmin(SQLModel, table=True):
     password_hash: str = Field(max_length=255)
     status: str = Field(default="active", max_length=20, description="active/disabled")
     created_at: datetime = Field(default_factory=datetime.utcnow)
+    last_login_at: datetime | None = Field(default=None, description="最后登录时间")

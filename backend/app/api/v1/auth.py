@@ -113,6 +113,13 @@ async def login(body: LoginIn, session: AsyncSession = Depends(_public_session))
     if (user is None or user.status != "active"
             or not verify_password(body.password, user.password_hash)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
+    if user.frozen:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"账号已被冻结：{user.freeze_reason or '请联系管理员'}",
+        )
+    user.last_login_at = datetime.utcnow()
+    await session.flush()
     # 由账号决定其所属学校，随登录结果返回，前端无需预先选择
     tenant = await session.get(Tenant, user.tenant_id)
     role_codes = await get_staff_role_codes(session, user.id)

@@ -40,6 +40,10 @@ class StaffStatusIn(BaseModel):
     status: UserStatus
 
 
+class StaffFreezeIn(BaseModel):
+    reason: str = Field(min_length=1, max_length=200, description="冻结原因")
+
+
 def _require_school_admin(user: User) -> None:
     if user.role != BaseUserRole.director:
         raise HTTPException(status_code=403, detail="仅校长管理员可以配置人员与权限")
@@ -59,6 +63,8 @@ def _staff_data(user: User, roles: list[str]):
         "roles": ["school_admin"] if is_school_admin else roles,
         "is_school_admin": is_school_admin,
         "teacher_level": user.teacher_level,
+        "frozen": user.frozen,
+        "freeze_reason": user.freeze_reason,
     }
 
 
@@ -196,6 +202,47 @@ async def update_staff_status(
     if account.role == BaseUserRole.director:
         raise HTTPException(status_code=422, detail="校长管理员账号不可停用")
     account.status = body.status
+    await session.commit()
+    await session.refresh(account)
+    roles = await _load_role_map(session, [account.id])
+    return {"code": 0, "message": "ok", "data": _staff_data(account, roles.get(account.id, []))}
+
+
+@router.post("/{staff_id}/freeze", summary="冻结教职工账号")
+async def freeze_staff(
+    staff_id: int,
+    body: StaffFreezeIn,
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+    session: AsyncSession = Depends(get_session),
+):
+    _require_school_admin(user)
+    account = await session.get(User, staff_id)
+    if account is None or account.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="教职工账号不存在")
+    if account.role == BaseUserRole.director:
+        raise HTTPException(status_code=422, detail="校长管理员账号不可冻结")
+    account.frozen = True
+    account.freeze_reason = body.reason
+    await session.commit()
+    await session.refresh(account)
+    roles = await _load_role_map(session, [account.id])
+    return {"code": 0, "message": "ok", "data": _staff_data(account, roles.get(account.id, []))}
+
+
+@router.post("/{staff_id}/unfreeze", summary="解冻教职工账号")
+async def unfreeze_staff(
+    staff_id: int,
+    user: User = Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+    session: AsyncSession = Depends(get_session),
+):
+    _require_school_admin(user)
+    account = await session.get(User, staff_id)
+    if account is None or account.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="教职工账号不存在")
+    account.frozen = False
+    account.freeze_reason = None
     await session.commit()
     await session.refresh(account)
     roles = await _load_role_map(session, [account.id])
