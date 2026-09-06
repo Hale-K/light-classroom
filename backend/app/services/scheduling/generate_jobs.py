@@ -23,6 +23,7 @@ _MAX_JOBS = 40
 # 心跳与僵尸收割阈值：queued 超时未启动 / running 心跳超时，都明确判失败并给出原因
 _STALE_QUEUED_SECONDS = 120.0
 _STALE_RUNNING_SECONDS = 150.0
+_BUSY_LEASE_SECONDS = 180
 
 _jobs: dict[str, "GenerateJob"] = {}
 _gate = threading.Lock()
@@ -70,6 +71,10 @@ def _ev_key(job_id: str) -> str:
 
 def _busy_key() -> str:
     return f"{_ns()}:busy"
+
+
+def _busy_lease_key(tenant_id: int | str) -> str:
+    return f"{_ns()}:busy-lease:{tenant_id}"
 
 
 @dataclass
@@ -169,6 +174,12 @@ class GenerateBusy(Exception):
 
 
 _ACQUIRE_LUA = """
+local members = redis.call('smembers', KEYS[1])
+for _, member in ipairs(members) do
+  if redis.call('exists', ARGV[4] .. member) == 0 then
+    redis.call('srem', KEYS[1], member)
+  end
+end
 if redis.call('sismember', KEYS[1], ARGV[1]) == 1 then
   return 1
 end
@@ -176,7 +187,7 @@ if redis.call('scard', KEYS[1]) >= tonumber(ARGV[2]) then
   return 2
 end
 redis.call('sadd', KEYS[1], ARGV[1])
-redis.call('expire', KEYS[1], ARGV[3])
+redis.call('set', ARGV[4] .. ARGV[1], '1', 'EX', ARGV[3])
 return 0
 """
 
@@ -191,7 +202,11 @@ def try_acquire_generate_slot(tenant_id: int) -> None:
                 raise GenerateBusy("排课生成繁忙，请稍后再试")
             _active_tenants.add(tenant_id)
         return
-    code = client.eval(_ACQUIRE_LUA, 1, _busy_key(), str(tenant_id), MAX_ACTIVE_GENERATES, _JOB_TTL)
+    lease_prefix = _busy_lease_key("")
+    code = client.eval(
+        _ACQUIRE_LUA, 1, _busy_key(), str(tenant_id), MAX_ACTIVE_GENERATES,
+        _BUSY_LEASE_SECONDS, lease_prefix,
+    )
     if int(code) == 1:
         raise GenerateBusy("本校已有课表正在生成，请等待完成后再试")
     if int(code) == 2:
@@ -204,7 +219,10 @@ def release_generate_slot(tenant_id: int) -> None:
         with _gate:
             _active_tenants.discard(tenant_id)
         return
-    client.srem(_busy_key(), str(tenant_id))
+    pipe = client.pipeline()
+    pipe.srem(_busy_key(), str(tenant_id))
+    pipe.delete(_busy_lease_key(tenant_id))
+    pipe.execute()
 
 
 def reset_generate_slots() -> None:
@@ -212,7 +230,9 @@ def reset_generate_slots() -> None:
         _active_tenants.clear()
     client = _redis()
     if client is not None:
-        client.delete(_busy_key())
+        members = client.smembers(_busy_key())
+        keys = [_busy_key(), *(_busy_lease_key(member) for member in members)]
+        client.delete(*keys)
 
 
 def create_job(tenant_id: int) -> GenerateJob:
@@ -294,7 +314,10 @@ def touch_heartbeat(job_id: str) -> None:
         return
     data = json.loads(raw)
     data["heartbeat_at"] = time.time()
-    client.set(_job_key(job_id), json.dumps(data, ensure_ascii=False), ex=_JOB_TTL)
+    pipe = client.pipeline()
+    pipe.set(_job_key(job_id), json.dumps(data, ensure_ascii=False), ex=_JOB_TTL)
+    pipe.set(_busy_lease_key(int(data["tenant_id"])), "1", ex=_BUSY_LEASE_SECONDS)
+    pipe.execute()
 
 
 def get_or_create_job(job_id: str, tenant_id: int) -> GenerateJob:
