@@ -157,6 +157,10 @@ export const adminApi = {
     unwrap<{ school_id: number; phone: string | null }>(
       http.post(`/admin/schools/${id}/reset-password`, { password }),
     ),
+  toggleAdminStatus: (id: number) =>
+    unwrap<{ school_id: number; frozen: boolean }>(
+      http.post(`/admin/schools/${id}/admin-status`),
+    ),
   schoolStats: () => unwrap<{ total: number }>(http.get('/admin/schools/stats')),
 }
 
@@ -228,6 +232,10 @@ export const staffApi = {
     unwrap<StaffAccount>(http.patch(`/staff/${id}/roles`, { roles })),
   updateStatus: (id: number, status: 'active' | 'disabled') =>
     unwrap<StaffAccount>(http.patch(`/staff/${id}/status`, { status })),
+  freeze: (id: number, reason: string) =>
+    unwrap<StaffAccount>(http.post(`/staff/${id}/freeze`, { reason })),
+  unfreeze: (id: number) =>
+    unwrap<StaffAccount>(http.post(`/staff/${id}/unfreeze`)),
 }
 
 export const organizationApi = {

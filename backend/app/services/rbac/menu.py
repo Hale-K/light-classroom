@@ -267,6 +267,10 @@ def build_menu(
     capabilities = get_subject_choice_strategy(gaokao_mode).capabilities
     mapping = menu_permissions or {}
     items = menu_items or []
+    teacher_roles = {"teacher", "head_teacher", "subject_teacher"}
+    if role in teacher_roles:
+        if any(item.get("group_key") == "teacher-workbench" for item in items):
+            items = [item for item in items if item.get("group_key") == "teacher-workbench"]
 
     def is_visible(item: dict[str, Any]) -> bool:
         if not item.get("enabled", True) or not item.get("path"):
@@ -282,6 +286,8 @@ def build_menu(
         if key in mapping:
             required = mapping[key]
             return bool(required & permission_codes)
+        if item.get("group_key") == "teacher-workbench":
+            return False
         return not roles or role in roles
 
     visible_items = {

@@ -55,6 +55,9 @@ class User(TimestampMixin, TenantMixin, SQLModel, table=True):
     role: BaseUserRole = Field(default=BaseUserRole.teacher, description="基础角色")
     teacher_level: str | None = Field(default=None, max_length=30, description="教师职级")
     status: UserStatus = Field(default=UserStatus.active)
+    frozen: bool = Field(default=False, description="是否冻结（临时禁用，可附原因）")
+    freeze_reason: str | None = Field(default=None, max_length=200, description="冻结原因")
+    last_login_at: datetime | None = Field(default=None, description="最后登录时间")
 
 
 class OrganizationUnit(TimestampMixin, TenantMixin, SQLModel, table=True):

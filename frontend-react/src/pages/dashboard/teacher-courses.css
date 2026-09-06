@@ -1,0 +1,15 @@
+.teacher-courses-page{min-height:calc(100vh - 76px);padding:28px;background:#f1f6fa;color:var(--td-ink,#15252e)}
+.tc-page-head{display:flex;align-items:flex-end;justify-content:space-between;gap:24px;margin-bottom:22px}
+.tc-eyebrow{display:block;margin-bottom:5px;color:#14999d;font-size:12px;font-weight:800;letter-spacing:.12em}
+.tc-page-head h1{margin:0;font-size:28px;line-height:1.25}.tc-page-head p{margin:6px 0 0;color:#6c7d87}
+.tc-term{display:flex;align-items:center;gap:8px;padding:8px 12px;border:1px solid #cfe1e8;border-radius:8px;background:#fff;color:#4d6876;font-size:13px}
+.tc-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr)) auto;align-items:stretch;gap:1px;margin-bottom:20px;overflow:hidden;border:1px solid #e1eaee;border-radius:8px;background:#e1eaee}
+.tc-summary>div{display:flex;align-items:baseline;gap:7px;padding:18px 20px;background:#fff}.tc-summary span{margin-right:auto;color:#6c7d87}.tc-summary strong{font-size:28px;color:#15252e}.tc-summary small{color:#6c7d87}
+.tc-summary>.ant-btn{align-self:center;margin:0 16px;background:#20b6b7;border-color:#20b6b7}
+.tc-week{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:12px;align-items:start;overflow-x:auto;padding-bottom:8px}
+.tc-day{min-height:280px;border:1px solid #e1eaee;border-radius:8px;background:#fff;overflow:hidden}
+.tc-day-head{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid #edf2f4;background:#f8fbfc}.tc-day-head h2{margin:0;font-size:15px}.tc-day-head span{color:#81939d;font-size:12px}
+.tc-lesson{display:grid;gap:3px;margin:10px;padding:11px;border-left:3px solid #20b6b7;background:#f3fbfb}.tc-period{color:#14999d;font-size:12px;font-weight:700}.tc-lesson strong{font-size:15px}.tc-lesson>span:not(.tc-period){color:#526874;font-size:13px}.tc-lesson small{display:flex;align-items:center;gap:4px;color:#7d909a}
+.tc-day .ant-empty{margin:58px 0}.tc-day .ant-empty-description{color:#93a2aa}
+@media(max-width:900px){.teacher-courses-page{padding:18px}.tc-page-head{align-items:flex-start;flex-direction:column}.tc-summary{grid-template-columns:1fr 1fr}.tc-summary>.ant-btn{margin:12px}.tc-week{grid-template-columns:repeat(7,180px)}}
+@media(max-width:560px){.teacher-courses-page{padding:12px}.tc-summary{grid-template-columns:1fr}.tc-page-head h1{font-size:23px}}

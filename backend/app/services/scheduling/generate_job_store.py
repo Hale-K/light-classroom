@@ -18,7 +18,7 @@ class JobClaim:
 
 
 _RUNNING_RECOVERY_AFTER = timedelta(
-    seconds=float(os.environ.get("SCHEDULING_HEARTBEAT_TIMEOUT_SECONDS", "300"))
+    seconds=float(os.environ.get("SCHEDULING_HEARTBEAT_TIMEOUT_SECONDS", "900"))
 )
 
 

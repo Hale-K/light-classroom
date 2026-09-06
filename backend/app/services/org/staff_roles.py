@@ -36,6 +36,8 @@ def effective_menu_role(base_role: BaseUserRole, role_codes: list[str]) -> str:
         return "director"
     if "academic_director" in role_codes:
         return "academic_director"
+    if "head_teacher" in role_codes:
+        return "head_teacher"
     return "teacher"
 
 

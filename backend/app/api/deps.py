@@ -42,6 +42,11 @@ async def get_current_user(
     user = await session.get(User, int(user_id))
     if user is None or user.status != "active":
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="用户不存在或已禁用")
+    if user.frozen:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"账号已被冻结：{user.freeze_reason or '请联系管理员'}",
+        )
     return user
 
 

@@ -47,6 +47,8 @@ export default function CourseHoursPanel({
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<CourseHourPlanInfo>()
+  const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(10)
   const [form] = Form.useForm<CourseHourFormValues>()
   const weekdayPeriods = Form.useWatch('weekday_periods', form) ?? 0
   const saturdayPeriods = Form.useWatch('saturday_periods', form) ?? 0
@@ -257,7 +259,14 @@ export default function CourseHoursPanel({
         loading={loading}
         columns={columns}
         dataSource={rows}
-        pagination={{ pageSize: 12, showSizeChanger: false }}
+        pagination={{
+          current: page,
+          pageSize,
+          total: rows.length,
+          onChange: (p, s) => { setPage(p); setPageSize(s) },
+          showSizeChanger: true,
+          showTotal: (total) => `共 ${total} 条`,
+        }}
         locale={{ emptyText: '暂无课时方案，请先新增班级课程课时' }}
       />
       <Modal title={editing ? '编辑课时方案' : '新增课时方案'} open={open} centered onCancel={close} onOk={() => form.submit()} okText="保存" cancelText="取消" confirmLoading={saving}>

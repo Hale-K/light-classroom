@@ -3,6 +3,7 @@
 平台端与学校端隔离：本模块使用原始 AsyncSessionLocal（不挂载多租户自动过滤），
 以便跨租户创建/查询学校与校长号；鉴权走 get_current_admin（scope=admin 令牌）。
 """
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, update
@@ -13,7 +14,7 @@ from app.db.session import AsyncSessionLocal
 from app.api.deps import get_current_admin
 from app.models.admin import PlatformAdmin
 from app.models.org import Tenant, User
-from app.models.enums import BaseUserRole, TenantType
+from app.models.enums import BaseUserRole, TenantType, UserStatus
 
 router = APIRouter(prefix="/admin", tags=["平台管理"])
 
@@ -51,6 +52,10 @@ class SchoolOut(BaseModel):
     gaokao_mode: str
     created_at: str
     admin_phone: str | None = None
+    admin_status: str | None = None
+    frozen: bool | None = None
+    freeze_reason: str | None = None
+    last_login_at: str | None = None
 
 
 class SchoolUpdate(BaseModel):
@@ -82,6 +87,8 @@ async def login(body: AdminLoginIn, session: AsyncSession = Depends(get_admin_se
         select(PlatformAdmin).where(PlatformAdmin.username == body.username))).scalar_one_or_none()
     if admin is None or admin.status != "active" or not verify_password(body.password, admin.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
+    admin.last_login_at = datetime.utcnow()
+    await session.flush()
     return {"code": 0, "message": "ok", "data": {
         "access_token": create_admin_access_token(admin.id),
         "admin": AdminOut(id=admin.id, username=admin.username, name=admin.name).model_dump(),
@@ -103,12 +110,19 @@ async def list_schools(session: AsyncSession = Depends(get_admin_session),
     # 每校回填其校长手机号（取担任 director 的首位账号）
     out = []
     for t in rows:
-        phone = (await session.execute(
-            select(User.phone).where(User.tenant_id == t.id, User.role == BaseUserRole.director)
+        admin_user = (await session.execute(
+            select(User).where(User.tenant_id == t.id, User.role == BaseUserRole.director)
             .limit(1))).scalar_one_or_none()
-        out.append(SchoolOut(id=t.id, code=t.code, name=t.name, type=t.type.value,
-                             province=t.province, gaokao_mode=t.gaokao_mode,
-                             created_at=t.created_at.isoformat(), admin_phone=phone).model_dump())
+        out.append(SchoolOut(
+            id=t.id, code=t.code, name=t.name, type=t.type.value,
+            province=t.province, gaokao_mode=t.gaokao_mode,
+            created_at=t.created_at.isoformat(),
+            admin_phone=admin_user.phone if admin_user else None,
+            admin_status=admin_user.status.value if admin_user else None,
+            frozen=admin_user.frozen if admin_user else None,
+            freeze_reason=admin_user.freeze_reason if admin_user else None,
+            last_login_at=admin_user.last_login_at.isoformat() if admin_user and admin_user.last_login_at else None,
+        ).model_dump())
     return {"code": 0, "message": "ok", "data": out}
 
 
@@ -142,12 +156,12 @@ async def create_school(body: SchoolCreate, session: AsyncSession = Depends(get_
     session.add(user)
     await session.flush()
 
-    return {"code": 0, "message": "ok", "data": SchoolOut(id=tenant.id, code=tenant.code,
-                                                          name=tenant.name, type=tenant.type.value,
-                                                          province=tenant.province,
-                                                          gaokao_mode=tenant.gaokao_mode,
-                                                          created_at=tenant.created_at.isoformat(),
-                                                          admin_phone=body.admin_phone).model_dump()}
+    return {"code": 0, "message": "ok", "data": SchoolOut(
+        id=tenant.id, code=tenant.code, name=tenant.name, type=tenant.type.value,
+        province=tenant.province, gaokao_mode=tenant.gaokao_mode,
+        created_at=tenant.created_at.isoformat(), admin_phone=body.admin_phone,
+        admin_status=UserStatus.active.value, frozen=False, freeze_reason=None,
+        last_login_at=None).model_dump()}
 
 
 @router.put("/schools/{school_id}", summary="编辑学校（名称/校长手机号可改，代码锁定）")
@@ -205,6 +219,22 @@ async def reset_password(school_id: int, body: ResetPasswordIn,
     principal.password_hash = get_password_hash(body.password)
     await session.flush()
     return {"code": 0, "message": "ok", "data": {"school_id": school_id, "phone": principal.phone}}
+
+
+@router.post("/schools/{school_id}/admin-status", summary="冻结/解冻校长登录账号")
+async def toggle_admin_status(school_id: int,
+                              session: AsyncSession = Depends(get_admin_session),
+                              _: PlatformAdmin = Depends(get_current_admin)):
+    principal = (await session.execute(
+        select(User).where(User.tenant_id == school_id, User.role == BaseUserRole.director)
+        .limit(1))).scalar_one_or_none()
+    if principal is None:
+        raise HTTPException(status_code=404, detail="该校暂无校长账号")
+    principal.frozen = not principal.frozen
+    principal.freeze_reason = "平台管理员操作" if principal.frozen else None
+    await session.flush()
+    return {"code": 0, "message": "ok",
+            "data": {"school_id": school_id, "frozen": principal.frozen}}
 
 
 @router.get("/schools/stats", summary="学校总数")

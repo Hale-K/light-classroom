@@ -11,6 +11,14 @@
 
 # (module, name, code)
 PERMISSION_SEED: list[tuple[str, str, str]] = [
+    ("教师工作台", "课程菜单", "teacher_menu:courses"),
+    ("教师工作台", "备课菜单", "teacher_menu:preparation"),
+    ("教师工作台", "作业菜单", "teacher_menu:homework"),
+    ("教师工作台", "成绩菜单", "teacher_menu:grades"),
+    ("教师工作台", "学生菜单", "teacher_menu:students"),
+    ("教师工作台", "班级菜单", "teacher_menu:classes"),
+    ("教师工作台", "教研菜单", "teacher_menu:research"),
+    ("教师工作台", "通知菜单", "teacher_menu:notices"),
     ("工作台", "查看工作台", "dashboard:view"),
     ("试卷库", "查看试卷", "paper:view"),
     ("试卷库", "新建/编辑试卷", "paper:write"),
@@ -52,6 +60,14 @@ PERMISSION_SEED: list[tuple[str, str, str]] = [
 # 菜单项种子：key, name, path, icon, sort, enabled, roles, capability, group_key, group_title, group_icon, group_sort
 # 侧栏仅 3 个分组：工作台 / 学籍教务 / 教学考试
 MENU_SEED: list[dict] = [
+    {"key": "teacher-courses", "name": "课程", "path": "/teacher-courses", "icon": "book", "sort": 20, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-preparation", "name": "备课", "path": "/teacher-preparation", "icon": "edit", "sort": 30, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-homework", "name": "作业", "path": "/exams", "icon": "clipboard", "sort": 40, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-grades", "name": "成绩", "path": "/teacher-grades", "icon": "chart", "sort": 50, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-students", "name": "学生", "path": "/teacher-students", "icon": "user", "sort": 60, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-classes", "name": "班级", "path": "/teacher-classes", "icon": "users", "sort": 70, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-research", "name": "教研", "path": "/meetings", "icon": "school", "sort": 80, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
+    {"key": "teacher-notices", "name": "通知", "path": "/teacher-notices", "icon": "message", "sort": 90, "enabled": True, "roles": ["teacher"], "required_capability": None, "group_key": "teacher-workbench", "group_title": "教师工作台", "group_icon": "school", "group_sort": 5},
     {"key": "dashboard", "name": "工作台", "path": "/dashboard", "icon": "dashboard", "sort": 10,
      "enabled": True, "roles": [], "required_capability": None,
      "group_key": "overview", "group_title": "工作台", "group_icon": "dashboard", "group_sort": 10},
@@ -122,6 +138,14 @@ MENU_SEED: list[dict] = [
 
 # 菜单默认可见权限（menu_key → permission codes）；仅空映射时播种
 MENU_PERMISSION_SEED: dict[str, set[str]] = {
+    "teacher-courses": {"teacher_menu:courses"},
+    "teacher-preparation": {"teacher_menu:preparation"},
+    "teacher-homework": {"teacher_menu:homework"},
+    "teacher-grades": {"teacher_menu:grades"},
+    "teacher-students": {"teacher_menu:students"},
+    "teacher-classes": {"teacher_menu:classes"},
+    "teacher-research": {"teacher_menu:research"},
+    "teacher-notices": {"teacher_menu:notices"},
     "dashboard": {"dashboard:view"},
     "exams": {"paper:view", "exam:view"},
     "scans": {"scan:view"},

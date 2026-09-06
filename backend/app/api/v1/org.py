@@ -517,7 +517,15 @@ async def list_students(class_id: int | None = None,
                         grade_id: int | None = None,
                         session: AsyncSession = Depends(get_session),
                         user=Depends(get_current_user)):
-    stmt = select(Student).order_by(Student.class_id, Student.roster_order, Student.id)
+    stmt = select(Student).where(Student.tenant_id == user.tenant_id).order_by(Student.class_id, Student.roster_order, Student.id)
+    user_roles = set(getattr(user, "roles", []) or [])
+    is_teacher = getattr(user, "role", None) == "teacher" or "teacher" in user_roles
+    if is_teacher:
+        managed_class_ids = list((await session.execute(select(TeachingAssignment.class_id).where(
+            TeachingAssignment.tenant_id == user.tenant_id,
+            TeachingAssignment.teacher_id == user.id,
+        ).distinct())).scalars().all())
+        stmt = stmt.where(Student.class_id.in_(managed_class_ids)) if managed_class_ids else stmt.where(Student.id == -1)
     if class_id is not None:
         stmt = stmt.where(Student.class_id == class_id)
     if campus_id is not None:
