@@ -11,6 +11,7 @@ from app.ai.advisor.clarify import clarify
 from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
 from app.ai.graph.loop import run_tool_loop
 from app.ai.model.chat import ChatEndpoint, ChatError, complete_chat, resolve_chat_endpoints
+from app.ai.model.routing import ProviderRoute
 from app.ai.prompt.messages import GREET_REPLY, build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
 from app.ai.tools.retrieve import retrieve_skill
@@ -252,13 +253,7 @@ async def handle_teacher_turn(
     # 慢服务商把 180 秒总闸撞爆，整轮报废成 timed_out。
     from app.ai.runs.service import RUN_TIMEOUT
 
-    turn_started = time.monotonic()
-
-    def spent_total() -> float:
-        return time.monotonic() - turn_started
-
-    def remaining_budget() -> float:
-        return RUN_TIMEOUT - spent_total()
+    route = ProviderRoute(endpoints, RUN_TIMEOUT, clock=time.monotonic)
 
     async def text_only_fallback(endpoint: ChatEndpoint, budget: int) -> TeacherTurn:
         await report_progress(
@@ -316,12 +311,12 @@ async def handle_teacher_turn(
     budget_exhausted = False
     for index, endpoint in enumerate(endpoints):
         is_last = index == len(endpoints) - 1
-        if not provider_circuits.is_available(endpoint.key):
+        if not route.is_available(endpoint, provider_circuits):
             logger.warning("assistant.provider isolated id=%s provider=%s", message_id or "-", endpoint.name)
             await report_progress(on_progress, "isolated", f"{endpoint.name} 正在隔离期，已跳过该服务")
             trail.append(f"{endpoint.name}隔离期跳过")
             continue
-        if remaining_budget() < 30:
+        if not route.can_start():
             # 剩余预算做不完一轮有意义的处理，不再起新 endpoint，避免整轮被总闸报废。
             budget_exhausted = True
             break
@@ -347,19 +342,19 @@ async def handle_teacher_turn(
         except ChatError as exc:
             can_try_text_only = (
                 is_last
-                and spent_total() <= _FALLBACK_MAX_SPENT
+                and RUN_TIMEOUT - route.remaining_seconds() <= _FALLBACK_MAX_SPENT
                 and exc.error_class in _TEXT_ONLY_FALLBACK_ERRORS
             )
             if can_try_text_only:
                 try:
-                    turn = await text_only_fallback(endpoint, max(10, int(remaining_budget() // 2)))
+                    turn = await text_only_fallback(endpoint, max(10, int(route.remaining_seconds() // 2)))
                 except ChatError as fallback_error:
                     exc = fallback_error
                     trail.append(f"{endpoint.name}只读说明仍失败({fallback_error.error_class})")
                 else:
                     provider_circuits.record_success(endpoint.key)
                     return turn
-            last_error = exc
+            last_error = route.last_error = exc
             state = provider_circuits.record_failure(endpoint.key, exc.error_class)
             trail.append(f"{endpoint.name}({exc.error_class})")
             logger.warning(
