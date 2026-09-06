@@ -21,6 +21,7 @@ services:
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
+    command: redis-server --appendonly yes
     volumes: ["redisdata:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -33,6 +34,7 @@ services:
     ports:
       - "5672:5672"
       - "15672:15672"
+    volumes: ["rabbitmqdata:/var/lib/rabbitmq"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -119,4 +121,5 @@ services:
 volumes:
   pgdata:
   redisdata:
+  rabbitmqdata:
   miniodata:

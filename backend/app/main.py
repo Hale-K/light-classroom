@@ -32,6 +32,17 @@ async def lifespan(app: FastAPI):
             await ensure_builtin_roles(session)
             await ensure_menu_permissions(session)  # 菜单结构 + 菜单权限映射
             await session.commit()
+    try:
+        from app.workers.scheduling.generate import recover_incomplete_jobs
+
+        recovered = await recover_incomplete_jobs()
+        if recovered:
+            logger.bind(event="scheduling_recovery_completed", recovered=recovered).warning(
+                f"已恢复 {recovered} 个排课任务"
+            )
+    except Exception as exc:
+        # 首次部署可能由 schema-init 随后建表；恢复失败不能阻止 API 提供服务。
+        logger.bind(event="scheduling_recovery_unavailable").warning(f"排课任务恢复暂不可用: {exc}")
     yield
     # 关闭
     logger.info("👋 关闭中")

@@ -25,6 +25,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: redis-server --appendonly yes
     volumes: ["redisdata:/data"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -39,6 +40,7 @@ services:
       RABBITMQ_DEFAULT_PASS: Ay29XrHtqDblUW4u
     ports:
       - "15672:15672"
+    volumes: ["rabbitmqdata:/var/lib/rabbitmq"]
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
       interval: 10s
@@ -115,6 +117,7 @@ services:
       minio: {condition: service_healthy}
     env_file: ../.env
     ports: ["8000:8000"]
+    restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import urllib.request;urllib.request.urlopen('http://localhost:8000/health')\""]
@@ -132,8 +135,10 @@ services:
       rabbitmq: {condition: service_healthy}
     env_file: ../.env
     command: celery -A app.workers.celery_app worker -Q scheduling,academic --concurrency=2 --loglevel=info
+    restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
+  rabbitmqdata:
   miniodata:

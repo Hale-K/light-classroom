@@ -2926,6 +2926,8 @@ async def stream_generate_job(
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=1.0)
                 except asyncio.TimeoutError:
+                    # 无事件时仍检查心跳，Worker 异常退出后让订阅端得到明确失败。
+                    get_job(job_id)
                     # 注释行保活，逼代理/浏览器冲刷缓冲，避免进度停在前几秒
                     yield ": keepalive\n\n"
                     continue

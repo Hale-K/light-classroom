@@ -510,7 +510,19 @@ export const schedulingApi = {
       rule_validation?: SchedulingRuleValidationResult | null
     }>(http.post('/scheduling/generate', data, { timeout: 300000 })),
   startGenerateJob: (data: Record<string, unknown>) =>
-    unwrap<{ job_id: string }>(http.post('/scheduling/generate-jobs', data)),
+    unwrap<{ job_id: string; resumed?: boolean }>(http.post('/scheduling/generate-jobs', data)),
+  activeGenerateJob: (params: { academic_year: string; term: string }) =>
+    unwrap<{
+      job_id: string
+      status: 'queued' | 'running' | 'retrying'
+      stage: string
+      message: string
+      percent: number
+      attempt: number
+      created_at: string
+      updated_at: string
+      heartbeat_at: string
+    } | null>(http.get('/scheduling/generate-jobs/active', { params })),
   streamGenerateJob: async (
     jobId: string,
     onEvent: (event: {
@@ -528,76 +540,91 @@ export const schedulingApi = {
       }
       detail?: unknown
     }) => void,
+    signal?: AbortSignal,
   ) => {
     const { getAuthHeaders, getSseApiBaseURL } = await import('./http')
-    const response = await fetch(`${getSseApiBaseURL()}/scheduling/generate-jobs/${jobId}/events`, {
-      headers: {
-        ...getAuthHeaders(),
-        Accept: 'text/event-stream',
-        'Cache-Control': 'no-cache',
-      },
-      cache: 'no-store',
-    })
-    if (!response.ok) {
-      if (response.status === 401) {
-        throw new ApiError('登录已失效，请重新登录', 401, 401)
-      }
-      throw new ApiError(`订阅生成进度失败（${response.status}）`, response.status, response.status)
-    }
-    if (!response.body) throw new ApiError('浏览器不支持流式响应', -1, 0)
-    const reader = response.body.getReader()
-    const decoder = new TextDecoder('utf-8')
-    let buffer = ''
-    let currentEvent = 'message'
-    let finished = false
-    while (!finished) {
-      const { done, value } = await reader.read()
-      if (done) break
-      buffer += decoder.decode(value, { stream: true })
-      const chunks = buffer.split(/\r?\n/)
-      buffer = chunks.pop() || ''
-      for (const line of chunks) {
-        if (line.startsWith('event:')) {
-          currentEvent = line.slice(6).trim()
-          continue
-        }
-        if (!line.startsWith('data:')) continue
-        const raw = line.slice(5).trim()
-        if (!raw) continue
-        const payload = JSON.parse(raw) as {
-          type?: string
-          stage?: string
-          message?: string
-          percent?: number
-          elapsed?: number
-          solutions?: number
-          phase?: string
-          result?: {
-            created: number
-            class_count: number
-            unplaced?: Array<{ assignment_id: number; count: number }>
-          }
-          detail?: unknown
-        }
-        const type = payload.type || currentEvent
-        onEvent({
-          type,
-          stage: payload.stage,
-          message: payload.message,
-          percent: payload.percent,
-          elapsed: payload.elapsed,
-          solutions: payload.solutions,
-          phase: payload.phase,
-          result: payload.result,
-          detail: payload.detail,
+    let lastError: unknown = new ApiError('排课进度连接已中断', -1, 0)
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      try {
+        const response = await fetch(`${getSseApiBaseURL()}/scheduling/generate-jobs/${jobId}/events`, {
+          headers: {
+            ...getAuthHeaders(),
+            Accept: 'text/event-stream',
+            'Cache-Control': 'no-cache',
+          },
+          cache: 'no-store',
+          signal,
         })
-        currentEvent = 'message'
-        if (type === 'done' || type === 'error') {
-          finished = true
-          break
+        if (!response.ok) {
+          if (response.status === 401) {
+            throw new ApiError('登录已失效，请重新登录', 401, 401)
+          }
+          throw new ApiError(`订阅生成进度失败（${response.status}）`, response.status, response.status)
         }
+        if (!response.body) throw new ApiError('浏览器不支持流式响应', -1, 0)
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder('utf-8')
+        let buffer = ''
+        let currentEvent = 'message'
+        let finished = false
+        while (!finished) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+          const chunks = buffer.split(/\r?\n/)
+          buffer = chunks.pop() || ''
+          for (const line of chunks) {
+            if (line.startsWith('event:')) {
+              currentEvent = line.slice(6).trim()
+              continue
+            }
+            if (!line.startsWith('data:')) continue
+            const raw = line.slice(5).trim()
+            if (!raw) continue
+            const payload = JSON.parse(raw) as {
+              type?: string
+              stage?: string
+              message?: string
+              percent?: number
+              elapsed?: number
+              solutions?: number
+              phase?: string
+              result?: {
+                created: number
+                class_count: number
+                unplaced?: Array<{ assignment_id: number; count: number }>
+              }
+              detail?: unknown
+            }
+            const type = payload.type || currentEvent
+            onEvent({
+              type,
+              stage: payload.stage,
+              message: payload.message,
+              percent: payload.percent,
+              elapsed: payload.elapsed,
+              solutions: payload.solutions,
+              phase: payload.phase,
+              result: payload.result,
+              detail: payload.detail,
+            })
+            currentEvent = 'message'
+            if (type === 'done' || type === 'error') {
+              finished = true
+              break
+            }
+          }
+        }
+        if (finished) return
+        lastError = new ApiError('排课进度连接已中断', -1, 0)
+      } catch (error) {
+        if (signal?.aborted) throw error
+        if (error instanceof ApiError && error.status === 401) throw error
+        lastError = error
       }
+      await new Promise((resolve) => window.setTimeout(resolve, Math.min(5000, 750 * (attempt + 1))))
     }
+    throw lastError
   },
   adjustmentOptions: (params: { schedule_id: number; academic_year: string; term: string; days?: number; periods_per_day?: number }) =>
     unwrap<Array<{

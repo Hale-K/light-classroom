@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import select
@@ -15,6 +15,18 @@ from app.models.scheduling import SchedulingGenerateJob
 class JobClaim:
     state: str
     result: dict | None = None
+
+
+_RUNNING_RECOVERY_AFTER = timedelta(seconds=150)
+
+
+def should_recover(row, *, now: datetime | None = None) -> bool:
+    now = now or datetime.utcnow()
+    if row.status in {"queued", "retrying"}:
+        return True
+    if row.status != "running":
+        return False
+    return now - row.heartbeat_at >= _RUNNING_RECOVERY_AFTER
 
 
 def job_snapshot(row: SchedulingGenerateJob) -> dict:
@@ -62,6 +74,32 @@ async def active_job(session, tenant_id: int, academic_year: str, term: str):
         .limit(1)
     )
     return result.scalars().first()
+
+
+async def prepare_recovery_jobs(session) -> list[dict]:
+    """Mark interrupted jobs retrying and return payloads for MQ republish."""
+    rows = list((await session.execute(
+        select(SchedulingGenerateJob).where(
+            SchedulingGenerateJob.status.in_(("queued", "running", "retrying"))
+        )
+    )).scalars().all())
+    now = datetime.utcnow()
+    recoverable = [row for row in rows if should_recover(row, now=now)]
+    jobs = []
+    for row in recoverable:
+        row.status = "retrying"
+        row.stage = "queued"
+        row.message = "服务恢复后正在重新进入排课队列"
+        row.updated_at = now
+        session.add(row)
+        jobs.append({
+            "job_id": row.id,
+            "tenant_id": row.tenant_id,
+            "payload": row.payload,
+        })
+    if jobs:
+        await session.commit()
+    return jobs
 
 
 async def stage_success(session, job_id: str, tenant_id: int, result: dict) -> bool:

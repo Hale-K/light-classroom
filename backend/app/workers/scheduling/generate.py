@@ -224,3 +224,24 @@ def spawn_generate_job(
 
         asyncio.create_task(_run_spawned_job(job.id, tenant_id, _execute))
         return job.id
+
+
+async def recover_incomplete_jobs() -> int:
+    """Republish durable jobs that were queued or interrupted by a restart."""
+    from app.db.session import AsyncSessionLocal
+    from app.services.scheduling.generate_job_store import prepare_recovery_jobs
+
+    async with AsyncSessionLocal() as session:
+        jobs = await prepare_recovery_jobs(session)
+    for item in jobs:
+        spawn_generate_job(
+            int(item["tenant_id"]),
+            dict(item["payload"]),
+            job_id=str(item["job_id"]),
+        )
+        logger.bind(
+            event="scheduling_job_republished",
+            job_id=item["job_id"],
+            tenant_id=item["tenant_id"],
+        ).warning("重启后重新投递排课任务")
+    return len(jobs)

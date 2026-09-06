@@ -870,30 +870,9 @@ export default function SchedulingView() {
     if (id) setGenerationFocus({ groupId: id, token: Date.now() })
   }
 
-  const generateAll = async (classIds?: number[], ruleGroupId?: string) => {
-    const generationConfig = activeRuleTemplate?.config || conditions
-    lastGenerateRef.current = { classIds, ruleGroupId }
-    genWallClockRef.current = Date.now()
-    setGenerating(true)
-    setGenStage('validating')
-    setFailedStageIndex(0)
-    setIssues([])
-    setGenDiagnosis(null)
-    setGenTrace([])
-    setGenPercent(2)
-    setGenElapsed(0)
-    setGenSolutions(0)
-    setGenSummary('已提交生成任务，等待进度…')
-    setDiagOpen(true)
+  const followGenerateJob = async (jobId: string, signal?: AbortSignal) => {
     let streamedDiagnosis: GenerationDiagnosis | null = null
     try {
-      const payload = {
-        ...generationPayload(generationConfig),
-        ...(classIds?.length ? { class_ids: classIds } : {}),
-        ...(ruleGroupId ? { rule_group_id: ruleGroupId } : {}),
-      }
-      const { job_id } = await schedulingApi.startGenerateJob(payload)
-      setAssistantContext('generation', { job_id })
       type GenerateJobResult = {
         created: number
         class_count: number
@@ -901,7 +880,7 @@ export default function SchedulingView() {
       }
       let result: GenerateJobResult | null = null
       let jobError: unknown = null
-      await schedulingApi.streamGenerateJob(job_id, (event) => {
+      await schedulingApi.streamGenerateJob(jobId, (event) => {
         if (event.stage === 'validating' || event.stage === 'generating' || event.stage === 'refreshing' || event.stage === 'done') {
           setGenStage(event.stage)
           if (event.stage === 'validating') setFailedStageIndex(0)
@@ -939,7 +918,7 @@ export default function SchedulingView() {
           streamedDiagnosis = parseGenerationDiagnosis(jobError)
           if (streamedDiagnosis) setGenDiagnosis(streamedDiagnosis)
         }
-      })
+      }, signal)
       if (jobError) {
         throw new Error(
           typeof jobError === 'string'
@@ -966,6 +945,7 @@ export default function SchedulingView() {
       void loadVersions()
       setDiagOpen(false)
     } catch (e) {
+      if (signal?.aborted) return
       setGenStage('error')
       const diagnosis = streamedDiagnosis || parseGenerationDiagnosis(e)
       if (diagnosis) setGenDiagnosis(diagnosis)
@@ -977,6 +957,71 @@ export default function SchedulingView() {
       setGenerating(false)
     }
   }
+
+  const generateAll = async (classIds?: number[], ruleGroupId?: string) => {
+    const generationConfig = activeRuleTemplate?.config || conditions
+    lastGenerateRef.current = { classIds, ruleGroupId }
+    genWallClockRef.current = Date.now()
+    setGenerating(true)
+    setGenStage('validating')
+    setFailedStageIndex(0)
+    setIssues([])
+    setGenDiagnosis(null)
+    setGenTrace([])
+    setGenPercent(2)
+    setGenElapsed(0)
+    setGenSolutions(0)
+    setGenSummary('已提交生成任务，等待进度…')
+    setDiagOpen(true)
+    try {
+      const payload = {
+        ...generationPayload(generationConfig),
+        ...(classIds?.length ? { class_ids: classIds } : {}),
+        ...(ruleGroupId ? { rule_group_id: ruleGroupId } : {}),
+      }
+      const { job_id, resumed } = await schedulingApi.startGenerateJob(payload)
+      setAssistantContext('generation', { job_id })
+      if (resumed) setGenSummary('发现本学期已有排课任务，正在恢复进度…')
+      await followGenerateJob(job_id)
+    } catch (e) {
+      setGenerating(false)
+      setGenStage('error')
+      const detail = formatGenerationError(e)
+      setGenSummary(detail)
+      message.error(detail)
+      openDiagnosisDrawer()
+    }
+  }
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void schedulingApi.activeGenerateJob({ academic_year: academicYear, term })
+      .then(async (job) => {
+        if (!job || controller.signal.aborted) return
+        genWallClockRef.current = Date.parse(job.created_at) || Date.now()
+        setGenerating(true)
+        setGenStage(
+          job.stage === 'generating' || job.stage === 'refreshing'
+            ? job.stage
+            : 'validating',
+        )
+        setFailedStageIndex(job.stage === 'refreshing' ? 2 : job.stage === 'generating' ? 1 : 0)
+        setGenPercent(Math.max(0, Math.min(100, job.percent || 2)))
+        setGenSummary(`正在恢复排课任务：${job.message}`)
+        setGenTrace([])
+        setDiagOpen(true)
+        setAssistantContext('generation', { job_id: job.job_id })
+        await followGenerateJob(job.job_id, controller.signal)
+      })
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          console.warn('恢复排课任务失败', error)
+        }
+      })
+    return () => controller.abort()
+    // 当前学年学期变化时重新寻找该范围内的活动任务。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [academicYear, term])
 
   const openVerifyWorkbench = () => {
     if (!calendar.length) {
