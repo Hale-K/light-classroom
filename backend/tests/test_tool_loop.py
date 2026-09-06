@@ -74,6 +74,39 @@ def test_loop_executes_tool_and_feeds_result_back():
     assert convo[2] == {"role": "tool", "tool_call_id": "call_1", "content": "2026学年第1学期，任教「数学」的在职教师共 3 人：\n- 张三：数学"}
 
 
+def test_loop_emits_replayable_model_and_tool_events():
+    async def main():
+        trace = []
+
+        async def caller(**kwargs):
+            if not trace:
+                raise AssertionError("模型请求必须先记入轨迹")
+            if len([event for event in trace if event[0] == "model.request"]) == 1:
+                return ChatOutcome(tool_calls=[ToolCallOut(id="call_1", name="lookup_teachers", arguments="{}")])
+            return ChatOutcome(text="已完成")
+
+        async def executor(name, arguments):
+            return "教师共 3 人"
+
+        async def record(kind, data):
+            trace.append((kind, data))
+
+        outcome = await run_tool_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "教师有谁"}], tools=_TOOLS,
+            executor=executor, caller=caller, on_trace=record,
+        )
+        return outcome, trace
+
+    outcome, trace = asyncio.run(main())
+    assert outcome.text == "已完成"
+    assert [kind for kind, _ in trace] == [
+        "model.request", "model.response", "tool.call", "tool.result", "model.request", "model.response",
+    ]
+    assert trace[0][1]["messages"] == [{"role": "user", "content": "教师有谁"}]
+    assert trace[3][1]["content"] == "教师共 3 人"
+
+
 def test_loop_forces_text_on_last_step():
     async def main():
         seen: list[dict] = []

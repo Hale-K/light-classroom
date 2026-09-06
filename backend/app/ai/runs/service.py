@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.ai.actions import fingerprint
 from app.ai.runs.models import AiRun
-from app.ai.runs.events import run_event
+from app.ai.runs.events import run_event, trace_event
 from app.ai.runs.progress import drive_turn
 from app.db.session import AsyncSessionLocal
 
@@ -25,7 +25,8 @@ def run_view(run: AiRun) -> dict:
     now = datetime.utcnow()
     return {
         "id": run.id, "status": run.status, "phase": run.phase, "message": run.message,
-        "events": run.events, "result": run.result,
+        # 原始轨迹可能含模型上下文和查询结果，只保留给受控诊断通道；老师界面只收进度投影。
+        "events": [event for event in run.events if event.get("visibility") != "internal"], "result": run.result,
         "elapsed_seconds": max(0, int(((now if run.status == 'running' else run.updated_at) - run.created_at).total_seconds())),
         "phase_elapsed_seconds": max(0, int((now - run.phase_started_at).total_seconds())),
         "heartbeat_at": run.updated_at.isoformat() + "Z",
@@ -114,7 +115,12 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
     async def progress(phase, message):
         now = datetime.utcnow()
         events.append(run_event(phase, message, at=now))
-        if not await persist(phase=phase, message=message[:300], phase_started_at=now, events=events[-30:]):
+        if not await persist(phase=phase, message=message[:300], phase_started_at=now, events=events[-100:]):
+            raise asyncio.CancelledError()
+
+    async def trace(kind: str, data: dict) -> None:
+        events.append(trace_event(kind, data))
+        if not await persist(events=events[-100:]):
             raise asyncio.CancelledError()
 
     try:
@@ -124,6 +130,13 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 raise ChatError("账号已失效，请重新登录")
             permissions = await get_user_permission_codes(session, user_id)
             turns = [{"role": item["role"] if item["role"] in ("user", "assistant") else "user", "content": item["content"].strip()[:4000]} for item in payload["messages"][-20:] if item["content"].strip()]
+            await trace("session.turn", {
+                "messages": turns,
+                "page_title": payload.get("page_title"),
+                "page_path": payload.get("page_path"),
+                "page_context": payload.get("page_context") or {},
+                "memory_summary": payload.get("memory_summary") or "",
+            })
             await progress("preparing", "正在结合当前页面和已有对话核对需求")
             result = await drive_turn(handle_teacher_turn(
                 session, tenant_id, turns, user_id=user_id,
@@ -132,7 +145,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 can=payload.get("can"), cannot=payload.get("cannot"),
                 page_context=payload.get("page_context"),
                 memory_summary=payload.get("memory_summary") or "",
-                message_id=payload.get("message_id"), on_progress=progress,
+                message_id=payload.get("message_id"), on_progress=progress, on_trace=trace,
             ), persist, timeout=RUN_TIMEOUT)
             # A cancellation racing completion wins if it acquired this row first.
             run = (await session.execute(select(AiRun).where(AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == user_id).with_for_update().execution_options(populate_existing=True))).scalars().one()

@@ -18,6 +18,7 @@ from app.ai.resilience import provider_circuits
 from app.ai.tools.retrieve import retrieve_skill
 from app.ai.tools.school import SCHOOL_TOOLS, execute_school_tool
 from app.ai.runs.progress import Progress, report_progress
+from app.ai.runs.events import TraceCallback
 from app.utils.answer_cache import answer_cache_key, get_cached_answer, put_cached_answer
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,7 @@ async def agent_reply(
     on_progress: Progress | None = None,
     page_context: dict | None = None,
     memory_summary: str = "",
+    on_trace: TraceCallback | None = None,
 ) -> TeacherTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
 
@@ -135,6 +137,7 @@ async def agent_reply(
             executor=executor,
             stop_when=lambda: plan is not None,
             on_progress=on_progress,
+            on_trace=on_trace,
         )
 
     try:
@@ -183,6 +186,7 @@ async def handle_teacher_turn(
     on_progress: Progress | None = None,
     page_context: dict | None = None,
     memory_summary: str = "",
+    on_trace: TraceCallback | None = None,
 ) -> TeacherTurn:
     if not turns:
         raise ChatError("请输入内容")
@@ -263,7 +267,7 @@ async def handle_teacher_turn(
             base_url=endpoint.base_url, api_key=endpoint.api_key, model=endpoint.model,
             timeout=endpoint.timeout, page_title=page_title, page_path=page_path,
             can=can, cannot=cannot, user_id=user_id, can_manage_rules=can_manage_rules,
-            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary,
+            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace,
         )
 
     routed = await ModelProviderRouter(provider_circuits).route(
@@ -271,6 +275,7 @@ async def handle_teacher_turn(
         total_budget_seconds=RUN_TIMEOUT,
         invoke=invoke,
         on_progress=on_progress,
+        on_trace=on_trace,
         message_id=message_id,
         clock=time.monotonic,
     )
@@ -290,6 +295,8 @@ async def handle_teacher_turn(
     ):
         # 只读说明只在快速失败时尝试，防止两轮额外模型调用耗尽任务总预算。
         try:
+            if on_trace:
+                await on_trace("provider.degraded", {"provider": endpoints[-1].name, "mode": "text_only", "error_class": last_error.error_class})
             turn = await text_only_fallback(endpoints[-1], max(10, int((RUN_TIMEOUT - routed.spent_seconds) // 2)))
             provider_circuits.record_success(endpoints[-1].key)
             return turn

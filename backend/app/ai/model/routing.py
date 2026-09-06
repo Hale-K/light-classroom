@@ -10,6 +10,7 @@ from typing import Generic, TypeVar
 from app.ai.model.chat import ChatEndpoint, ChatError
 from app.ai.resilience import ProviderCircuitBreaker
 from app.ai.runs.progress import Progress, report_progress
+from app.ai.runs.events import TraceCallback
 
 logger = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -68,6 +69,7 @@ class ModelProviderRouter:
         total_budget_seconds: int,
         invoke: Callable[[ChatEndpoint], Awaitable[T]],
         on_progress: Progress | None = None,
+        on_trace: TraceCallback | None = None,
         message_id: str | None = None,
         clock: Callable[[], float] = time.monotonic,
     ) -> ProviderRouteResult[T]:
@@ -75,6 +77,8 @@ class ModelProviderRouter:
         result: ProviderRouteResult[T] = ProviderRouteResult()
         for index, endpoint in enumerate(endpoints):
             if not state.is_available(endpoint, self._circuits):
+                if on_trace:
+                    await on_trace("provider.skipped", {"provider": endpoint.name, "reason": "circuit_isolated"})
                 logger.warning("assistant.provider isolated id=%s provider=%s", message_id or "-", endpoint.name)
                 await report_progress(on_progress, "isolated", f"{endpoint.name} 正在隔离期，已跳过该服务")
                 continue
@@ -84,6 +88,8 @@ class ModelProviderRouter:
             try:
                 value = await invoke(endpoint)
             except ChatError as exc:
+                if on_trace:
+                    await on_trace("provider.failed", {"provider": endpoint.name, "error_class": exc.error_class, "message": exc.message})
                 state.last_error = exc
                 result.last_error = exc
                 state.trail.append(f"{endpoint.name}({exc.error_class})")
@@ -98,6 +104,8 @@ class ModelProviderRouter:
                     await report_progress(on_progress, "recovering", "当前模型未响应，正在切换备用模型继续处理")
                 continue
             self._circuits.record_success(endpoint.key)
+            if on_trace:
+                await on_trace("provider.selected", {"provider": endpoint.name, "used_backup": index > 0})
             result.value = value
             result.endpoint = endpoint
             result.used_backup = index > 0

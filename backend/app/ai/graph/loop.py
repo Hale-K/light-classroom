@@ -7,11 +7,13 @@
 from __future__ import annotations
 
 import logging
+from copy import deepcopy
 from dataclasses import dataclass, field
-from typing import Awaitable, Callable
+from typing import Any, Awaitable, Callable
 
 from app.ai.model.chat import ChatError, ChatOutcome, complete_chat_tools
 from app.ai.runs.progress import Progress, TOOL_LABELS, report_progress
+from app.ai.runs.events import TraceCallback
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +72,7 @@ async def run_tool_loop(
     caller: Callable[..., Awaitable[ChatOutcome]] | None = None,
     stop_when: Callable[[], bool] | None = None,
     on_progress: Progress | None = None,
+    on_trace: TraceCallback | None = None,
 ) -> AgentOutcome:
     """跑工具循环。caller 参数仅供测试注入假模型，生产走 complete_chat_tools。"""
     call = caller or _default_caller
@@ -78,6 +81,13 @@ async def run_tool_loop(
     for index in range(max_steps):
         final = index == max_steps - 1
         await report_progress(on_progress, "model", "正在等待模型理解需求" if index == 0 else "正在等待模型整理查询结果")
+        if on_trace:
+            await on_trace("model.request", {
+                "step": index + 1,
+                "final": final,
+                "messages": deepcopy(convo),
+                "tools_enabled": not final,
+            })
         outcome = await call(
             base_url=base_url,
             api_key=api_key,
@@ -87,6 +97,12 @@ async def run_tool_loop(
             tools=None if final else tools,
             temperature=temperature,
         )
+        if on_trace:
+            await on_trace("model.response", {
+                "step": index + 1,
+                "content": outcome.text or "",
+                "tool_calls": [{"id": tc.id, "name": tc.name, "arguments": tc.arguments} for tc in outcome.tool_calls],
+            })
         if final and outcome.tool_calls:
             # 个别服务商在撤掉工具表的收口轮仍幻觉出 tool_calls：丢弃调用只收文本，
             # 避免把最后一轮浪费在执行不存在的工具上。
@@ -102,12 +118,16 @@ async def run_tool_loop(
         convo.append(_assistant_msg(outcome))
         for tc in outcome.tool_calls:
             await report_progress(on_progress, "tool", TOOL_LABELS.get(tc.name, "正在处理模型请求的查询"))
+            if on_trace:
+                await on_trace("tool.call", {"step": index + 1, "id": tc.id, "name": tc.name, "arguments": tc.arguments})
             try:
                 result = await executor(tc.name, tc.arguments)
             except Exception:
                 logger.exception("assistant.loop executor fail tool=%s", tc.name)
                 result = f"工具 {tc.name} 执行失败。"
             result = (result or "").strip() or "工具没有返回内容。"
+            if on_trace:
+                await on_trace("tool.result", {"step": index + 1, "id": tc.id, "name": tc.name, "content": result[:_TOOL_TEXT_CAP]})
             await report_progress(on_progress, "observed", "已收到工具返回，正在核对结果")
             steps.append(AgentStep(tool=tc.name, detail=_brief(result)))
             convo.append(
