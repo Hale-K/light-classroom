@@ -1,5 +1,6 @@
 """教务只读工具：schema 完整性、说明书取回、派发兜底。数据库查询部分不在单测覆盖。"""
 import asyncio
+from unittest.mock import AsyncMock
 
 from app.ai.tools.school import SCHOOL_TOOLS, _when, execute_school_tool, lookup_playbook
 
@@ -43,3 +44,16 @@ def test_execute_dispatches_and_never_raises():
 
     bad = asyncio.run(execute_school_tool("lookup_playbook", "{{{", session=None, tenant_id=1))
     assert "编号没有对上" in bad
+
+
+def test_read_only_tool_retries_transient_failure(monkeypatch):
+    from app.ai.tools import school
+
+    call = AsyncMock(side_effect=[TimeoutError(), "查询成功"])
+    monkeypatch.setattr(school, "lookup_generation_status", call)
+    monkeypatch.setattr(school.asyncio, "sleep", AsyncMock())
+
+    text = asyncio.run(execute_school_tool("lookup_generation_status", '{"job_id":"a"}', session=None, tenant_id=1))
+
+    assert text == "查询成功"
+    assert call.await_count == 2

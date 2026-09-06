@@ -7,6 +7,14 @@ from sqlalchemy.orm import Session
 
 from app.ai.runs.models import AiRun
 from app.ai.runs import create_run, get_run
+from app.ai.runs.events import run_event
+
+
+def test_run_event_has_stable_type_and_source():
+    event = run_event("recovering", "正在切换备用模型")
+    assert event["type"] == "assistant.recovering"
+    assert event["source"] == "model"
+    assert event["message"] == "正在切换备用模型"
 
 
 def _sqlite_session():

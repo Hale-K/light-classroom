@@ -10,6 +10,7 @@ from sqlalchemy.exc import IntegrityError
 
 from app.ai.actions import fingerprint
 from app.ai.runs.models import AiRun
+from app.ai.runs.events import run_event
 from app.ai.runs.progress import drive_turn
 from app.db.session import AsyncSessionLocal
 
@@ -112,7 +113,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
 
     async def progress(phase, message):
         now = datetime.utcnow()
-        events.append({"phase": phase, "message": message, "at": now.isoformat() + "Z"})
+        events.append(run_event(phase, message, at=now))
         if not await persist(phase=phase, message=message[:300], phase_started_at=now, events=events[-30:]):
             raise asyncio.CancelledError()
 

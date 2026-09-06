@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import asyncio
 
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -302,22 +303,19 @@ async def execute_school_tool(
     tenant_id: int,
     page_context: dict | None = None,
 ) -> str:
-    """执行一个教务只读工具，返回给模型看的文本。任何异常都转成文本，不打断循环。"""
-    try:
+    """执行一个教务只读工具，返回给模型看的文本。
+
+    这里的工具全部只读，因此仅对连接和超时做一次短退避重试；参数和业务错误
+    不重试，直接交给模型澄清。规则草稿与确认写入不经过本函数。
+    """
+    async def dispatch() -> str:
         context = page_context or {}
         args = _args(arguments)
         scope = {"academic_year": args.get("academic_year") or context.get("academic_year"), "term": args.get("term") or context.get("term")}
         if name == "lookup_generation_status":
             return await lookup_generation_status(str(args.get("job_id") or context.get("job_id") or ""), tenant_id)
         if name == "lookup_teachers":
-            args = _args(arguments)
-            return await lookup_teachers(
-                session,
-                tenant_id,
-                subject=str(args.get("subject") or ""),
-                keyword=str(args.get("keyword") or ""),
-                **scope,
-            )
+            return await lookup_teachers(session, tenant_id, subject=str(args.get("subject") or ""), keyword=str(args.get("keyword") or ""), **scope)
         if name == "lookup_schedule_setup":
             return await lookup_schedule_setup(session, tenant_id, class_id=args.get("class_id"), **scope)
         if name == "lookup_rules":
@@ -326,6 +324,17 @@ async def execute_school_tool(
             return lookup_playbook(arguments)
         names = ", ".join(t["function"]["name"] for t in SCHOOL_TOOLS)
         return f"没有名为「{name}」的工具。可用工具：{names}"
+
+    try:
+        return await dispatch()
+    except (TimeoutError, ConnectionError) as exc:
+        logger.warning("assistant.tool transient_retry name=%s error=%s", name, type(exc).__name__)
+        try:
+            await asyncio.sleep(0.2)
+            return await dispatch()
+        except Exception:
+            logger.exception("assistant.tool retry_fail name=%s", name)
+            return f"工具 {name} 暂时无法连接。请稍后重试，或让老师自己到对应页面核对。"
     except Exception:
         logger.exception("assistant.tool fail name=%s args=%s", name, (arguments or "")[:120])
         return f"工具 {name} 查询失败。请换个问法，或让老师自己到对应页面核对。"
