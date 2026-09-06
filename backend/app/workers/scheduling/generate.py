@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import asyncio
 import threading
-import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -21,16 +20,16 @@ class WorkerTimeout(Exception):
         self.message = f"{label}超时已中止，请收紧规则后重试"
 
 
-def _heartbeat_sync_loop(job_id: str) -> None:
+def _heartbeat_sync_loop(job_id: str, stop: threading.Event) -> None:
     """专用线程执行心跳：CPU 打满时也不会被饿死（asyncio 协程会被求解线程挤掉）。"""
     from app.services.scheduling.generate_jobs import touch_heartbeat
 
-    while True:
+    while not stop.is_set():
         try:
             touch_heartbeat(job_id)
         except Exception:
             pass
-        time.sleep(5)
+        stop.wait(5)
 
 
 async def run_in_thread(fn, /, *args, timeout: float, label: str, **kwargs):
@@ -74,8 +73,9 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
     async def on_progress(stage: str, message: str, **extra: Any) -> None:
         current.emit("progress", stage=stage, message=message, **extra)
 
+    heartbeat_stop = threading.Event()
     beat = threading.Thread(
-        target=_heartbeat_sync_loop, args=(job_id,), daemon=True)
+        target=_heartbeat_sync_loop, args=(job_id, heartbeat_stop), daemon=True)
     beat.start()
     token = tenant_id_ctx.set(tenant_id)
     try:
@@ -105,7 +105,8 @@ async def run_generate_payload(job_id: str, tenant_id: int, payload: dict[str, A
                 await session.rollback()
                 current.emit("error", stage="error", message=str(exc) or "生成失败")
     finally:
-        beat.cancel()
+        heartbeat_stop.set()
+        beat.join(timeout=1)
         tenant_id_ctx.reset(token)
         release_generate_slot(tenant_id)
 
@@ -128,8 +129,9 @@ async def _run_spawned_job(
     async def on_progress(stage: str, message: str, **extra: Any) -> None:
         current.emit("progress", stage=stage, message=message, **extra)
 
+    heartbeat_stop = threading.Event()
     beat = threading.Thread(
-        target=_heartbeat_sync_loop, args=(job_id,), daemon=True)
+        target=_heartbeat_sync_loop, args=(job_id, heartbeat_stop), daemon=True)
     beat.start()
     token = tenant_id_ctx.set(tenant_id)
     try:
@@ -154,7 +156,8 @@ async def _run_spawned_job(
                 await session.rollback()
                 current.emit("error", stage="error", message=str(exc) or "生成失败")
     finally:
-        beat.cancel()
+        heartbeat_stop.set()
+        beat.join(timeout=1)
         tenant_id_ctx.reset(token)
         release_generate_slot(tenant_id)
 
