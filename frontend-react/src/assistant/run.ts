@@ -8,7 +8,8 @@ import { pageGuidanceText } from '@/assistant/page-guidance'
 
 export type AssistantTool = 'openScheduling' | 'checkTeachers' | 'checkSettings' | 'guideGrade' | 'howToUse' | 'howToUseScheduling' | 'countSubjectTeachers' | 'proposeHours' | 'go' | 'explainRulePack' | 'executeHours' | 'nextStep' | 'pageGuide'
 
-export type JumpLink = { label: string; path: string }
+/** 后端只提出建议；页面必须取得老师确认后才可导航。 */
+export type JumpLink = { label: string; path: string; requires_confirmation?: boolean }
 
 export type ToolExtra = {
   grade?: string

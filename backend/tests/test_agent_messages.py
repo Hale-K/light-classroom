@@ -45,7 +45,7 @@ def test_agent_messages_declare_tools_and_catalog():
 def test_rule_jumps_only_when_off_rules_page():
     answer = "在排课页「规则组」里配置，添加组件「课位教师角色」。"
     assert rule_jumps("怎么设置周六晚课必须班主任", answer, "/settings") == [
-        {"label": "去规则组", "path": "/scheduling?tab=rules"}
+        {"label": "去规则组", "path": "/scheduling?tab=rules", "requires_confirmation": True}
     ]
     assert rule_jumps("怎么设置周六晚课必须班主任", answer, "/scheduling?tab=rules") == []
     assert rule_jumps("数学老师有谁", "任教「数学」的在职教师共 3 人。", "/settings") == []

@@ -1134,7 +1134,7 @@ export type AssistantRun = {
   phase_elapsed_seconds: number
   heartbeat_at: string
   events: { phase: string; message: string; at: string }[]
-  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string }[] } | null
+  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[] } | null
 }
 
 export type AssistantConversation = {

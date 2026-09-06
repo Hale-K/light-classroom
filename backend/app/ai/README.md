@@ -4,7 +4,7 @@
 
 | Spring AI Alibaba | 本仓库 | 做什么 |
 |-------------------|--------|--------|
-| ChatModel / ChatClient | `model/` | OpenAI 兼容对话（含 tools 参数）、服务商探测 |
+| ChatModel / ChatClient | `model/` | OpenAI 兼容对话（含 tools 参数）、服务商探测；`routing.py` 统一服务商选择、熔断隔离、故障转移和总预算 |
 | PromptTemplate | `prompt/` | 拼本轮 system |
 | Advisor | `advisor/` | 澄清守卫（**无向量 RAG**） |
 | Agent Framework | `agent/` | 教务一轮：首轮本地回复 → 带完整上下文的工具循环 |
@@ -13,6 +13,8 @@
 | Tool / FunctionCallback | `tools/` | `retrieve_skill`（降级路径）；`school.py` 教务只读查询 |
 | 确认执行 | `actions/` | `proposal.py` 草稿生成与校验、`confirm.py` 确认后原子追加与审计、`models.py` 草稿表 |
 | 运行任务 | `runs/` | `service.py` 提交/取消/恢复、`progress.py` 阶段与心跳、`models.py` 运行表 |
+| 会话记忆 | `conversations/` | 按学校和用户持久化最近消息，超过窗口时压缩为摘要；摘要只用于理解指代，不覆盖实时查询结果 |
+| 页面引导 | `guide.py` | 基于当前页面提供无副作用指引与跳转建议；跳转必须由前端取得老师确认后执行 |
 | MCP Client / Registry | `mcp/` | **不接协议**；远程 Tool = 本校 REST |
 | 表模型 | 分域存放 | `AiProvider` 在 `model/store.py`，`AiAction` 在 `actions/models.py`，`AiRun` 在 `runs/models.py` |
 

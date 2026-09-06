@@ -7,12 +7,13 @@ from dataclasses import dataclass, field
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.advisor.clarify import clarify
 from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
+from app.ai.guide import degraded_reply as _local_degraded_reply
+from app.ai.guide import local_reply, rule_jumps
 from app.ai.graph.loop import run_tool_loop
 from app.ai.model.chat import ChatEndpoint, ChatError, complete_chat, resolve_chat_endpoints
 from app.ai.model.routing import ModelProviderRouter
-from app.ai.prompt.messages import GREET_REPLY, build_agent_messages, build_messages
+from app.ai.prompt.messages import build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
 from app.ai.tools.retrieve import retrieve_skill
 from app.ai.tools.school import SCHOOL_TOOLS, execute_school_tool
@@ -21,7 +22,6 @@ from app.utils.answer_cache import answer_cache_key, get_cached_answer, put_cach
 
 logger = logging.getLogger(__name__)
 
-_GREET = {"你好", "您好", "hi", "hello", "在吗", "在么", "嗨"}
 # 工具循环已消耗超过该秒数才失败时，不再走降级路径（降级还要两轮模型调用，必然撞总闸）。
 _FALLBACK_MAX_SPENT = 20
 # 降级两轮调用的单轮上限：RUN_TIMEOUT(180) − 前序最多 _FALLBACK_MAX_SPENT(20) 对半再留余量，
@@ -42,60 +42,12 @@ class TeacherTurn:
     jumps: list[dict] = field(default_factory=list)
 
 
-_RULE_JUMP_PATH = "/scheduling?tab=rules"
-
-
-def rule_jumps(query: str, text: str, page_path: str | None) -> list[dict]:
-    """回答在讲规则配置、而当前页不在规则组时，给一个跳转按钮。"""
-    if page_path and "tab=rules" in page_path:
-        return []
-    joined = f"{query or ''}\n{text or ''}"
-    if "规则" not in joined:
-        return []
-    if not any(word in text for word in ("规则组", "组件", "禁排", "连堂", "课位", "班主任")):
-        return []
-    return [{"label": "去规则组", "path": _RULE_JUMP_PATH}]
-
-
-def local_reply(text: str, page_path: str | None = None) -> str | None:
-    q = (text or "").strip().rstrip("！!。.~～")
-    if q.lower() in _GREET:
-        return GREET_REPLY
-    if page_path and any(word in q for word in ("下一步", "接下来", "该干什么", "该做什么", "先做什么")):
-        return None
-    hit = clarify(text or "")
-    if hit:
-        return hit.text
-    return None
-
-
 def _trim_turns(turns: list[dict], keep: int = 6) -> list[dict]:
     """超长重试用的历史裁剪：保留最近若干条，并从 user 消息起头，方便模型衔接。"""
     tail = list(turns[-keep:])
     while len(tail) > 1 and tail[0].get("role") != "user":
         tail.pop(0)
     return tail
-
-
-def _local_degraded_reply(query: str, page_path: str | None) -> str:
-    """所有模型通道都不可用时的本地兜底文案：按页面给一段教务指引，明确本轮无写入。"""
-    joined = f"{query} {page_path or ''}"
-    if "排课" in joined or "/scheduling" in joined:
-        guidance = "请依次核对学年学期、课位结构、班级课时、任教关系和排课规则；数据齐全后再生成课表。"
-    elif "学生" in joined or "/students" in joined:
-        guidance = "请先维护学生档案，再完成行政班分配；批量处理前可先下载模板核对字段。"
-    elif "教师" in joined or "/teachers" in joined:
-        guidance = "请先核对教师账号和教师档案，再到任教关系中确认教师、班级与科目的对应。"
-    elif "空间" in joined or "校区" in joined or "/facilities" in joined:
-        guidance = "请先建立校区、楼宇、楼层和场室，再配置资源分配规则与班级划分。"
-    elif "设置" in joined or "/settings" in joined:
-        guidance = "请先核对当前学年、学期、层次和年级，再继续配置人员、空间与班级。"
-    else:
-        guidance = "你可以继续维护学生、教师、空间资源和排课基础数据；涉及保存或执行的操作请等待模型服务恢复。"
-    return (
-        "模型服务暂时不可用，助手已进入本地说明模式。"
-        f"{guidance}\n\n本轮未执行任何写入，已保留当前页面和对话，你可以稍后直接重试。"
-    )
 
 
 async def agent_reply(
