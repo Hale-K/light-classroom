@@ -266,6 +266,8 @@ export const organizationApi = {
   }) => unwrap<StaffAppointment>(http.post('/organization/appointments', data)),
   deleteAppointment: (id: number) =>
     unwrap<{ id: number }>(http.delete(`/organization/appointments/${id}`)),
+  deleteUnit: (id: number) =>
+    unwrap<{ id: number }>(http.delete(`/organization/units/${id}`)),
   archiveUnitAppointments: (unitId: number) =>
     unwrap<{ unit_id: number; archived_count: number }>(http.post(`/organization/appointments/archive-by-unit/${unitId}`)),
 }

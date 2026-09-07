@@ -85,7 +85,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
   }
   useEffect(() => { void load() }, [])
 
-  // 年级管理中心:优先取用户显式标记(TenantConfig),未标记时按名称兜底
+  // 年级管理中心:只认显式标记(TenantConfig),不再硬编码名字兜底
   const [gradeCenterMarker, setGradeCenterMarker] = useState<{ unit_id: number | null; unit_name: string | null }>({ unit_id: null, unit_name: null })
   useEffect(() => {
     organizationApi.gradeCenter().then(setGradeCenterMarker).catch(() => {})
@@ -93,7 +93,6 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
 
   const units = useMemo(() => flattenOrganizationUnits(data?.units ?? []), [data])
   const gradeCenterId = gradeCenterMarker.unit_id
-    ?? units.find((unit) => unit.name === '年级管理中心')?.id
   const yearOptions = useMemo(
     () => academicYearOptions(units.map((unit) => unit.academic_year)),
     [units],
@@ -161,6 +160,32 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
       } })
   }
 
+
+  const remove = () => {
+    if (!selected) return
+    modal.confirm({
+      title: `删除“${selected.name}”`,
+      content: '删除操作不可恢复，确认无业务依赖后执行。',
+      okText: '确认删除', okButtonProps: { danger: true }, cancelText: '取消',
+      onOk: async () => {
+        try {
+          await organizationApi.deleteUnit(selected.id)
+          setSelectedId(undefined); await load(); message.success('组织节点已删除')
+        } catch (error) {
+          const detail = error instanceof Error ? (error as any).response?.data?.detail : null
+          if (typeof detail === 'object' && detail?.message) {
+            const parts = [detail.message]
+            if (detail.children) parts.push(`${detail.children} 个子节点`)
+            if (detail.active_appointments) parts.push(`${detail.active_appointments} 人任职`)
+            message.error(parts.join('，'))
+          } else {
+            message.error(error instanceof Error ? error.message : '删除失败')
+          }
+        }
+      },
+    })
+  }
+
   const createButton = <Button type="primary" onClick={startCreate}>新建组织</Button>
   return <div className={embedded ? 'personnel-pane' : 'zh-page'}>
     {embedded ? <div className="facility-subhead"><div><h3>组织机构</h3><p>维护部门、年级部、学科组及行政班的上下级关系。</p></div>{createButton}</div> : <><PageHeader title="组织机构" extra={createButton} /><p className="zh-page-desc">维护学校长期部门与当前学年的年级组织。年级部可绑定届和学年，历史节点采用归档而不是删除。</p></>}
@@ -186,7 +211,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
       <section className="zh-organization-detail" aria-label="组织详情">
         {selected ? <>
           <div className="zh-organization-detail-head"><div><span>{TYPE_LABEL[selected.unit_type]}</span><h2>{selected.name}</h2></div>
-            <div><Button onClick={startCreate}>创建下级</Button><Button onClick={startEdit}>修改</Button><Button danger onClick={archive}>归档</Button></div></div>
+            <div><Button onClick={startCreate}>创建下级</Button><Button onClick={startEdit}>修改</Button><Button danger onClick={archive}>归档</Button><Button danger onClick={remove}>删除</Button></div></div>
           <dl className="zh-organization-facts">
             <div><dt>当前成员</dt><dd>{selected.member_count} 人</dd></div>
             {selected.unit_type === 'subject_group' && <div><dt>关联科目</dt><dd>{subjects.find((subject) => subject.id === selected.subject_id)?.name || '未关联'}</dd></div>}

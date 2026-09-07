@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { App, Button, Checkbox, Form, Input, InputNumber, Modal, Select, Space, Tag } from 'antd'
 import { authApi, facilityApi, organizationApi } from '@/api'
 import type { Building, Campus, OrganizationUnit, ResourceAllocationRule, RoomAllocationPreview, RoomResource } from '@/types'
@@ -45,6 +46,7 @@ export default function AllocationRuleDrawer({
   onChanged: () => Promise<void>
 }) {
   const { message } = App.useApp()
+  const navigate = useNavigate()
   const [form] = Form.useForm<RuleForm>()
   const [gradeUnitOptions, setGradeUnitOptions] = useState<Array<{ value: number; label: string }>>([])
   const [gradeUnits, setGradeUnits] = useState<OrganizationUnit[]>([])
@@ -63,7 +65,7 @@ export default function AllocationRuleDrawer({
   useEffect(() => {
     if (!open || viewRule) return
     void Promise.all([authApi.academicYears(), organizationApi.tree()]).then(([settings, tree]) => {
-      const units = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'grade_group' && item.status === 'active' && item.cohort_label)
+      const units = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'n' && item.status === 'active' && item.cohort_label)
       setGradeUnits(units)
       setGradeUnitOptions(units
         .sort((left, right) => (right.cohort_label || '').localeCompare(left.cohort_label || '') || left.name.localeCompare(right.name, 'zh-CN'))
@@ -188,7 +190,39 @@ export default function AllocationRuleDrawer({
           { whitespace: true, message: '规则名称不能只包含空格' },
           { max: 100, message: '规则名称不能超过100个字符' },
         ]}><Input placeholder="例如：2029届低楼层普通教室" maxLength={100} /></Form.Item>
-        <Form.Item name="target_grade_unit_id" label="目标年级部" rules={[{ required: true, message: '请选择目标年级部' }]}><Select showSearch optionFilterProp="label" options={gradeUnitOptions} placeholder="选择年级管理中心下的年级部" /></Form.Item>
+        <Form.Item
+          name="target_grade_unit_id"
+          label="目标年级部"
+          rules={[{ required: true, message: '请选择目标年级部' }]}
+          extra={gradeUnitOptions.length === 0 && (
+            <span>
+              尚未配置年级部，
+              <Button
+                type="link"
+                size="small"
+                style={{ padding: 0 }}
+                onClick={() => { onClose(); navigate('/organization') }}
+              >去设置</Button>
+            </span>
+          )}
+        >
+          <Select
+            showSearch
+            optionFilterProp="label"
+            options={gradeUnitOptions}
+            placeholder={gradeUnitOptions.length === 0 ? '暂无年级部，点击下方"去设置"' : '选择年级管理中心下的年级部'}
+            notFoundContent={
+              <div style={{ padding: 8, textAlign: 'center' }}>
+                暂无年级部
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => { onClose(); navigate('/organization') }}
+                >去设置</Button>
+              </div>
+            }
+          />
+        </Form.Item>
       </div>
       <div className="facility-form-grid">
         <Form.Item name="academic_year" label="适用学年" rules={[{ required: true, message: '请选择适用学年' }]}><Select options={academicYearOptions} placeholder="选择学年" /></Form.Item>

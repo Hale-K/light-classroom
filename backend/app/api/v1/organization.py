@@ -259,13 +259,9 @@ async def delete_unit(
     tenant_id: int = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
 ):
-    """删除未被引用的组织节点；有学生年级快照时必须保留。"""
+    """删除组织节点：无子节点且无老师任职即可删除。"""
     _require_principal(user)
     unit = await _tenant_unit(session, tenant_id, unit_id)
-    linked_students = (await session.execute(select(func.count(StudentGradeMembership.id)).where(
-        StudentGradeMembership.tenant_id == tenant_id,
-        StudentGradeMembership.grade_unit_id == unit_id,
-    ))).scalar_one()
     child_count = (await session.execute(select(func.count(OrganizationUnit.id)).where(
         OrganizationUnit.tenant_id == tenant_id,
         OrganizationUnit.parent_id == unit_id,
@@ -276,10 +272,9 @@ async def delete_unit(
         StaffAppointment.organization_unit_id == unit_id,
         StaffAppointment.status == "active",
     ))).scalar_one()
-    if linked_students or child_count or appointment_count:
+    if child_count or appointment_count:
         raise HTTPException(status_code=409, detail={
-            "message": "组织节点存在关联数据，不能删除",
-            "student_memberships": linked_students,
+            "message": "组织节点存在子节点或老师任职，不能删除",
             "children": child_count,
             "active_appointments": appointment_count,
         })
