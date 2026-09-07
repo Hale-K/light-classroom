@@ -215,7 +215,7 @@ async def reset_password(school_id: int, body: ResetPasswordIn,
         select(User).where(User.tenant_id == school_id, User.role == BaseUserRole.director)
         .limit(1))).scalar_one_or_none()
     if principal is None:
-        raise HTTPException(status_code=404, detail="该校暂无校长账号")
+        raise HTTPException(status_code=409, detail="该校暂未创建校长账号")
     principal.password_hash = get_password_hash(body.password)
     await session.flush()
     return {"code": 0, "message": "ok", "data": {"school_id": school_id, "phone": principal.phone}}
@@ -229,7 +229,7 @@ async def toggle_admin_status(school_id: int,
         select(User).where(User.tenant_id == school_id, User.role == BaseUserRole.director)
         .limit(1))).scalar_one_or_none()
     if principal is None:
-        raise HTTPException(status_code=404, detail="该校暂无校长账号")
+        raise HTTPException(status_code=409, detail="该校暂未创建校长账号，无法冻结/解冻")
     principal.frozen = not principal.frozen
     principal.freeze_reason = "平台管理员操作" if principal.frozen else None
     await session.flush()

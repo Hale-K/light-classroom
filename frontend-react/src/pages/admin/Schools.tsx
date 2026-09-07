@@ -272,29 +272,34 @@ export default function AdminSchools() {
       key: 'actions',
       width: 200,
       fixed: 'right',
-      render: (_, row) => (
-        <>
-          <Tooltip title={row.frozen ? '点击解冻' : '点击冻结管理员账号'}>
-            <Switch
-              checked={!!row.frozen}
-              onChange={(checked) => void onToggleFrozen(row, checked)}
-              checkedChildren="冻结"
-              unCheckedChildren="正常"
-            />
-          </Tooltip>
-          <Button type="link" size="small" style={{ paddingInline: 6 }} onClick={() => openEdit(row)}>
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            style={{ paddingInline: 6, color: 'var(--yellow-ink)' }}
-            onClick={() => openReset(row)}
-          >
-            重置密码
-          </Button>
-        </>
-      ),
+      render: (_, row) => {
+        const hasPrincipal = !!row.admin_phone
+        return (
+          <>
+            <Tooltip title={hasPrincipal ? (row.frozen ? '点击解冻' : '点击冻结管理员账号') : '该校暂未创建校长账号'}>
+              <Switch
+                checked={!!row.frozen}
+                onChange={(checked) => void onToggleFrozen(row, checked)}
+                checkedChildren="冻结"
+                unCheckedChildren="正常"
+                disabled={!hasPrincipal}
+              />
+            </Tooltip>
+            <Button type="link" size="small" style={{ paddingInline: 6 }} onClick={() => openEdit(row)}>
+              编辑
+            </Button>
+            <Button
+              type="link"
+              size="small"
+              style={{ paddingInline: 6, color: hasPrincipal ? 'var(--yellow-ink)' : 'var(--text-3)' }}
+              disabled={!hasPrincipal}
+              onClick={() => openReset(row)}
+            >
+              重置密码
+            </Button>
+          </>
+        )
+      },
     },
   ]
 
