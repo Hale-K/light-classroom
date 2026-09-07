@@ -8,7 +8,9 @@
 from datetime import datetime
 from typing import Any, Generic, TypeVar, Type
 from sqlmodel import SQLModel, Field, select, func
+from sqlalchemy import event, inspect as sa_inspect
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Session
 
 T = TypeVar("T", bound=SQLModel)
 
@@ -198,3 +200,17 @@ class BaseRepo(Generic[T]):
             await self.session.delete(obj)
             await self.session.flush()
         return True
+
+
+# ---------- 全局 updated_at 自动刷新 ----------
+# SQLAlchemy 的 onupdate 是列级触发，只在该列自身被赋值时才生效，
+# 不会因为同一行其他字段被改而自动刷新。因此用 before_flush 事件
+# 全局兜底：所有 TimestampMixin 子类的 dirty 实例在 flush 前自动更新 updated_at。
+# 若业务代码显式设置了 updated_at（如补录历史数据），则保留业务值不覆盖。
+@event.listens_for(Session, "before_flush")
+def _auto_refresh_updated_at(session, context, instances):
+    for obj in session.dirty:
+        if isinstance(obj, TimestampMixin):
+            hist = sa_inspect(obj).attrs.updated_at.history
+            if not hist.has_changes():
+                obj.updated_at = datetime.utcnow()
