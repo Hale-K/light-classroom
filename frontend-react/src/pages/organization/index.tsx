@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Key } from 'react'
-import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tree } from 'antd'
+import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tooltip, Tree } from 'antd'
+import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import { organizationApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
@@ -270,7 +271,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
           {({ getFieldValue }) => {
             const isGrade = !!getFieldValue('is_grade')
             return <>
-              <Form.Item name="unit_type" label="组织类型" rules={[{ required: true }]}><Select disabled={!!editing || isGrade}
+              <Form.Item name="unit_type" label="组织类型" tooltip={{ title: <div><div><b>职能部门</b>：教务处、德育处等长期机构，无学年届别</div><div><b>年级部</b>：按届/学年划分的年级管理单元（如 2026 届年级部）</div><div><b>学科组</b>：某一科目的教研组，需关联科目</div><div><b>行政班</b>：学生行政班级</div></div>, icon: <QuestionCircleOutlined /> }} rules={[{ required: true }]}><Select disabled={!!editing || isGrade}
                 options={Object.entries(TYPE_LABEL).map(([value, label]) => ({ value, label }))} /></Form.Item>
               <Form.Item name="parent_id" label="上级组织"><Select allowClear disabled={isGrade} placeholder={isGrade ? '年级管理中心(自动)' : '学校直属'}
                 options={units.filter((unit) => unit.id !== editing?.id).map((unit) => ({ value: unit.id, label: unit.name }))} /></Form.Item>

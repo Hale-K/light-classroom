@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Key } from 'react'
-import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
+import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, Tooltip, TreeSelect } from 'antd'
+import { QuestionCircleOutlined, ReadOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
 import type { TableProps } from 'antd'
 import { orgApi, organizationApi, schedulingApi, staffApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
@@ -31,6 +33,7 @@ const POSITION_LABEL: Record<StaffAppointment['position_code'], string> = {
 
 export default function PersonnelView() {
   const { message, modal } = App.useApp()
+  const navigate = useNavigate()
   const [org, setOrg] = useState<OrganizationTreeResult>()
   const [accounts, setAccounts] = useState<StaffAccount[]>([])
   const [appointments, setAppointments] = useState<StaffAppointment[]>([])
@@ -278,7 +281,7 @@ export default function PersonnelView() {
 
   return <div className="zh-page">
     <PageHeader
-      title="人员账号"
+      title={<span>人员账号 <ReadOutlined style={{ color: '#8c8c8c', cursor: 'pointer', marginLeft: 6 }} onClick={() => navigate('/tutorial')} /></span>}
       extra={(
         <Space>
           <Button onClick={() => openUnit(false)}>新建组织</Button>
@@ -286,7 +289,6 @@ export default function PersonnelView() {
         </Space>
       )}
     />
-    <p className="zh-page-desc">组织树是人员目录的浏览入口；选择组织即可查看成员，未归属人员集中显示在“未分配组织”。</p>
     <div className="personnel-workspace">
       <PersonnelTree
         data={org}
@@ -374,7 +376,7 @@ export default function PersonnelView() {
     <Modal title={editingUnit ? '编辑组织' : '新建组织'} open={unitOpen} onCancel={() => setUnitOpen(false)} onOk={() => void saveUnit()} confirmLoading={saving} okText="保存" forceRender>
       <Form form={unitForm} layout="vertical">
         <Form.Item name="name" label="组织名称" rules={[{ required: true }]}><Input /></Form.Item>
-        <Form.Item name="unit_type" label="组织类型" rules={[{ required: true }]}><Select disabled={!!editingUnit} options={TYPE_OPTIONS} /></Form.Item>
+        <Form.Item name="unit_type" label="组织类型" tooltip={{ title: <div><div><b>职能部门</b>：教务处、德育处等长期机构，无学年届别</div><div><b>年级部</b>：按届/学年划分的年级管理单元（如 2026 届年级部）</div><div><b>学科组</b>：某一科目的教研组，需关联科目</div><div><b>行政班</b>：学生行政班级</div></div>, icon: <QuestionCircleOutlined /> }} rules={[{ required: true }]}><Select disabled={!!editingUnit} options={TYPE_OPTIONS} /></Form.Item>
         <Form.Item noStyle shouldUpdate={(prev, next) => prev.unit_type !== next.unit_type}>
           {({ getFieldValue }) => getFieldValue('unit_type') === 'subject_group' ? (
             <Form.Item name="subject_id" label="关联科目" rules={[{ required: true, message: '请选择学科组关联的科目' }]}>
