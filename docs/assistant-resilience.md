@@ -9,7 +9,9 @@ flowchart LR
     U[教务老师 / AssistantDock]
     API[FastAPI Assistant API]
     RUN[AIRun 后台任务\n状态、事件、心跳]
-    AGENT[Teacher Agent\n上下文、工具循环、草稿]
+    AGENT[Assistant Agent\n上下文、工具循环]
+    MGW[Model Gateway\n解析、调用、路由、故障转移]
+    TGW[Tool Gateway\n白名单、权限、作用域、审计]
     DETECT[识别故障\n错误分类 / 预算 / 心跳]
     RECOVER[尝试恢复\n连接与 5xx 重试一次\n上下文裁剪重试]
     ISOLATE[隔离故障\nProvider Circuit Breaker]
@@ -22,13 +24,14 @@ flowchart LR
 
     U -->|POST /assistant/runs| API --> RUN --> AGENT
     RUN -->|每 5 秒轮询任务状态| U
-    AGENT --> DETECT
+    AGENT --> MGW --> DETECT
     DETECT -->|可恢复| RECOVER --> AGENT
     DETECT -->|连续失败 / 配置故障| ISOLATE
     ISOLATE -->|备用可用| BACKUP --> AGENT
     ISOLATE -->|全部不可用| DEGRADED --> RUN
-    AGENT -->|工具查询| TOOL --> AGENT
-    AGENT -->|只生成，不写入| PROPOSAL --> DB
+    AGENT --> TGW
+    TGW -->|工具查询| TOOL --> AGENT
+    TGW -->|只生成，不写入| PROPOSAL --> DB
     U -->|明确确认| CONFIRM --> DB
 ```
 
@@ -37,7 +40,8 @@ flowchart LR
 ```text
 老师提问
   -> 创建 AiRun，页面持续读取状态、阶段和心跳
-  -> Teacher Agent 读取模型服务商列表
+  -> Assistant Agent 通过 Model Gateway 读取并调用模型
+  -> Tool Gateway 按本轮租户、用户和权限开放教务工具
   -> 主模型 + 教务工具循环
        ├─ 成功：回答 / 生成待确认草稿
        ├─ 可恢复错误：重试或压缩上下文后重试
@@ -51,9 +55,9 @@ flowchart LR
 
 | 防线 | 当前行为 | 代码位置 | 对老师可见的结果 |
 |---|---|---|---|
-| 识别 Detect | 对 HTTP 状态、网络、限流、鉴权、额度、配置、上下文超长和响应解析分类；运行任务记录阶段与心跳 | `backend/app/ai/model/chat.py`、`backend/app/ai/runs/service.py` | “正在检查模型服务和备用通道”、具体失败提示或任务中断提示 |
+| 识别 Detect | 对 HTTP 状态、网络、限流、鉴权、额度、配置、上下文超长和响应解析分类；运行任务记录阶段与心跳 | `backend/app/ai/gateway/model.py`、`backend/app/ai/model/chat.py`、`backend/app/ai/runs/service.py` | “正在检查模型服务和备用通道”、具体失败提示或任务中断提示 |
 | 恢复 Recover | 连接失败和 500/502/503/504 等待 1 秒后重试一次；上下文超长时保留最近 6 条对话再试；失败时切换下一个服务商 | `backend/app/ai/model/chat.py`、`backend/app/ai/agent/assistant_agent.py` | 显示恢复进度，成功时说明已切换备用模型 |
-| 隔离 Isolate | 鉴权、配置、额度错误立即隔离；网络、不可用、限流、超时连续 2 次隔离 60 秒；成功后清除状态 | `backend/app/ai/resilience.py` | 隔离期跳过问题服务商，避免每轮都重复撞失败通道 |
+| 隔离 Isolate | Model Gateway 对鉴权、配置、额度错误立即隔离；网络、不可用、限流、超时连续 2 次隔离 60 秒；成功后清除状态 | `backend/app/ai/gateway/model.py`、`backend/app/ai/resilience.py` | 隔离期跳过问题服务商，避免每轮都重复撞失败通道 |
 | 降级 Degrade | 工具调用不兼容且快速失败时退为模型只读说明；所有通道不可用时按当前页面提供本地教务指引 | `backend/app/ai/agent/assistant_agent.py` | 明确说明本轮未生成草稿、未执行任何写入，可稍后重试 |
 
 ## 模型调用故障路径
@@ -87,6 +91,7 @@ flowchart TD
 
 ```text
 模型发起查询工具调用
+  -> Tool Gateway 检查本轮工具白名单、学校和用户权限
   -> 服务端执行只读教务查询或读取操作手册
   -> 成功：查询结果回传模型
   -> 失败：返回“工具执行失败”观察结果，由模型说明、澄清或换方案

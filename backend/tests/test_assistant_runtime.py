@@ -1,14 +1,15 @@
 import pytest
 
 from app.ai.guide import AssistantUiGuide
-from app.ai.model.routing import ModelProviderRouter
+from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.runtime import AssistantRuntime, ServiceRegistry
 
 
 def test_service_registry_has_named_runtime_capabilities():
     runtime = AssistantRuntime()
 
-    assert isinstance(runtime.service("model_router"), ModelProviderRouter)
+    assert isinstance(runtime.service("model_gateway"), ModelGateway)
+    assert isinstance(runtime.service("tool_gateway"), ToolGateway)
     assert runtime.service("ui_guide") is AssistantUiGuide
 
 
@@ -17,7 +18,7 @@ async def test_runtime_allows_service_replacement_and_emits_trace():
     events = []
     services = ServiceRegistry()
     replacement = object()
-    services.register("model_router", replacement)
+    services.register("model_gateway", replacement)
 
     async def on_trace(kind, data):
         events.append((kind, data))
@@ -25,7 +26,7 @@ async def test_runtime_allows_service_replacement_and_emits_trace():
     runtime = AssistantRuntime(services=services, on_trace=on_trace)
     await runtime.emit("turn.started", {"agent": "assistant"})
 
-    assert runtime.service("model_router") is replacement
+    assert runtime.service("model_gateway") is replacement
     assert runtime.service("ui_guide") is AssistantUiGuide
     assert events == [("turn.started", {"agent": "assistant"})]
 

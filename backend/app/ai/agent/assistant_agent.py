@@ -5,19 +5,19 @@ import logging
 import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from typing import cast
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
 from app.ai.conversations import project_messages, project_summary
+from app.ai.gateway import ModelGatewayService, ToolGatewayService
 from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import local_reply, rule_jumps
 from app.ai.graph.loop import ReactLoop
-from app.ai.model.chat import ChatEndpoint, ChatError, complete_chat, resolve_chat_endpoints
+from app.ai.model.chat import ChatEndpoint, ChatError
 from app.ai.prompt.messages import build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
 from app.ai.tools.retrieve import retrieve_skill
-from app.ai.tools.school import SCHOOL_TOOLS, execute_school_tool
 from app.ai.runs.progress import Progress, report_progress
 from app.ai.runs.events import TraceCallback
 from app.ai.runtime import AssistantRuntime
@@ -104,28 +104,21 @@ async def agent_reply(
             jumps=cached.get("jumps") or [],
         )
 
-    plan = None
-    async def executor(name: str, arguments: str) -> str:
-        nonlocal plan
-        if name == "propose_rules":
-            if not can_manage_rules or user_id is None:
-                return "当前账号没有排课配置权限，请由教务管理员确认配置。"
-            if plan is not None:
-                return "本轮已经生成草稿，请先让老师核对，下一轮再修改。"
-            try:
-                from app.ai.tools.school import _term
-                year, term = await _term(session, tenant_id) if page_context else (None, None)
-                if page_context and ((page_context.get("academic_year") and page_context["academic_year"] != year) or (page_context.get("term") and page_context["term"] != term)):
-                    return "当前页面与学校当前学期不同。规则草稿暂只支持学校当前学期，请先切换页面或到规则工作台手动配置，不能改到另一个学期。"
-                proposal = RulesProposal.model_validate_json(arguments)
-                action = await propose_rules(session, tenant_id, user_id, proposal)
-                plan = action_view(action)
-                return "草稿已准备，尚未保存规则：\n" + plan["summary"]
-            except ValueError as exc:
-                return "草稿未生成，请澄清：" + str(exc)[:700]
-        return await execute_school_tool(name, arguments, session=session, tenant_id=tenant_id, page_context=page_context)
-
-    agent_tools = [*SCHOOL_TOOLS, *([PROPOSE_RULES_TOOL] if can_manage_rules else [])]
+    runtime = runtime or AssistantRuntime(
+        on_progress=on_progress,
+        on_trace=on_trace,
+        circuits=provider_circuits,
+    )
+    model_gateway = cast(ModelGatewayService, runtime.service("model_gateway"))
+    tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))
+    tool_scope = tool_gateway.open_scope(
+        session=session,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        can_manage_rules=can_manage_rules,
+        page_context=page_context,
+        on_trace=on_trace,
+    )
 
     def agent_messages(history: list[dict], memory: str) -> list[dict]:
         return build_agent_messages(
@@ -147,9 +140,10 @@ async def agent_reply(
             # 总时长由 runs 的 RUN_TIMEOUT 兜底。
             timeout=min(timeout, 90),
             messages=agent_messages(history, memory),
-            tools=agent_tools,
-            executor=executor,
-            stop_when=lambda: plan is not None,
+            tools=tool_scope.definitions,
+            executor=tool_scope.execute,
+            caller=model_gateway.complete_tools,
+            stop_when=lambda: tool_scope.plan is not None,
             on_progress=on_progress,
             on_trace=on_trace,
             on_step=on_step,
@@ -166,6 +160,7 @@ async def agent_reply(
         await report_progress(on_progress, "model", "对话较长，正在压缩上下文重试")
         outcome = await run_loop(trimmed, memory_summary[:1500])
     logger.info("assistant.agent tools=%s", ",".join(s.tool for s in outcome.steps) or "-")
+    plan = tool_scope.plan
     last_user = next((str(t.get("content") or "") for t in reversed(turns) if t.get("role") == "user"), "")
     guide = runtime.service("ui_guide") if runtime else None
     jumps = [] if plan else (guide.rule_jumps(last_user, outcome.text, page_path) if guide else rule_jumps(last_user, outcome.text, page_path))
@@ -228,11 +223,12 @@ async def handle_assistant_turn(
             break
     await report_progress(on_progress, "detecting", "正在检查本校模型服务和备用通道")
     # 未配置服务商保持抛错：配置指引必须到达管理员；本地说明模式只留给"配了但全挂"。
-    endpoints = await resolve_chat_endpoints(session, tenant_id)
+    runtime = runtime or AssistantRuntime(on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits)
+    model_gateway = cast(ModelGatewayService, runtime.service("model_gateway"))
+    endpoints = await model_gateway.resolve(session, tenant_id)
     # 故障转移共享本轮总预算（runs 的 RUN_TIMEOUT）：逐 endpoint 各自计时会让
     # 慢服务商把 180 秒总闸撞爆，整轮报废成 timed_out。
     from app.ai.runs.service import RUN_TIMEOUT
-    runtime = runtime or AssistantRuntime(on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits)
     await runtime.emit("turn.agent_started", {"agent": "assistant"})
 
 
@@ -249,6 +245,7 @@ async def handle_assistant_turn(
             api_key=endpoint.api_key,
             model=endpoint.model,
             timeout=fallback_timeout,
+            complete=model_gateway.complete,
         )
 
         def fallback_messages(history: list[dict]) -> list[dict]:
@@ -264,7 +261,7 @@ async def handle_assistant_turn(
             )
 
         try:
-            text = await complete_chat(
+            text = await model_gateway.complete(
                 base_url=endpoint.base_url,
                 api_key=endpoint.api_key,
                 model=endpoint.model,
@@ -274,7 +271,7 @@ async def handle_assistant_turn(
         except ChatError as exc:
             if exc.error_class != "context_overflow":
                 raise
-            text = await complete_chat(
+            text = await model_gateway.complete(
                 base_url=endpoint.base_url,
                 api_key=endpoint.api_key,
                 model=endpoint.model,
@@ -297,7 +294,7 @@ async def handle_assistant_turn(
             on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace, runtime=runtime, on_step=on_step,
         )
 
-    routed = await runtime.service("model_router").route(
+    routed = await model_gateway.route(
         endpoints,
         total_budget_seconds=RUN_TIMEOUT,
         invoke=invoke,

@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.guide import AssistantUiGuide
-from app.ai.model.routing import ModelProviderRouter
+from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.inbox import InboxKind, InboxMessage, consume, receive
@@ -47,8 +47,10 @@ class AssistantRuntime:
 
     def __post_init__(self) -> None:
         # 调用方可预先注册同名服务，以替换默认实现（例如测试、灰度或备用实现）。
-        if not self.services.has("model_router"):
-            self.services.register("model_router", ModelProviderRouter(self.circuits))
+        if not self.services.has("model_gateway"):
+            self.services.register("model_gateway", ModelGateway(self.circuits))
+        if not self.services.has("tool_gateway"):
+            self.services.register("tool_gateway", ToolGateway())
         if not self.services.has("ui_guide"):
             self.services.register("ui_guide", AssistantUiGuide)
 

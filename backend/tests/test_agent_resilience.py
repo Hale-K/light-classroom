@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.ai.agent import assistant_agent as assistant
+from app.ai.gateway import model as gateway_model
 
 
 @pytest.mark.asyncio
@@ -82,7 +83,7 @@ async def test_failover_stops_starting_endpoints_once_budget_is_exhausted(monkey
         ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5),
         ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5),
     ]
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
     clock = {"t": 0.0}
 
     def fake_monotonic():
@@ -113,7 +114,7 @@ async def test_request_shaped_failure_on_last_provider_raises_precise_error(monk
 
     teacher.provider_circuits.clear()
     endpoint = ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5)
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=[endpoint]))
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[endpoint]))
     monkeypatch.setattr(
         teacher, "agent_reply",
         AsyncMock(side_effect=ChatError("模型多轮调用未能完成回答，请重试或把要求拆成几条。", "exhausted")),
@@ -135,7 +136,7 @@ async def test_missing_provider_config_raises_instead_of_local_mode(monkeypatch)
 
     teacher.provider_circuits.clear()
     monkeypatch.setattr(
-        teacher, "resolve_chat_endpoints",
+        gateway_model, "resolve_chat_endpoints",
         AsyncMock(side_effect=ChatError("请先在「服务商管理」启用一条带对话模型的服务商", "config")),
     )
 
@@ -158,7 +159,7 @@ async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(mo
         ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5),
         ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5),
     ]
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
     agent = AsyncMock(side_effect=[
         ChatError("模型服务暂时不可用", "unavailable"),
         teacher.AssistantTurn(text="备用模型已回答"),
@@ -192,14 +193,14 @@ async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
         ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5),
         ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5),
     ]
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
     agent = AsyncMock(side_effect=[
         ChatError("不支持工具", "bad_request"),
         teacher.AssistantTurn(text="备用模型完成了工具查询"),
     ])
     text_fallback = AsyncMock(return_value="不应调用")
     monkeypatch.setattr(teacher, "agent_reply", agent)
-    monkeypatch.setattr(teacher, "complete_chat", text_fallback)
+    monkeypatch.setattr(gateway_model, "complete_chat", text_fallback)
     monkeypatch.setattr(teacher, "retrieve_skill", AsyncMock(return_value=""))
 
     result = await assistant.handle_assistant_turn(
@@ -220,7 +221,7 @@ async def test_teacher_agent_uses_local_guide_when_all_providers_fail(monkeypatc
 
     teacher.provider_circuits.clear()
     endpoint = ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5)
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=[endpoint]))
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[endpoint]))
     monkeypatch.setattr(
         teacher,
         "agent_reply",
@@ -254,7 +255,7 @@ async def test_isolated_provider_is_skipped_without_calling_it(monkeypatch):
     backup = ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5)
     teacher.provider_circuits.record_failure(primary.key, "auth")
     monkeypatch.setattr(
-        teacher,
+        gateway_model,
         "resolve_chat_endpoints",
         AsyncMock(return_value=[primary, backup]),
     )
