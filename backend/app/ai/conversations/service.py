@@ -5,6 +5,7 @@ from sqlalchemy import delete, select
 import tiktoken
 
 from app.ai.conversations.models import AiConversation
+from app.ai.conversations.projector import is_model_visible, project_summary
 
 MAX_MESSAGES = 40
 MAX_SUMMARY_CHARS = 8000
@@ -48,7 +49,11 @@ def _clean(messages: list[dict]) -> list[dict]:
         content = str(item.get("content") or "").strip()[:MAX_CONTENT_CHARS]
         if role not in ("user", "assistant") or not content:
             continue
-        clean.append({"role": role, "content": content})
+        clean.append({
+            "role": role,
+            "content": content,
+            "model_visible": is_model_visible(item),
+        })
     return clean
 
 
@@ -76,8 +81,10 @@ def _merge(row: AiConversation, incoming: list[dict]) -> None:
         merged = current
     dropped = merged[:-MAX_MESSAGES]
     if dropped:
-        addition = "\n".join(_summary_line(item) for item in dropped)
-        row.summary = "\n".join(part for part in (row.summary, addition) if part)[-MAX_SUMMARY_CHARS:]
+        addition = "\n".join(_summary_line(item) for item in dropped if item["model_visible"])
+        row.summary = project_summary(
+            "\n".join(part for part in (row.summary, addition) if part)
+        )[-MAX_SUMMARY_CHARS:]
     row.messages = merged[-MAX_MESSAGES:]
     row.updated_at = datetime.utcnow()
 
@@ -87,7 +94,7 @@ def conversation_view(row: AiConversation | None) -> dict:
         return {"messages": [], "summary": "", "updated_at": None}
     return {
         "messages": _clean(row.messages or []),
-        "summary": (row.summary or "")[-MAX_SUMMARY_CHARS:],
+        "summary": project_summary(row.summary or "")[-MAX_SUMMARY_CHARS:],
         "updated_at": row.updated_at.isoformat() + "Z",
     }
 

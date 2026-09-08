@@ -23,6 +23,31 @@ async def test_short_followup_keeps_history_and_rules_query_uses_agent(monkeypat
 
 
 @pytest.mark.asyncio
+async def test_operational_failure_bubbles_do_not_reach_agent_history(monkeypatch):
+    monkeypatch.setattr(
+        teacher,
+        "resolve_chat_endpoints",
+        AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "test", 5)]),
+    )
+    agent = AsyncMock(return_value=teacher.AssistantTurn(text="当前使用测试模型"))
+    monkeypatch.setattr(teacher, "agent_reply", agent)
+    turns = [
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "模型服务暂时不可用，助手已进入本地说明模式。"},
+        {"role": "assistant", "content": "暂时无法连接后台。已保留任务编号。"},
+        {"role": "user", "content": "你是什么模型"},
+    ]
+
+    result = await assistant.handle_assistant_turn(None, 1, turns)
+
+    assert result.text == "当前使用测试模型"
+    assert agent.call_args.args[2] == [
+        {"role": "user", "content": "你好"},
+        {"role": "user", "content": "你是什么模型"},
+    ]
+
+
+@pytest.mark.asyncio
 async def test_model_has_no_execute_tool_and_unprivileged_proposal_is_denied(monkeypatch):
     from app.ai.graph import loop
     seen = []

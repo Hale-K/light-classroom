@@ -33,6 +33,8 @@ type ChatMsg = {
   advice?: string
   choices?: { label: string; send: string; act?: () => void }[]
   think?: { done: string[]; live?: string }
+  /** False for transport/recovery/degraded UI notices that must not enter an LLM prompt. */
+  modelVisible?: boolean
 }
 
 function InboxTaskBar({
@@ -71,6 +73,7 @@ function storedThread(key: string): ChatMsg[] {
         role: value.role,
         text: value.text.slice(0, 8000),
         mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
+        modelVisible: value.modelVisible !== false,
       }]
     })
     const seen = new Set<string>()
@@ -93,6 +96,7 @@ function rememberThread(key: string, messages: ChatMsg[]) {
       role: message.role,
       text: (message.plan ? `${message.text}\n\n${message.plan.summary}` : message.text).slice(0, 8000),
       mid: message.mid,
+      modelVisible: message.modelVisible !== false,
     }))
   try {
     localStorage.setItem(key, JSON.stringify(safe))
@@ -496,7 +500,7 @@ export default function AssistantDock() {
         }
         commitThread((prev) => upsertThink(prev, resumeId ? '正在恢复上次任务状态' : '已收到，正在提交任务'))
         agentConversationRef.current = true
-        const history = threadRef.current.filter((m) => m.text)
+        const history = threadRef.current.filter((m) => m.text && m.modelVisible !== false)
         halt()
         // HTTP 部署（非安全上下文）下浏览器不提供 crypto.randomUUID，走 getRandomValues 回退
         const runId = resumeId || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -509,6 +513,7 @@ export default function AssistantDock() {
             messages: history.slice(-20).map((m) => ({
               role: m.role === 'bot' ? 'assistant' : 'user',
               content: m.plan ? `${m.text}\n草稿状态：${m.plan.status}\n${m.plan.summary}` : m.text,
+              model_visible: m.modelVisible !== false,
             })),
             page_title: pageName,
             page_path: hereNow,
@@ -545,6 +550,7 @@ export default function AssistantDock() {
             plan: data.plan ?? undefined,
             jumps: data.jumps,
             think: { done },
+            modelVisible: data.model_visible !== false,
           })
         })
         break
@@ -562,7 +568,9 @@ export default function AssistantDock() {
       commitThread((prev) => {
         // 恢复查看同一个 run 时不要重复追加相同错误气泡，避免重试改变对话布局。
         if (prev.some((item) => item.role === 'bot' && item.text === msg)) return prev
-        return replaceThinkBot(prev, { role: 'bot', text: msg, mid: midRef.current })
+        return replaceThinkBot(prev, {
+          role: 'bot', text: msg, mid: midRef.current, modelVisible: false,
+        })
       })
       setRecoverable(Boolean(activeRunRef.current))
     } finally {
@@ -602,6 +610,7 @@ export default function AssistantDock() {
         const restoredRemote: ChatMsg[] = remote.messages.map((item) => ({
           role: item.role === 'assistant' ? 'bot' : 'user',
           text: item.content,
+          modelVisible: item.model_visible !== false,
         }))
         threadRef.current = restoredRemote
         setThread(restoredRemote)
@@ -610,6 +619,7 @@ export default function AssistantDock() {
         void assistantApi.saveConversation(restored.map((item) => ({
           role: item.role === 'bot' ? 'assistant' : 'user',
           content: item.text,
+          model_visible: item.modelVisible !== false,
         }))).catch(() => undefined)
       }
       setConversationReady(true)
@@ -633,6 +643,7 @@ export default function AssistantDock() {
       .map((item) => ({
         role: item.role === 'bot' ? 'assistant' as const : 'user' as const,
         content: (item.plan ? `${item.text}\n\n${item.plan.summary}` : item.text).slice(0, 8000),
+        model_visible: item.modelVisible !== false,
       }))
     const timer = window.setTimeout(() => {
       void assistantApi.saveConversation(messages).catch(() => undefined)

@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
+from app.ai.conversations import project_messages, project_summary
 from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import local_reply, rule_jumps
 from app.ai.graph.loop import ReactLoop
@@ -51,6 +52,7 @@ class AssistantTurn:
     choices: list[dict] = field(default_factory=list)
     plan: dict | None = None
     jumps: list[dict] = field(default_factory=list)
+    model_visible: bool = True
 
 
 def _trim_turns(turns: list[dict], keep: int = 6) -> list[dict]:
@@ -204,6 +206,8 @@ async def handle_assistant_turn(
     runtime: AssistantRuntime | None = None,
     on_step: Callable[[int], Awaitable[list[dict]]] | None = None,
 ) -> AssistantTurn:
+    turns = project_messages(turns, limit=20)
+    memory_summary = project_summary(memory_summary)
     if not turns:
         raise ChatError("请输入内容")
     last = turns[-1]
@@ -281,6 +285,7 @@ async def handle_assistant_turn(
             text="当前模型工具调用不可用，本轮仅提供说明，未生成可执行草稿。\n" + text,
             think=[f"优雅降级：{endpoint.name} 已切换到只读说明模式"],
             jumps=rule_jumps(query, text, page_path),
+            model_visible=False,
         )
 
     async def invoke(endpoint: ChatEndpoint) -> AssistantTurn:
@@ -341,4 +346,5 @@ async def handle_assistant_turn(
     return AssistantTurn(
         text=_local_degraded_reply(query, page_path),
         think=[f"故障降级：{note}；本轮未执行任何写操作"],
+        model_visible=False,
     )

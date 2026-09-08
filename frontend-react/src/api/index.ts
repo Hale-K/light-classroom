@@ -1142,11 +1142,11 @@ export type AssistantRun = {
   phase_elapsed_seconds: number
   heartbeat_at: string
   events: { phase: string; message: string; at: string }[]
-  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[] } | null
+  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[]; model_visible?: boolean } | null
 }
 
 export type AssistantConversation = {
-  messages: { role: 'user' | 'assistant'; content: string }[]
+  messages: { role: 'user' | 'assistant'; content: string; model_visible?: boolean }[]
   summary: string
   updated_at?: string | null
 }
@@ -1166,7 +1166,7 @@ export const assistantApi = {
     unwrap<AssistantPlan>(http.post(`/assistant/actions/${encodeURIComponent(id)}`, { decision })),
   chat: (
     data: {
-      messages: { role: 'user' | 'assistant'; content: string }[]
+      messages: { role: 'user' | 'assistant'; content: string; model_visible?: boolean }[]
       page_title?: string
       page_path?: string
       can?: string[]
@@ -1181,6 +1181,7 @@ export const assistantApi = {
       think?: string[]
       choices?: { label: string; send: string }[]
       plan?: AssistantPlan | null
+      model_visible?: boolean
     }>(http.post('/assistant/chat', data, { timeout: 120000, signal: opts?.signal })),
 }
 

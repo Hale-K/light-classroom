@@ -12,7 +12,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.ai.agent.assistant_agent import handle_assistant_turn
 from app.ai.actions import decide_action
 from app.ai.model.chat import ChatError
-from app.ai.conversations import compact_for_chat, conversation_view, delete_conversation, get_conversation, sync_conversation
+from app.ai.conversations import compact_for_chat, conversation_view, delete_conversation, get_conversation, project_messages, sync_conversation
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
@@ -25,6 +25,7 @@ router = APIRouter(prefix="/assistant", tags=["轻课堂助手"])
 class ChatTurn(BaseModel):
     role: str
     content: str
+    model_visible: bool = True
 
 
 class PageContext(BaseModel):
@@ -73,7 +74,7 @@ async def save_assistant_conversation(
 ):
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
-    messages = [{"role": item.role, "content": item.content} for item in body.messages]
+    messages = [item.model_dump() for item in body.messages]
     row = await sync_conversation(session, tenant_id, user.id, messages)
     return {"code": 0, "message": "ok", "data": conversation_view(row)}
 
@@ -104,7 +105,12 @@ async def assistant_chat(
         role = item.role if item.role in ("user", "assistant") else "user"
         text = compact_for_chat(item.content or "")
         if text:
-            turns.append({"role": role, "content": text})
+            turns.append({
+                "role": role,
+                "content": text,
+                "model_visible": item.model_visible,
+            })
+    turns = project_messages(turns, limit=20)
     try:
         logger.info(
             "assistant.chat start id=%s tenant=%s user=%s path=%s turns=%s",
@@ -146,6 +152,7 @@ async def assistant_chat(
             "choices": turn.choices,
             "plan": turn.plan,
             "jumps": turn.jumps,
+            "model_visible": turn.model_visible,
         },
     }
 

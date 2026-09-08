@@ -112,6 +112,7 @@ async def create_run(session, run_id: str, tenant_id: int, user_id: int, payload
 
 async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, *, sessions=AsyncSessionLocal):
     from app.ai.agent.assistant_agent import handle_assistant_turn
+    from app.ai.conversations import compact_for_chat, project_messages, project_summary
     from app.ai.model.chat import ChatError
     from app.api.deps import get_user_permission_codes
     from app.models.org import User
@@ -176,14 +177,20 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
             if user is None:
                 raise ChatError("账号已失效，请重新登录")
             permissions = await get_user_permission_codes(session, user_id)
-            turns = [{"role": item["role"] if item["role"] in ("user", "assistant") else "user", "content": item["content"].strip()[:4000]} for item in payload["messages"][-20:] if item["content"].strip()]
+            candidates = [{
+                "role": item["role"] if item["role"] in ("user", "assistant") else "user",
+                "content": compact_for_chat(item["content"]),
+                "model_visible": item.get("model_visible", True),
+            } for item in payload["messages"][-24:] if item["content"].strip()]
+            turns = project_messages(candidates, limit=20)
             turns.extend(await consume_inbox("turn"))
+            memory_summary = project_summary(payload.get("memory_summary") or "")
             await trace("session.turn", {
                 "messages": turns,
                 "page_title": payload.get("page_title"),
                 "page_path": payload.get("page_path"),
                 "page_context": payload.get("page_context") or {},
-                "memory_summary": payload.get("memory_summary") or "",
+                "memory_summary": memory_summary,
             })
             await progress("preparing", "正在结合当前页面和已有对话核对需求")
             result = await drive_turn(handle_assistant_turn(
@@ -192,7 +199,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 page_title=payload.get("page_title"), page_path=payload.get("page_path"),
                 can=payload.get("can"), cannot=payload.get("cannot"),
                 page_context=payload.get("page_context"),
-                memory_summary=payload.get("memory_summary") or "",
+                memory_summary=memory_summary,
                 message_id=payload.get("message_id"), on_progress=progress, on_trace=trace,
                 on_step=lambda step: consume_inbox("step"),
             ), persist, timeout=RUN_TIMEOUT)
