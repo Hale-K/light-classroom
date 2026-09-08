@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -10,7 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
 from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import local_reply, rule_jumps
-from app.ai.graph.loop import run_tool_loop
+from app.ai.graph.loop import ReactLoop
 from app.ai.model.chat import ChatEndpoint, ChatError, complete_chat, resolve_chat_endpoints
 from app.ai.prompt.messages import build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
@@ -32,10 +33,19 @@ _FALLBACK_STEP_TIMEOUT = 75
 _TEXT_ONLY_FALLBACK_ERRORS = {"bad_request", "parse", "empty", "context_overflow", "unavailable"}
 # 服务明显活着、只是本轮请求没能完成的类别：保留精确报错抛出，不吞进"服务不可用"的本地文案。
 _PRECISE_FAILURE_CLASSES = {"bad_request", "parse", "empty", "context_overflow", "exhausted"}
+_BLOCKED_DESTRUCTIVE_REQUESTS = (
+    "删除数据库", "清空数据库", "drop database", "truncate table", "delete from", "删库",
+    "清空所有数据", "删除全部学生", "删除全部教师", "执行任意sql", "运行shell",
+)
+
+
+def _blocked_destructive_request(text: str) -> bool:
+    normalized = (text or "").strip().lower().replace("\u3000", " ")
+    return any(marker in normalized for marker in _BLOCKED_DESTRUCTIVE_REQUESTS)
 
 
 @dataclass
-class TeacherTurn:
+class AssistantTurn:
     text: str
     think: list[str] = field(default_factory=list)
     choices: list[dict] = field(default_factory=list)
@@ -71,7 +81,8 @@ async def agent_reply(
     memory_summary: str = "",
     on_trace: TraceCallback | None = None,
     runtime: AssistantRuntime | None = None,
-) -> TeacherTurn:
+    on_step: Callable[[int], Awaitable[list[dict]]] | None = None,
+) -> AssistantTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
 
     cache_key = answer_cache_key(
@@ -85,7 +96,7 @@ async def agent_reply(
     cached = get_cached_answer(cache_key)
     if cached:
         logger.info("assistant.cache hit kind=%s", cached.get("kind"))
-        return TeacherTurn(
+        return AssistantTurn(
             text=cached.get("text") or "",
             think=[*(cached.get("think") or []), "回答缓存命中，未重跑模型"],
             jumps=cached.get("jumps") or [],
@@ -126,7 +137,7 @@ async def agent_reply(
         )
 
     async def run_loop(history: list[dict], memory: str):
-        return await run_tool_loop(
+        return await ReactLoop(
             base_url=base_url,
             api_key=api_key,
             model=model,
@@ -139,7 +150,8 @@ async def agent_reply(
             stop_when=lambda: plan is not None,
             on_progress=on_progress,
             on_trace=on_trace,
-        )
+            on_step=on_step,
+        ).run()
 
     try:
         outcome = await run_loop(turns, memory_summary)
@@ -165,7 +177,7 @@ async def agent_reply(
             tools=[step.tool for step in outcome.steps],
         )
         logger.info("assistant.cache store=%s", kind or "skip")
-    return TeacherTurn(
+    return AssistantTurn(
         text="规则草稿已准备，请核对下方内容后确认。" if plan else outcome.text,
         think=step_lines,
         plan=plan,
@@ -173,7 +185,7 @@ async def agent_reply(
     )
 
 
-async def handle_teacher_turn(
+async def handle_assistant_turn(
     session: AsyncSession,
     tenant_id: int,
     turns: list[dict],
@@ -190,16 +202,20 @@ async def handle_teacher_turn(
     memory_summary: str = "",
     on_trace: TraceCallback | None = None,
     runtime: AssistantRuntime | None = None,
-) -> TeacherTurn:
+    on_step: Callable[[int], Awaitable[list[dict]]] | None = None,
+) -> AssistantTurn:
     if not turns:
         raise ChatError("请输入内容")
     last = turns[-1]
+    if last.get("role") == "user" and _blocked_destructive_request(str(last.get("content") or "")):
+        logger.warning("assistant.blocked_destructive_request tenant=%s user=%s", tenant_id, user_id)
+        return AssistantTurn(text="这个请求涉及删除数据库或批量清空数据，助手不会执行。若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。")
     if len(turns) == 1 and last.get("role") == "user":
         guide = runtime.service("ui_guide") if runtime else None
         fixed = (guide.local_reply(str(last.get("content") or ""), page_path) if guide else local_reply(str(last.get("content") or ""), page_path))
         if fixed:
             logger.info("assistant.turn local id=%s", message_id or "-")
-            return TeacherTurn(text=fixed)
+            return AssistantTurn(text=fixed)
     logger.info("assistant.turn llm id=%s", message_id or "-")
     query = ""
     for item in reversed(turns):
@@ -213,10 +229,10 @@ async def handle_teacher_turn(
     # 慢服务商把 180 秒总闸撞爆，整轮报废成 timed_out。
     from app.ai.runs.service import RUN_TIMEOUT
     runtime = runtime or AssistantRuntime(on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits)
-    await runtime.emit("turn.agent_started", {"agent": "teacher"})
+    await runtime.emit("turn.agent_started", {"agent": "assistant"})
 
 
-    async def text_only_fallback(endpoint: ChatEndpoint, budget: int) -> TeacherTurn:
+    async def text_only_fallback(endpoint: ChatEndpoint, budget: int) -> AssistantTurn:
         await report_progress(
             on_progress,
             "degraded",
@@ -261,19 +277,19 @@ async def handle_teacher_turn(
                 timeout=fallback_timeout,
                 messages=fallback_messages(_trim_turns(turns)),
             )
-        return TeacherTurn(
+        return AssistantTurn(
             text="当前模型工具调用不可用，本轮仅提供说明，未生成可执行草稿。\n" + text,
             think=[f"优雅降级：{endpoint.name} 已切换到只读说明模式"],
             jumps=rule_jumps(query, text, page_path),
         )
 
-    async def invoke(endpoint: ChatEndpoint) -> TeacherTurn:
+    async def invoke(endpoint: ChatEndpoint) -> AssistantTurn:
         return await agent_reply(
             session, tenant_id, turns,
             base_url=endpoint.base_url, api_key=endpoint.api_key, model=endpoint.model,
             timeout=endpoint.timeout, page_title=page_title, page_path=page_path,
             can=can, cannot=cannot, user_id=user_id, can_manage_rules=can_manage_rules,
-            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace, runtime=runtime,
+            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace, runtime=runtime, on_step=on_step,
         )
 
     routed = await runtime.service("model_router").route(
@@ -322,7 +338,7 @@ async def handle_teacher_turn(
     )
     await report_progress(on_progress, "degraded", "所有模型通道暂不可用，已切换到本地教务说明模式")
     note = "；".join(trail) if trail else "模型通道不可用"
-    return TeacherTurn(
+    return AssistantTurn(
         text=_local_degraded_reply(query, page_path),
         think=[f"故障降级：{note}；本轮未执行任何写操作"],
     )

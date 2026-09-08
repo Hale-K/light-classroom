@@ -35,11 +35,35 @@ type ChatMsg = {
   think?: { done: string[]; live?: string }
 }
 
+function InboxTaskBar({
+  progress,
+  chatting,
+  onSteer,
+}: {
+  progress: AssistantRun | null
+  chatting: boolean
+  onSteer: () => void
+}) {
+  if (!chatting && !progress) return null
+  return (
+    <div className="assist-inbox-taskbar" role="status" aria-live="polite">
+      <span className="assist-inbox-task-label">
+        <Icon name="sparkles" size={14} />
+        {progress?.message || '轻课堂助手正在处理当前任务'}
+      </span>
+      <button type="button" className="assist-inbox-steer" onClick={onSteer}>
+        <Icon name="arrow-right" size={13} />
+        调整方向
+      </button>
+    </div>
+  )
+}
+
 function storedThread(key: string): ChatMsg[] {
   try {
     const raw = JSON.parse(localStorage.getItem(key) || '[]') as unknown
     if (!Array.isArray(raw)) return []
-    return raw.slice(-THREAD_LIMIT).flatMap((item): ChatMsg[] => {
+    const restored = raw.slice(-THREAD_LIMIT).flatMap((item): ChatMsg[] => {
       if (!item || typeof item !== 'object') return []
       const value = item as Record<string, unknown>
       if ((value.role !== 'user' && value.role !== 'bot') || typeof value.text !== 'string' || !value.text.trim()) return []
@@ -48,6 +72,13 @@ function storedThread(key: string): ChatMsg[] {
         text: value.text.slice(0, 8000),
         mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
       }]
+    })
+    const seen = new Set<string>()
+    return restored.filter((item) => {
+      const identity = `${item.role}:${item.mid || ''}:${item.text}`
+      if (seen.has(identity)) return false
+      seen.add(identity)
+      return true
     })
   } catch {
     return []
@@ -528,7 +559,11 @@ export default function AssistantDock() {
       const stopped = abortedRef.current
       const msg = stopped ? '已停止。' : err instanceof Error ? err.message : '对话失败'
       assistLog(midRef.current || '-', stopped ? 'stop' : 'fail', msg)
-      commitThread((prev) => replaceThinkBot(prev, { role: 'bot', text: msg, mid: midRef.current }))
+      commitThread((prev) => {
+        // 恢复查看同一个 run 时不要重复追加相同错误气泡，避免重试改变对话布局。
+        if (prev.some((item) => item.role === 'bot' && item.text === msg)) return prev
+        return replaceThinkBot(prev, { role: 'bot', text: msg, mid: midRef.current })
+      })
       setRecoverable(Boolean(activeRunRef.current))
     } finally {
       if (epoch !== epochRef.current) return
@@ -1104,6 +1139,14 @@ export default function AssistantDock() {
               </div>
             )}
           </div>
+          <InboxTaskBar
+            progress={runProgress}
+            chatting={chatting}
+            onSteer={() => {
+              setConnectionNote('请输入新的处理方向，发送后将用于下一步')
+              composerRef.current?.focus()
+            }}
+          />
           <div className="assist-composer">
             <div className="assist-composer-row">
               <button type="button" className="assist-plus" title="新对话" aria-label="新对话" onClick={newChat}>
@@ -1113,7 +1156,7 @@ export default function AssistantDock() {
                 ref={composerRef}
                 rows={1}
                 value={draft}
-                placeholder={chatting ? '思考中也可补充，会并入这一轮' : '排课、档案、设置，有问题都可以问'}
+                placeholder={chatting ? '随心输入新的处理方向' : '随心输入'}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1134,8 +1177,16 @@ export default function AssistantDock() {
               </button>
             </div>
           </div>
-          <p className="assist-here">{chatting ? '思考中 · 可补充' : `当前页 · ${pageName}`}</p>
-          {recoverable && <button type="button" className="assist-task" onClick={() => activeRunRef.current && void runLoop(activeRunRef.current)}>恢复查看上次任务</button>}
+          <p className="assist-here">{chatting ? '当前任务进行中 · 可调整方向' : `当前页 · ${pageName}`}</p>
+          {recoverable && (
+            <button
+              type="button"
+              className="assist-recover-button"
+              onClick={() => activeRunRef.current && void runLoop(activeRunRef.current)}
+            >
+              恢复查看上次任务
+            </button>
+          )}
         </section>
       )}
     </>

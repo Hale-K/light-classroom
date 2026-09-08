@@ -1,5 +1,5 @@
 """agent 消息构造与 OpenAI tool_calls 解析。"""
-from app.ai.agent.teacher import rule_jumps
+from app.ai.agent.assistant_agent import rule_jumps
 from app.ai.model.chat import parse_tool_calls
 from app.ai.prompt.messages import build_agent_messages, build_messages
 

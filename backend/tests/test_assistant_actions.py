@@ -234,13 +234,13 @@ async def test_chat_tool_to_confirm_endpoint_complete_flow(database, monkeypatch
     from unittest.mock import AsyncMock
     import json
     from app.api.v1 import assistant
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent
     from app.ai.graph import loop
     from app.ai.model.chat import ChatOutcome, ToolCallOut
     session, sync = database
     monkeypatch.setattr(assistant, "get_user_permission_codes", AsyncMock(return_value={"scheduling:assign"}))
     from app.ai.model.chat import ChatEndpoint
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "fixture", 5)]))
+    monkeypatch.setattr(assistant_agent, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "fixture", 5)]))
     caller = AsyncMock(return_value=ChatOutcome(text="不可使用模型声称的已保存", tool_calls=[ToolCallOut(id="1", name="propose_rules", arguments=json.dumps({
         "group_name": "高一规则", "rules": [{"code": "slot_forbidden", "target_names": ["数学"], "priority": "hard", "weekdays": [3], "periods": [6, 7]}],
     }))]))

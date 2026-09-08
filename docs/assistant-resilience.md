@@ -52,9 +52,9 @@ flowchart LR
 | 防线 | 当前行为 | 代码位置 | 对老师可见的结果 |
 |---|---|---|---|
 | 识别 Detect | 对 HTTP 状态、网络、限流、鉴权、额度、配置、上下文超长和响应解析分类；运行任务记录阶段与心跳 | `backend/app/ai/model/chat.py`、`backend/app/ai/runs/service.py` | “正在检查模型服务和备用通道”、具体失败提示或任务中断提示 |
-| 恢复 Recover | 连接失败和 500/502/503/504 等待 1 秒后重试一次；上下文超长时保留最近 6 条对话再试；失败时切换下一个服务商 | `backend/app/ai/model/chat.py`、`backend/app/ai/agent/teacher.py` | 显示恢复进度，成功时说明已切换备用模型 |
+| 恢复 Recover | 连接失败和 500/502/503/504 等待 1 秒后重试一次；上下文超长时保留最近 6 条对话再试；失败时切换下一个服务商 | `backend/app/ai/model/chat.py`、`backend/app/ai/agent/assistant_agent.py` | 显示恢复进度，成功时说明已切换备用模型 |
 | 隔离 Isolate | 鉴权、配置、额度错误立即隔离；网络、不可用、限流、超时连续 2 次隔离 60 秒；成功后清除状态 | `backend/app/ai/resilience.py` | 隔离期跳过问题服务商，避免每轮都重复撞失败通道 |
-| 降级 Degrade | 工具调用不兼容且快速失败时退为模型只读说明；所有通道不可用时按当前页面提供本地教务指引 | `backend/app/ai/agent/teacher.py` | 明确说明本轮未生成草稿、未执行任何写入，可稍后重试 |
+| 降级 Degrade | 工具调用不兼容且快速失败时退为模型只读说明；所有通道不可用时按当前页面提供本地教务指引 | `backend/app/ai/agent/assistant_agent.py` | 明确说明本轮未生成草稿、未执行任何写入，可稍后重试 |
 
 ## 模型调用故障路径
 

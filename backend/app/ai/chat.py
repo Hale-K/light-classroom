@@ -7,6 +7,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.models import AiProvider
 from app.core.config import settings
+from app.core.secret_store import decrypt_secret
 
 
 class ChatError(Exception):
@@ -23,7 +24,7 @@ async def resolve_chat_endpoint(session: AsyncSession, tenant_id: int) -> tuple[
     row = (await session.execute(stmt)).scalars().first()
     if row and (row.base_url or "").strip() and (row.chat_model or "").strip():
         timeout = row.timeout_seconds if row.timeout_seconds and row.timeout_seconds > 0 else 60
-        return row.base_url.strip(), (row.api_key or "").strip(), row.chat_model.strip(), timeout
+        return row.base_url.strip(), decrypt_secret(row.api_key), row.chat_model.strip(), timeout
     if (settings.llm_base_url or "").strip() and (settings.llm_api_key or "").strip():
         return settings.llm_base_url.strip(), settings.llm_api_key.strip(), settings.llm_model, 60
     raise ChatError("请先在「服务商管理」启用一条带对话模型的服务商，或在后端配置 LLM_API_KEY")

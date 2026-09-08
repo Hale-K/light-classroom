@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.deps import get_current_tenant, get_current_user
+from app.api.deps import get_current_tenant, get_current_user, require_management_user
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
 from app.models.facility import (
@@ -21,7 +21,7 @@ from app.services.org.staff_roles import get_staff_role_codes
 from app.services.org.naming import normalize_entity_name
 from app.services.org.cohort import current_academic_year, expected_cohort_label, normalize_cohort_label
 
-router = APIRouter(tags=["校区场室与会议"])
+router = APIRouter(tags=["校区场室与会议"], dependencies=[Depends(require_management_user)])
 
 
 class CampusIn(BaseModel):

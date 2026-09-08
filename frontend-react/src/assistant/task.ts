@@ -1,6 +1,9 @@
 import { assistantApi, type AssistantRun } from '@/api'
 import { ApiError } from '@/api/http'
 
+const MAX_READ_FAILURES = 12
+const MAX_WATCH_MS = 300000
+
 function pause(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const stop = () => { clearTimeout(timer); reject(new DOMException('已停止查看', 'AbortError')) }
@@ -25,13 +28,13 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
       if (error instanceof ApiError && [401, 403, 404].includes(error.status)) throw error
       failures++
       onConnection(`暂时无法连接后台，正在重连（第 ${failures} 次）。任务可能仍在处理，不会重复提交。`)
-      if (failures >= 4) throw new Error('暂时无法连接后台。已保留任务编号，可以点“恢复查看”继续核对结果。')
-      await pause(2000, signal)
+      if (failures >= MAX_READ_FAILURES) throw new Error('后台暂时无法连接。任务仍未重新提交，已保留任务编号，请稍后点击“恢复查看”。')
+      await pause(Math.min(2000 + failures * 1000, 10000), signal)
       continue
     }
     onUpdate(run)
     if (run.status !== 'running') return run
-    if (Date.now() - started > 150000) throw new Error('仍未收到结束状态。可以稍后恢复查看，不需要重复发送需求。')
+    if (Date.now() - started > MAX_WATCH_MS) throw new Error('任务仍在后台运行，暂未收到结束状态。可以稍后恢复查看，不需要重复发送需求。')
     await pause(1500, signal)
   }
   throw new DOMException('已停止查看', 'AbortError')

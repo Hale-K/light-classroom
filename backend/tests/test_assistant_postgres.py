@@ -74,7 +74,7 @@ async def test_concurrent_confirmation_writes_once(monkeypatch):
 async def test_background_run_persists_progress_and_does_not_complete_after_cancel(monkeypatch):
     from app.ai.runs.models import AiRun
     from app.ai.runs import create_run, execute_run, get_run
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent
     from app.api import deps
     from app.models.org import User
     assert make_url(settings.database_url).host in {"localhost", "127.0.0.1"}
@@ -89,9 +89,9 @@ async def test_background_run_persists_progress_and_does_not_complete_after_canc
         await on_progress('tool', '正在核对课时与任教')
         entered.set()
         await release.wait()
-        return teacher.TeacherTurn(text='测试查询结果')
+        return teacher.AssistantTurn(text='测试查询结果')
     monkeypatch.setattr(deps, 'get_user_permission_codes', permissions)
-    monkeypatch.setattr(teacher, 'handle_teacher_turn', answer)
+    monkeypatch.setattr(teacher, 'handle_assistant_turn', answer)
     try:
         async with admin.begin() as conn:
             await conn.execute(text(f'CREATE SCHEMA "{schema}"'))

@@ -9,10 +9,10 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.agent.teacher import handle_teacher_turn
+from app.ai.agent.assistant_agent import handle_assistant_turn
 from app.ai.actions import decide_action
 from app.ai.model.chat import ChatError
-from app.ai.conversations import conversation_view, delete_conversation, get_conversation, sync_conversation
+from app.ai.conversations import compact_for_chat, conversation_view, delete_conversation, get_conversation, sync_conversation
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
@@ -102,7 +102,7 @@ async def assistant_chat(
     turns: list[dict] = []
     for item in body.messages[-20:]:
         role = item.role if item.role in ("user", "assistant") else "user"
-        text = (item.content or "").strip()[:4000]
+        text = compact_for_chat(item.content or "")
         if text:
             turns.append({"role": role, "content": text})
     try:
@@ -117,7 +117,7 @@ async def assistant_chat(
         permissions = await get_user_permission_codes(session, user.id)
         from app.ai.runs.service import RUN_TIMEOUT
         async with asyncio.timeout(RUN_TIMEOUT):
-            turn = await handle_teacher_turn(
+            turn = await handle_assistant_turn(
                 session,
                 tenant_id,
                 turns,

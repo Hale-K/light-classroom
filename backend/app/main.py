@@ -58,13 +58,16 @@ app = FastAPI(
 )
 
 # ---------- 中间件链 ----------
-# 1. CORS（开发期全开，生产按域名白名单）
+# 1. CORS：生产必须使用明确的前端来源白名单，禁止通配符。
+_cors_origins = [item.strip() for item in settings.cors_origins.split(",") if item.strip()]
+if not _cors_origins and settings.app_env == "dev":
+    _cors_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-School-Code", "X-Trace-Id"],
     expose_headers=[TRACE_HEADER],
 )
 

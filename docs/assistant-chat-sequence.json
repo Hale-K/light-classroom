@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "POST /assistant/chat 接口时序",
+    "locale": "zh-CN",
+    "output": "docs/assistant-chat-sequence.html",
+    "viewBox": [1080, 980],
+    "quality_profile": "showcase",
+    "column_fit": "spread",
+    "views": [
+      { "id": "request-guard", "label": "请求与鉴权", "focus": ["client", "api", "auth", "tenant"], "note": "先验证登录身份和租户归属，再进入 Agent。" },
+      { "id": "agent-turn", "label": "Agent Turn", "focus": ["api", "permission", "agent", "model", "tools"], "note": "权限和输入上下文通过后，交给助手执行一次 Turn。" },
+      { "id": "response-errors", "label": "响应与异常", "focus": ["agent", "api", "client"], "note": "成功返回结构化结果，超时和模型错误转换为 HTTP 错误。" }
+    ]
+  },
+  "participants": [
+    { "id": "client", "type": "frontend", "label": "AssistantDock", "sublabel": "前端" },
+    { "id": "api", "type": "backend", "label": "assistant_chat", "sublabel": "POST /chat" },
+    { "id": "auth", "type": "security", "label": "Auth Guard", "sublabel": "JWT / Cookie" },
+    { "id": "tenant", "type": "backend", "label": "Tenant Context", "sublabel": "租户校验" },
+    { "id": "permission", "type": "backend", "label": "RBAC", "sublabel": "权限查询" },
+    { "id": "agent", "type": "backend", "label": "Assistant Agent", "sublabel": "Turn 编排" },
+    { "id": "model", "type": "cloud", "label": "Model Router", "sublabel": "LLM / Failover" },
+    { "id": "tools", "type": "backend", "label": "School Tools", "sublabel": "教务查询" }
+  ],
+  "segments": [
+    { "from": 150, "to": 354, "label": "接入与安全校验" },
+    { "from": 372, "to": 720, "label": "上下文与 Agent 执行" },
+    { "from": 738, "to": 920, "label": "结果与错误映射" }
+  ],
+  "messages": [
+    { "from": "client", "to": "api", "y": 180, "label": "POST /assistant/chat", "variant": "emphasis" },
+    { "from": "api", "to": "auth", "y": 222, "label": "Depends(get_current_user)", "variant": "security" },
+    { "from": "auth", "to": "api", "y": 264, "label": "User / 401", "variant": "return" },
+    { "from": "api", "to": "tenant", "y": 306, "label": "Depends(get_current_tenant)", "variant": "security" },
+    { "from": "tenant", "to": "api", "y": 348, "label": "tenant_id / 403", "variant": "return" },
+    { "from": "api", "to": "agent", "y": 390, "label": "裁剪最近 20 条 / 4000 字符", "variant": "default" },
+    { "from": "api", "to": "permission", "y": 432, "label": "get_user_permission_codes", "variant": "default" },
+    { "from": "permission", "to": "api", "y": 474, "label": "权限集合", "variant": "return" },
+    { "from": "api", "to": "agent", "y": 516, "label": "asyncio.timeout(RUN_TIMEOUT)", "variant": "emphasis" },
+    { "from": "agent", "to": "model", "y": 558, "label": "handle_assistant_turn", "variant": "default" },
+    { "from": "model", "to": "agent", "y": 600, "label": "模型回答 / 工具调用", "variant": "return" },
+    { "from": "agent", "to": "tools", "y": 642, "label": "按白名单执行教务查询", "variant": "default" },
+    { "from": "tools", "to": "agent", "y": 684, "label": "工具结果", "variant": "return" },
+    { "from": "agent", "to": "api", "y": 726, "label": "AssistantTurn", "variant": "return" },
+    { "from": "api", "to": "client", "y": 768, "label": "200 { text, think, plan, jumps }", "variant": "emphasis" },
+    { "from": "agent", "to": "api", "y": 810, "label": "TimeoutError / ChatError", "variant": "dashed" },
+    { "from": "api", "to": "client", "y": 852, "label": "504 超时 / 400 模型错误", "variant": "return" },
+    { "from": "api", "to": "agent", "y": 894, "label": "记录 start / fail / done", "variant": "dashed" }
+  ],
+  "activations": [
+    { "participant": "api", "from": 174, "to": 908, "type": "backend" },
+    { "participant": "auth", "from": 216, "to": 270, "type": "security" },
+    { "participant": "tenant", "from": 300, "to": 354, "type": "backend" },
+    { "participant": "permission", "from": 426, "to": 480, "type": "backend" },
+    { "participant": "agent", "from": 510, "to": 738, "type": "backend" },
+    { "participant": "model", "from": 552, "to": 606, "type": "cloud" },
+    { "participant": "tools", "from": 636, "to": 690, "type": "backend" }
+  ],
+  "cards": [
+    { "dot": "cyan", "title": "输入边界", "items": ["只处理最近 20 条消息", "单条内容最多 4000 字符", "未知 role 会归一为 user"] },
+    { "dot": "violet", "title": "权限边界", "items": ["身份由 JWT 或 HttpOnly Cookie 校验", "用户租户必须与请求租户一致", "规则能力由后端 RBAC 决定，不信任前端 can 字段"] },
+    { "dot": "orange", "title": "失败边界", "items": ["总时长由 RUN_TIMEOUT 控制", "超时返回 504 且说明未执行规则写入", "ChatError 返回 400，不把内部堆栈暴露给前端"] }
+  ]
+}

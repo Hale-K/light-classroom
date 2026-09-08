@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_debug: bool = True
     default_school_code: str = "demo"  # 私有化部署固定单值
+    # 生产环境必须显式配置前端来源，逗号分隔；开发环境为空时仅允许本地前端。
+    cors_origins: str = ""
 
     # 数据库
     database_url: str
@@ -31,6 +33,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 1440
+    api_key_encryption_key: str = ""
 
     # 平台超管（创建学校的运营后台）
     admin_username: str = "admin"

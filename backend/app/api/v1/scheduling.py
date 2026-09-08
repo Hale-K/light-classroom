@@ -1,4 +1,4 @@
-﻿"""排课系统 API：基础资源、任教关系、周课表和日期课表。"""
+"""排课系统 API：基础资源、任教关系、周课表和日期课表。"""
 import asyncio
 import logging
 import random
@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.deps import get_current_tenant, get_current_user
+from app.api.deps import get_current_tenant, get_current_user, require_management_user
 from app.core.security import get_password_hash
 from app.db.session import get_session
 from app.models.enums import BaseUserRole, EveningParity, StudentStatus, UserStatus, WeekParity
@@ -99,7 +99,7 @@ from app.workers.scheduling.generate import (
     spawn_generate_job,
 )
 
-router = APIRouter(prefix="/scheduling", tags=["排课管理"])
+router = APIRouter(prefix="/scheduling", tags=["排课管理"], dependencies=[Depends(require_management_user)])
 logger = logging.getLogger(__name__)
 SCHEDULING_GRID_CONFIG_KEY = "scheduling_grid_config"
 SCHEDULING_RULE_GROUP_CONFIG_KEY = "scheduling_rule_group"

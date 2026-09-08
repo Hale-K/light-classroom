@@ -2,12 +2,43 @@
 from datetime import datetime
 
 from sqlalchemy import delete, select
+import tiktoken
 
 from app.ai.conversations.models import AiConversation
 
 MAX_MESSAGES = 40
 MAX_SUMMARY_CHARS = 8000
 MAX_CONTENT_CHARS = 8000
+CHAT_CONTEXT_CHARS = 4000
+CHAT_CONTEXT_TOKENS = 1200
+
+
+def count_tokens(text: str, model: str = "deepseek-chat") -> int:
+    """Count model-compatible tokens before putting user content into context."""
+    try:
+        encoding = tiktoken.encoding_for_model(model)
+    except KeyError:
+        encoding = tiktoken.get_encoding("cl100k_base")
+    return len(encoding.encode(text or ""))
+
+
+def compact_for_chat(content: str, limit: int = CHAT_CONTEXT_CHARS, token_limit: int = CHAT_CONTEXT_TOKENS) -> str:
+    """Extractive compression for oversized live requests; never sends the full payload to the LLM."""
+    text = " ".join((content or "").split())
+    if len(text) <= limit and count_tokens(text) <= token_limit:
+        return text
+    # Keep the beginning and conclusion, plus sentence-sized evidence from the middle.
+    parts = [p.strip() for p in __import__("re").split(r"(?<=[。！？.!?；;])", text) if p.strip()]
+    if len(parts) <= 2:
+        return text[:limit // 2] + "\n[内容过长，已压缩]\n" + text[-limit // 2:]
+    head = "".join(parts[: max(1, len(parts) // 3)])
+    tail = "".join(parts[-max(1, len(parts) // 4):])
+    middle = "".join(parts[max(1, len(parts) // 3): max(1, len(parts) // 3) + 3])
+    result = head[: limit // 2] + "\n[中间内容已压缩，保留关键片段]\n" + middle + tail
+    result = result[:limit]
+    while count_tokens(result) > token_limit and len(result) > 400:
+        result = result[: int(len(result) * 0.85)]
+    return result
 
 
 def _clean(messages: list[dict]) -> list[dict]:

@@ -1,5 +1,5 @@
 from app.ai.advisor.clarify import Q_LOW, Q_SCOPE, Q_STUCK, clarify
-from app.ai.agent.teacher import local_reply
+from app.ai.agent.assistant_agent import local_reply
 
 
 def test_vague_low_stays_in_jiaowu():

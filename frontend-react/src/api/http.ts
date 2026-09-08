@@ -93,10 +93,12 @@ function createHttp(baseURL: string): AxiosInstance {
   const http = axios.create({
     baseURL,
     timeout: 20000,
+    withCredentials: true,
   })
 
   http.interceptors.request.use((config) => {
     const token = isAdminUrl(config.url) ? resolver.getAdminToken() : resolver.getToken()
+    // 新会话使用 HttpOnly Cookie；保留 Bearer 读取仅用于旧版会话迁移。
     if (token) config.headers.Authorization = `Bearer ${token}`
     config.headers['X-School-Code'] = resolver.getSchoolCode()
     config.headers['X-Trace-Id'] = newTraceId()

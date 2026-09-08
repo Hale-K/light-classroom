@@ -23,11 +23,11 @@ async def test_runtime_allows_service_replacement_and_emits_trace():
         events.append((kind, data))
 
     runtime = AssistantRuntime(services=services, on_trace=on_trace)
-    await runtime.emit("turn.started", {"agent": "teacher"})
+    await runtime.emit("turn.started", {"agent": "assistant"})
 
     assert runtime.service("model_router") is replacement
     assert runtime.service("ui_guide") is AssistantUiGuide
-    assert events == [("turn.started", {"agent": "teacher"})]
+    assert events == [("turn.started", {"agent": "assistant"})]
 
 
 def test_service_registry_rejects_duplicate_and_unknown_services():

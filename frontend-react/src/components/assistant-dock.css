@@ -519,6 +519,27 @@
   white-space: nowrap;
 }
 
+.assist-recover-button {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 10px 16px 0;
+  padding: 9px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  cursor: pointer;
+}
+
+.assist-recover-button:hover,
+.assist-recover-button:focus-visible {
+  background: #dbeafe;
+  outline: none;
+}
+
 .assist-thread {
   display: flex;
   flex-direction: column;
@@ -908,6 +929,57 @@
   background: #fff;
   border: 1px solid #e5e7eb;
   color: #374151;
+}
+
+.assist-inbox-taskbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  margin: 0 16px;
+  padding: 7px 10px;
+  border: 1px solid #e5e7eb;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: #fafafa;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.assist-inbox-task-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.assist-inbox-task-label svg {
+  flex: 0 0 auto;
+  color: #1677ff;
+}
+
+.assist-inbox-steer {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #1677ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assist-inbox-steer:hover,
+.assist-inbox-steer:focus-visible {
+  background: rgba(22, 119, 255, 0.1);
+  outline: none;
 }
 
 .assist-composer {

@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.ai.actions import fingerprint
 from app.ai.runs.models import AiRun
 from app.ai.runs.events import run_event, trace_event
+from app.ai.runs.inbox import consume
 from app.ai.runs.progress import drive_turn
 from app.db.session import AsyncSessionLocal
 
@@ -110,12 +111,44 @@ async def create_run(session, run_id: str, tenant_id: int, user_id: int, payload
 
 
 async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, *, sessions=AsyncSessionLocal):
-    from app.ai.agent.teacher import handle_teacher_turn
+    from app.ai.agent.assistant_agent import handle_assistant_turn
     from app.ai.model.chat import ChatError
     from app.api.deps import get_user_permission_codes
     from app.models.org import User
 
     events: list[dict] = []
+
+    def inbox_messages(messages):
+        out = []
+        for item in messages:
+            if item.kind == "steer":
+                out.append({"role": "user", "content": f"执行方向调整：{item.content}"})
+            elif item.kind == "inject":
+                out.append({"role": "system", "content": f"运行时上下文补充：{item.content}"})
+            else:
+                out.append({"role": "user", "content": str(item.content)})
+        return out
+
+    async def consume_inbox(boundary: str) -> list[dict]:
+        async with sessions() as inbox_session:
+            run = (await inbox_session.execute(select(AiRun).where(
+                AiRun.id == run_id, AiRun.tenant_id == tenant_id,
+                AiRun.user_id == user_id, AiRun.status == "running",
+            ).with_for_update())).scalars().first()
+            if run is None:
+                raise asyncio.CancelledError()
+            stored = list(run.events or [])
+            messages = consume(stored, boundary)  # type: ignore[arg-type]
+            if messages:
+                for item in messages:
+                    stored.append(trace_event("inbox.consumed", {
+                        "id": item.id, "kind": item.kind, "boundary": boundary,
+                    }))
+                run.events = stored[-100:]
+                run.updated_at = datetime.utcnow()
+                await inbox_session.commit()
+                events[:] = run.events
+            return inbox_messages(messages)
 
     async def persist(**values) -> bool:
         async with sessions() as session:
@@ -144,6 +177,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 raise ChatError("账号已失效，请重新登录")
             permissions = await get_user_permission_codes(session, user_id)
             turns = [{"role": item["role"] if item["role"] in ("user", "assistant") else "user", "content": item["content"].strip()[:4000]} for item in payload["messages"][-20:] if item["content"].strip()]
+            turns.extend(await consume_inbox("turn"))
             await trace("session.turn", {
                 "messages": turns,
                 "page_title": payload.get("page_title"),
@@ -152,7 +186,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 "memory_summary": payload.get("memory_summary") or "",
             })
             await progress("preparing", "正在结合当前页面和已有对话核对需求")
-            result = await drive_turn(handle_teacher_turn(
+            result = await drive_turn(handle_assistant_turn(
                 session, tenant_id, turns, user_id=user_id,
                 can_manage_rules="scheduling:assign" in permissions,
                 page_title=payload.get("page_title"), page_path=payload.get("page_path"),
@@ -160,6 +194,7 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 page_context=payload.get("page_context"),
                 memory_summary=payload.get("memory_summary") or "",
                 message_id=payload.get("message_id"), on_progress=progress, on_trace=trace,
+                on_step=lambda step: consume_inbox("step"),
             ), persist, timeout=RUN_TIMEOUT)
             # A cancellation racing completion wins if it acquired this row first.
             run = (await session.execute(select(AiRun).where(AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == user_id).with_for_update().execution_options(populate_existing=True))).scalars().one()

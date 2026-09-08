@@ -3,14 +3,16 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.ai.agent import assistant_agent as assistant
+
 
 @pytest.mark.asyncio
 async def test_all_enabled_chat_providers_form_an_ordered_failover_chain():
     from app.ai.model.chat import resolve_chat_endpoints
 
     rows = [
-        SimpleNamespace(id=1, name="主模型", base_url="http://primary", api_key="a", chat_model="p", timeout_seconds=20),
-        SimpleNamespace(id=2, name="备用模型", base_url="http://backup", api_key="b", chat_model="b", timeout_seconds=30),
+        SimpleNamespace(id=1, name="主模型", provider_type="OPENAI", base_url="http://primary", api_key="a", chat_model="p", timeout_seconds=20),
+        SimpleNamespace(id=2, name="备用模型", provider_type="OLLAMA", base_url="http://backup", api_key="b", chat_model="b", timeout_seconds=30),
     ]
 
     class Result:
@@ -28,6 +30,7 @@ async def test_all_enabled_chat_providers_form_an_ordered_failover_chain():
 
     assert [item.name for item in endpoints[:2]] == ["主模型", "备用模型"]
     assert endpoints[0].key == "7:1"
+    assert endpoints[1].base_url == "http://backup/v1"
 
 
 def test_provider_circuit_isolates_repeated_failure_and_recovers_after_cooldown():
@@ -71,7 +74,7 @@ def test_request_shaped_errors_do_not_isolate_provider():
 
 @pytest.mark.asyncio
 async def test_failover_stops_starting_endpoints_once_budget_is_exhausted(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint, ChatError
 
     teacher.provider_circuits.clear()
@@ -94,7 +97,7 @@ async def test_failover_stops_starting_endpoints_once_budget_is_exhausted(monkey
     monkeypatch.setattr(teacher, "agent_reply", agent)
 
     with pytest.raises(ChatError) as ei:
-        await teacher.handle_teacher_turn(
+        await assistant.handle_assistant_turn(
             None, 1,
             [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}, {"role": "user", "content": "查准备度"}],
         )
@@ -105,7 +108,7 @@ async def test_failover_stops_starting_endpoints_once_budget_is_exhausted(monkey
 
 @pytest.mark.asyncio
 async def test_request_shaped_failure_on_last_provider_raises_precise_error(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint, ChatError
 
     teacher.provider_circuits.clear()
@@ -117,7 +120,7 @@ async def test_request_shaped_failure_on_last_provider_raises_precise_error(monk
     )
 
     with pytest.raises(ChatError) as ei:
-        await teacher.handle_teacher_turn(
+        await assistant.handle_assistant_turn(
             None, 1,
             [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}, {"role": "user", "content": "查准备度"}],
         )
@@ -127,7 +130,7 @@ async def test_request_shaped_failure_on_last_provider_raises_precise_error(monk
 
 @pytest.mark.asyncio
 async def test_missing_provider_config_raises_instead_of_local_mode(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatError
 
     teacher.provider_circuits.clear()
@@ -137,7 +140,7 @@ async def test_missing_provider_config_raises_instead_of_local_mode(monkeypatch)
     )
 
     with pytest.raises(ChatError) as ei:
-        await teacher.handle_teacher_turn(
+        await assistant.handle_assistant_turn(
             None, 1,
             [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}, {"role": "user", "content": "你好呀"}],
         )
@@ -147,7 +150,7 @@ async def test_missing_provider_config_raises_instead_of_local_mode(monkeypatch)
 
 @pytest.mark.asyncio
 async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint, ChatError
 
     teacher.provider_circuits.clear()
@@ -158,7 +161,7 @@ async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(mo
     monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
     agent = AsyncMock(side_effect=[
         ChatError("模型服务暂时不可用", "unavailable"),
-        teacher.TeacherTurn(text="备用模型已回答"),
+        teacher.AssistantTurn(text="备用模型已回答"),
     ])
     monkeypatch.setattr(teacher, "agent_reply", agent)
     events = []
@@ -166,7 +169,7 @@ async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(mo
     async def progress(phase, message):
         events.append((phase, message))
 
-    result = await teacher.handle_teacher_turn(
+    result = await assistant.handle_assistant_turn(
         None,
         1,
         [{"role": "user", "content": "帮我检查排课设置"}],
@@ -181,7 +184,7 @@ async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(mo
 
 @pytest.mark.asyncio
 async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint, ChatError
 
     teacher.provider_circuits.clear()
@@ -192,14 +195,14 @@ async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
     monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
     agent = AsyncMock(side_effect=[
         ChatError("不支持工具", "bad_request"),
-        teacher.TeacherTurn(text="备用模型完成了工具查询"),
+        teacher.AssistantTurn(text="备用模型完成了工具查询"),
     ])
     text_fallback = AsyncMock(return_value="不应调用")
     monkeypatch.setattr(teacher, "agent_reply", agent)
     monkeypatch.setattr(teacher, "complete_chat", text_fallback)
     monkeypatch.setattr(teacher, "retrieve_skill", AsyncMock(return_value=""))
 
-    result = await teacher.handle_teacher_turn(
+    result = await assistant.handle_assistant_turn(
         None,
         1,
         [{"role": "user", "content": "查询本校排课规则"}],
@@ -212,7 +215,7 @@ async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_teacher_agent_uses_local_guide_when_all_providers_fail(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint, ChatError
 
     teacher.provider_circuits.clear()
@@ -228,7 +231,7 @@ async def test_teacher_agent_uses_local_guide_when_all_providers_fail(monkeypatc
     async def progress(phase, message):
         events.append((phase, message))
 
-    result = await teacher.handle_teacher_turn(
+    result = await assistant.handle_assistant_turn(
         None,
         1,
         [{"role": "user", "content": "排课下一步怎么做"}],
@@ -243,7 +246,7 @@ async def test_teacher_agent_uses_local_guide_when_all_providers_fail(monkeypatc
 
 @pytest.mark.asyncio
 async def test_isolated_provider_is_skipped_without_calling_it(monkeypatch):
-    from app.ai.agent import teacher
+    from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint
 
     teacher.provider_circuits.clear()
@@ -255,14 +258,14 @@ async def test_isolated_provider_is_skipped_without_calling_it(monkeypatch):
         "resolve_chat_endpoints",
         AsyncMock(return_value=[primary, backup]),
     )
-    agent = AsyncMock(return_value=teacher.TeacherTurn(text="备用模型已回答"))
+    agent = AsyncMock(return_value=teacher.AssistantTurn(text="备用模型已回答"))
     monkeypatch.setattr(teacher, "agent_reply", agent)
     events = []
 
     async def progress(phase, message):
         events.append((phase, message))
 
-    result = await teacher.handle_teacher_turn(
+    result = await assistant.handle_assistant_turn(
         None,
         1,
         [{"role": "user", "content": "查询教师任教"}],
