@@ -8,6 +8,7 @@
 flowchart LR
     U[教务老师 / AssistantDock]
     API[FastAPI Assistant API]
+    AGW[Assistant Gateway\n输入投影、会话、同步 Turn、可恢复 Run]
     RUN[AIRun 后台任务\n状态、事件、心跳]
     AGENT[Assistant Agent\n上下文、工具循环]
     MGW[Model Gateway\n解析、调用、路由、故障转移]
@@ -22,7 +23,9 @@ flowchart LR
     CONFIRM[确认执行\n事务 + 审计]
     DB[(PostgreSQL)]
 
-    U -->|POST /assistant/runs| API --> RUN --> AGENT
+    U -->|POST /assistant/chat 或 /runs| API --> AGW
+    AGW -->|同步 Turn| AGENT
+    AGW -->|后台 Run| RUN --> AGENT
     RUN -->|每 5 秒轮询任务状态| U
     AGENT --> MGW --> DETECT
     DETECT -->|可恢复| RECOVER --> AGENT
@@ -39,7 +42,9 @@ flowchart LR
 
 ```text
 老师提问
-  -> 创建 AiRun，页面持续读取状态、阶段和心跳
+  -> FastAPI 完成登录、学校和权限校验
+  -> Assistant Gateway 投影模型可见上下文，并选择同步 Turn 或持久化 AiRun
+  -> 后台任务模式下，页面持续读取状态、阶段和心跳
   -> Assistant Agent 通过 Model Gateway 读取并调用模型
   -> Tool Gateway 按本轮租户、用户和权限开放教务工具
   -> 主模型 + 教务工具循环

@@ -1,23 +1,18 @@
 """轻课堂助手对话。"""
 from __future__ import annotations
 
-import logging
-import asyncio
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.agent.assistant_agent import handle_assistant_turn
 from app.ai.actions import decide_action
+from app.ai.gateway.assistant import AssistantRequest, assistant_gateway
 from app.ai.model.chat import ChatError
-from app.ai.conversations import compact_for_chat, conversation_view, delete_conversation, get_conversation, project_messages, sync_conversation
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
-
-logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/assistant", tags=["轻课堂助手"])
 
@@ -52,6 +47,18 @@ class ConversationIn(BaseModel):
     messages: list[ChatTurn] = Field(default_factory=list, max_length=60)
 
 
+def _assistant_request(body: ChatIn) -> AssistantRequest:
+    return AssistantRequest(
+        messages=[item.model_dump() for item in body.messages],
+        page_title=body.page_title,
+        page_path=body.page_path,
+        page_context=body.page_context.model_dump(exclude_none=True),
+        can=body.can,
+        cannot=body.cannot,
+        message_id=body.message_id,
+    )
+
+
 @router.get("/conversation", summary="读取当前用户的助手会话")
 async def read_assistant_conversation(
     session: AsyncSession = Depends(get_session),
@@ -60,9 +67,8 @@ async def read_assistant_conversation(
 ):
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
-    return {"code": 0, "message": "ok", "data": conversation_view(
-        await get_conversation(session, tenant_id, user.id)
-    )}
+    data = await assistant_gateway.read_conversation(session, tenant_id, user.id)
+    return {"code": 0, "message": "ok", "data": data}
 
 
 @router.put("/conversation", summary="同步当前用户的助手会话")
@@ -75,8 +81,8 @@ async def save_assistant_conversation(
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
     messages = [item.model_dump() for item in body.messages]
-    row = await sync_conversation(session, tenant_id, user.id, messages)
-    return {"code": 0, "message": "ok", "data": conversation_view(row)}
+    data = await assistant_gateway.save_conversation(session, tenant_id, user.id, messages)
+    return {"code": 0, "message": "ok", "data": data}
 
 
 @router.delete("/conversation", summary="开始新的助手会话")
@@ -87,8 +93,8 @@ async def clear_assistant_conversation(
 ):
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
-    await delete_conversation(session, tenant_id, user.id)
-    return {"code": 0, "message": "ok", "data": {"cleared": True}}
+    data = await assistant_gateway.clear_conversation(session, tenant_id, user.id)
+    return {"code": 0, "message": "ok", "data": data}
 
 
 @router.post("/chat", summary="助手对话")
@@ -100,48 +106,16 @@ async def assistant_chat(
 ):
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
-    turns: list[dict] = []
-    for item in body.messages[-20:]:
-        role = item.role if item.role in ("user", "assistant") else "user"
-        text = compact_for_chat(item.content or "")
-        if text:
-            turns.append({
-                "role": role,
-                "content": text,
-                "model_visible": item.model_visible,
-            })
-    turns = project_messages(turns, limit=20)
     try:
-        logger.info(
-            "assistant.chat start id=%s tenant=%s user=%s path=%s turns=%s",
-            body.message_id or "-",
-            tenant_id,
-            getattr(user, "id", None),
-            body.page_path,
-            len(turns),
-        )
         permissions = await get_user_permission_codes(session, user.id)
-        from app.ai.runs.service import RUN_TIMEOUT
-        async with asyncio.timeout(RUN_TIMEOUT):
-            turn = await handle_assistant_turn(
-                session,
-                tenant_id,
-                turns,
-                page_title=body.page_title,
-                page_path=body.page_path,
-                can=body.can,
-                cannot=body.cannot,
-                message_id=body.message_id,
-                user_id=user.id,
-                can_manage_rules="scheduling:assign" in permissions,
-                page_context=body.page_context.model_dump(exclude_none=True),
-            )
+        turn = await assistant_gateway.chat(
+            session, tenant_id, user.id, _assistant_request(body),
+            can_manage_rules="scheduling:assign" in permissions,
+        )
     except TimeoutError as exc:
         raise HTTPException(504, "本轮处理超时，请重试或把要求拆成几条；未执行规则写入") from exc
     except ChatError as exc:
-        logger.warning("assistant.chat fail id=%s err=%s", body.message_id or "-", exc.message)
         raise HTTPException(status_code=400, detail=exc.message) from exc
-    logger.info("assistant.chat done id=%s chars=%s", body.message_id or "-", len(turn.text))
     return {
         "code": 0,
         "message": "ok",
@@ -170,15 +144,11 @@ async def start_assistant_run(
     body: RunIn, session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
 ):
-    from app.ai.runs import create_run, spawn_run
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
-    payload = body.model_dump(exclude={"request_id"})
-    conversation = await get_conversation(session, tenant_id, user.id)
-    payload["memory_summary"] = conversation.summary if conversation else ""
-    data, created = await create_run(session, body.request_id, tenant_id, user.id, payload)
-    if created:
-        spawn_run(body.request_id, tenant_id, user.id, payload)
+    data = await assistant_gateway.start_run(
+        session, tenant_id, user.id, body.request_id, _assistant_request(body),
+    )
     return {"code": 0, "message": "ok", "data": data}
 
 
@@ -187,8 +157,7 @@ async def read_assistant_run(
     run_id: str, session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
 ):
-    from app.ai.runs import get_run
-    data = await get_run(session, run_id, tenant_id, user.id)
+    data = await assistant_gateway.read_run(session, tenant_id, user.id, run_id)
     return {"code": 0, "message": "ok", "data": data}
 
 
@@ -210,8 +179,7 @@ async def cancel_assistant_run(
     run_id: str, session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
 ):
-    from app.ai.runs import get_run
-    data = await get_run(session, run_id, tenant_id, user.id, cancel=True)
+    data = await assistant_gateway.read_run(session, tenant_id, user.id, run_id, cancel=True)
     return {"code": 0, "message": "ok", "data": data}
 
 

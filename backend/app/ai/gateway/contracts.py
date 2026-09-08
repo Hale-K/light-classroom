@@ -51,3 +51,32 @@ class ToolGatewayService(Protocol):
         page_context: dict | None,
         on_trace: TraceCallback | None = None,
     ) -> ToolScopeService: ...
+
+
+class AssistantGatewayService(Protocol):
+    async def read_conversation(
+        self, session: AsyncSession, tenant_id: int, user_id: int,
+    ) -> dict: ...
+
+    async def save_conversation(
+        self, session: AsyncSession, tenant_id: int, user_id: int, messages: list[dict],
+    ) -> dict: ...
+
+    async def clear_conversation(
+        self, session: AsyncSession, tenant_id: int, user_id: int,
+    ) -> dict: ...
+
+    async def chat(
+        self, session: AsyncSession, tenant_id: int, user_id: int, request: Any,
+        *, can_manage_rules: bool,
+    ) -> Any: ...
+
+    async def start_run(
+        self, session: AsyncSession, tenant_id: int, user_id: int,
+        request_id: str, request: Any,
+    ) -> dict: ...
+
+    async def read_run(
+        self, session: AsyncSession, tenant_id: int, user_id: int, run_id: str,
+        *, cancel: bool = False,
+    ) -> dict: ...
