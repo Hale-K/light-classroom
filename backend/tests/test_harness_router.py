@@ -6,18 +6,46 @@ from app.ai.agent import assistant_agent
 from app.ai.gateway import model as gateway_model
 from app.ai.gateway.tool import ToolGateway
 from app.ai.harness import HarnessRouter
+from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
 from app.ai.model.chat import ChatEndpoint, ChatOutcome
 
 
-def test_router_selects_registered_harnesses_deterministically():
+def test_router_maps_structured_intent_to_registered_harness():
     router = HarnessRouter()
 
-    assert router.select("这个页面怎么使用").name == "guide"
-    assert router.select("帮我检查排课准备情况，还缺什么").name == "readiness"
-    assert router.select("排课生成失败，为什么卡住了").name == "diagnosis"
-    assert router.select("为什么会这样", page_path="/scheduling").name == "diagnosis"
-    assert router.select("创建数学晚课禁排规则").name == "configuration"
+    for kind in AssistantIntent:
+        decision = IntentDecision(kind=kind, confidence=1, source="test")
+        expected = "guide" if kind is AssistantIntent.UNKNOWN else kind.value
+        assert router.select(decision).name == expected
     assert set(router.profiles) == {"guide", "readiness", "diagnosis", "configuration"}
+
+
+@pytest.mark.asyncio
+async def test_intent_gateway_classifies_business_and_page_context():
+    gateway = IntentGateway()
+
+    assert (await gateway.classify("这个页面怎么使用")).kind is AssistantIntent.GUIDE
+    assert (await gateway.classify("帮我检查排课准备情况，还缺什么")).kind is AssistantIntent.READINESS
+    assert (await gateway.classify("排课生成失败，为什么卡住了")).kind is AssistantIntent.DIAGNOSIS
+    assert (await gateway.classify("为什么会这样", page_path="/scheduling")).kind is AssistantIntent.DIAGNOSIS
+    assert (await gateway.classify("创建数学晚课禁排规则")).kind is AssistantIntent.CONFIGURATION
+
+
+@pytest.mark.asyncio
+async def test_intent_gateway_delegates_ambiguous_language_to_semantic_classifier():
+    async def semantic(query, page_path, recent_turns):
+        assert query == "照刚才说的处理"
+        assert recent_turns[-1]["content"] == query
+        return IntentDecision(AssistantIntent.CONFIGURATION, 0.82, "semantic")
+
+    decision = await IntentGateway(semantic).classify(
+        "照刚才说的处理",
+        page_path="/rules",
+        recent_turns=[{"role": "user", "content": "照刚才说的处理"}],
+    )
+
+    assert decision.kind is AssistantIntent.CONFIGURATION
+    assert decision.source == "semantic"
 
 
 def test_tool_scope_cannot_exceed_harness_allowlist():
@@ -58,8 +86,10 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     )
 
     assert result.text == "已检查"
-    assert events[0][0] == "harness.selected"
-    assert events[0][1]["name"] == "readiness"
+    assert events[0][0] == "intent.classified"
+    assert events[0][1]["kind"] == "readiness"
+    assert events[1][0] == "harness.selected"
+    assert events[1][1]["name"] == "readiness"
     assert invoke.await_args.kwargs["harness"].name == "readiness"
 
 

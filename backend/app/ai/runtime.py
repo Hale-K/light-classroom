@@ -10,6 +10,7 @@ from typing import Any
 from app.ai.guide import AssistantUiGuide
 from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.harness import HarnessRouter
+from app.ai.intent import IntentGateway
 from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.inbox import InboxKind, InboxMessage, consume, receive
@@ -54,6 +55,8 @@ class AssistantRuntime:
             self.services.register("tool_gateway", ToolGateway())
         if not self.services.has("ui_guide"):
             self.services.register("ui_guide", AssistantUiGuide)
+        if not self.services.has("intent_gateway"):
+            self.services.register("intent_gateway", IntentGateway())
         if not self.services.has("harness_router"):
             self.services.register("harness_router", HarnessRouter())
 

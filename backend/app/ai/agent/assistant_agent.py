@@ -15,6 +15,7 @@ from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import local_reply, rule_jumps
 from app.ai.graph.loop import ReactLoop
 from app.ai.harness import HarnessProfile, HarnessRouterService
+from app.ai.intent import IntentGatewayService
 from app.ai.model.chat import ChatEndpoint, ChatError
 from app.ai.prompt.messages import build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
@@ -103,9 +104,12 @@ async def agent_reply(
             ),
             "",
         )
-        harness = cast(HarnessRouterService, runtime.service("harness_router")).select(
-            last_user, page_path=page_path,
+        decision = await cast(
+            IntentGatewayService, runtime.service("intent_gateway")
+        ).classify(
+            last_user, page_path=page_path, recent_turns=turns,
         )
+        harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     cache_key = answer_cache_key(
         tenant_id,
         model,
@@ -234,9 +238,13 @@ async def handle_assistant_turn(
     runtime = runtime or AssistantRuntime(
         on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits,
     )
-    harness = cast(HarnessRouterService, runtime.service("harness_router")).select(
-        query, page_path=page_path,
+    decision = await cast(
+        IntentGatewayService, runtime.service("intent_gateway")
+    ).classify(
+        query, page_path=page_path, recent_turns=turns,
     )
+    await runtime.emit("intent.classified", decision.trace_data())
+    harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     await runtime.emit("harness.selected", harness.trace_data())
     if (
         last.get("role") == "user"

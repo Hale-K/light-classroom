@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
+from app.ai.intent import AssistantIntent, IntentDecision
+
 
 @dataclass(frozen=True, slots=True)
 class HarnessProfile:
@@ -35,7 +37,7 @@ class HarnessProfile:
 
 
 class HarnessRouterService(Protocol):
-    def select(self, query: str, *, page_path: str | None = None) -> HarnessProfile: ...
+    def select(self, decision: IntentDecision) -> HarnessProfile: ...
 
 
 GUIDE_HARNESS = HarnessProfile(
@@ -107,7 +109,7 @@ CONFIGURATION_HARNESS = HarnessProfile(
 
 
 class HarnessRouter:
-    """Deterministically select one of the server-owned harness profiles."""
+    """Map a classified intent to one server-owned harness profile."""
 
     profiles = MappingProxyType({
         profile.name: profile
@@ -116,28 +118,13 @@ class HarnessRouter:
         )
     })
 
-    _CONFIG_MARKERS = (
-        "禁排", "连堂", "规则草稿", "新增规则", "添加规则", "创建规则", "修改规则",
-        "配置规则", "设置规则", "建立规则",
-    )
-    _DIAGNOSIS_MARKERS = (
-        "排课失败", "生成失败", "生成未完成", "重新生成", "不能排", "排不出来",
-        "排课冲突", "卡住", "中断", "任务状态", "排课过程", "为什么失败",
-    )
-    _READINESS_MARKERS = (
-        "排课准备", "准备情况", "还缺什么", "缺少什么", "核对排课", "检查排课",
-        "课时方案", "课位结构", "任教关系", "任教覆盖",
-    )
+    _intent_profiles = MappingProxyType({
+        AssistantIntent.GUIDE: GUIDE_HARNESS,
+        AssistantIntent.READINESS: READINESS_HARNESS,
+        AssistantIntent.DIAGNOSIS: DIAGNOSIS_HARNESS,
+        AssistantIntent.CONFIGURATION: CONFIGURATION_HARNESS,
+        AssistantIntent.UNKNOWN: GUIDE_HARNESS,
+    })
 
-    def select(self, query: str, *, page_path: str | None = None) -> HarnessProfile:
-        text = " ".join((query or "").lower().split())
-        path = (page_path or "").lower()
-        if any(marker in text for marker in self._CONFIG_MARKERS):
-            return CONFIGURATION_HARNESS
-        if any(marker in text for marker in self._DIAGNOSIS_MARKERS):
-            return DIAGNOSIS_HARNESS
-        if any(marker in text for marker in self._READINESS_MARKERS):
-            return READINESS_HARNESS
-        if "scheduling" in path and any(marker in text for marker in ("为什么", "怎么回事", "异常")):
-            return DIAGNOSIS_HARNESS
-        return GUIDE_HARNESS
+    def select(self, decision: IntentDecision) -> HarnessProfile:
+        return self._intent_profiles[decision.kind]

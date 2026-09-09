@@ -9,6 +9,7 @@ flowchart LR
     U[教务老师 / AssistantDock]
     API[FastAPI Assistant API]
     AGW[Assistant Gateway\n输入投影、会话、同步 Turn、可恢复 Run]
+    INTENT[Intent Gateway\n任务类型、置信度、判定来源]
     HRT[Harness Router\n固定模板、工具白名单、Step 与时间预算]
     RUN[AIRun 后台任务\n状态、事件、心跳]
     AGENT[Assistant Agent\n上下文、工具循环]
@@ -25,8 +26,8 @@ flowchart LR
     DB[(PostgreSQL)]
 
     U -->|POST /assistant/chat 或 /runs| API --> AGW
-    AGW -->|同步 Turn| HRT --> AGENT
-    AGW -->|后台 Run| RUN --> HRT
+    AGW -->|同步 Turn| INTENT --> HRT --> AGENT
+    AGW -->|后台 Run| RUN --> INTENT
     RUN -->|每 5 秒轮询任务状态| U
     AGENT --> MGW --> DETECT
     DETECT -->|可恢复| RECOVER --> AGENT
@@ -45,7 +46,8 @@ flowchart LR
 老师提问
   -> FastAPI 完成登录、学校和权限校验
   -> Assistant Gateway 投影模型可见上下文，并选择同步 Turn 或持久化 AiRun
-  -> Harness Router 从服务端固定模板选择页面说明、准备检查、故障诊断或规则配置
+  -> Intent Gateway 根据本轮话语、当前页面和近期上下文输出结构化意图、置信度和判定来源
+  -> Harness Router 只按结构化意图选择页面说明、准备检查、故障诊断或规则配置
   -> 后台任务模式下，页面持续读取状态、阶段和心跳
   -> Assistant Agent 通过 Model Gateway 读取并调用模型
   -> Tool Gateway 按本轮租户、用户和权限开放教务工具
@@ -60,7 +62,9 @@ flowchart LR
 
 ## 固定 Harness 路由
 
-当前采用受约束的 JIT 思路：路由器只能选择服务端注册并经过测试的 Harness，不能执行模型生成的 Python、SQL 或 Shell。每次选择都会以 `harness.selected` 记录在 `AiRun.events` 的内部诊断轨迹中。
+当前采用受约束的 JIT 思路：`IntentGateway` 负责识别老师要说明页面、核对准备、诊断故障还是配置规则，并产生 `IntentDecision`；`HarnessRouter` 不再读取自然语言，只把 `AssistantIntent` 枚举映射到服务端注册并经过测试的 Harness。两步分别以 `intent.classified` 和 `harness.selected` 记录在 `AiRun.events` 的内部诊断轨迹中。
+
+当前默认识别器对高置信度业务表达采用可审查规则，对含糊表达可注入语义分类器；没有语义分类结果时安全回落到 `guide`。意图结果只选择任务策略，不能授予权限，也不能执行模型生成的 Python、SQL 或 Shell。
 
 | Harness | 策略 | 能力范围 | 预算 |
 |---|---|---|---|

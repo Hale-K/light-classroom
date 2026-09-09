@@ -3,6 +3,7 @@ import pytest
 from app.ai.guide import AssistantUiGuide
 from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.harness import HarnessRouter
+from app.ai.intent import IntentGateway
 from app.ai.runtime import AssistantRuntime, ServiceRegistry
 
 
@@ -12,6 +13,7 @@ def test_service_registry_has_named_runtime_capabilities():
     assert isinstance(runtime.service("model_gateway"), ModelGateway)
     assert isinstance(runtime.service("tool_gateway"), ToolGateway)
     assert runtime.service("ui_guide") is AssistantUiGuide
+    assert isinstance(runtime.service("intent_gateway"), IntentGateway)
     assert isinstance(runtime.service("harness_router"), HarnessRouter)
 
 
