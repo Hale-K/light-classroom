@@ -14,6 +14,7 @@ from app.ai.gateway import ModelGatewayService, ToolGatewayService
 from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import local_reply, rule_jumps
 from app.ai.graph.loop import ReactLoop
+from app.ai.harness import HarnessProfile, HarnessRouterService
 from app.ai.model.chat import ChatEndpoint, ChatError
 from app.ai.prompt.messages import build_agent_messages, build_messages
 from app.ai.resilience import provider_circuits
@@ -84,31 +85,47 @@ async def agent_reply(
     on_trace: TraceCallback | None = None,
     runtime: AssistantRuntime | None = None,
     on_step: Callable[[int], Awaitable[list[dict]]] | None = None,
+    harness: HarnessProfile | None = None,
 ) -> AssistantTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
-
-    cache_key = answer_cache_key(
-        tenant_id,
-        model,
-        ([{"role": "assistant", "content": memory_summary[-8000:]}] if memory_summary else []) + turns,
-        page_path=page_path,
-        can_manage_rules=can_manage_rules,
-        page_context=page_context,
-    )
-    cached = get_cached_answer(cache_key)
-    if cached:
-        logger.info("assistant.cache hit kind=%s", cached.get("kind"))
-        return AssistantTurn(
-            text=cached.get("text") or "",
-            think=[*(cached.get("think") or []), "回答缓存命中，未重跑模型"],
-            jumps=cached.get("jumps") or [],
-        )
 
     runtime = runtime or AssistantRuntime(
         on_progress=on_progress,
         on_trace=on_trace,
         circuits=provider_circuits,
     )
+    if harness is None:
+        last_user = next(
+            (
+                str(item.get("content") or "")
+                for item in reversed(turns)
+                if item.get("role") == "user"
+            ),
+            "",
+        )
+        harness = cast(HarnessRouterService, runtime.service("harness_router")).select(
+            last_user, page_path=page_path,
+        )
+    cache_key = answer_cache_key(
+        tenant_id,
+        model,
+        (
+            [{"role": "assistant", "content": memory_summary[-8000:]}]
+            if memory_summary else []
+        ) + turns,
+        page_path=page_path,
+        can_manage_rules=can_manage_rules,
+        page_context=page_context,
+        harness_name=harness.name,
+    )
+    cached = get_cached_answer(cache_key)
+    if cached:
+        logger.info("assistant.cache hit kind=%s harness=%s", cached.get("kind"), harness.name)
+        return AssistantTurn(
+            text=cached.get("text") or "",
+            think=[*(cached.get("think") or []), "回答缓存命中，未重跑模型"],
+            jumps=cached.get("jumps") or [],
+        )
     model_gateway = cast(ModelGatewayService, runtime.service("model_gateway"))
     tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))
     tool_scope = tool_gateway.open_scope(
@@ -117,6 +134,7 @@ async def agent_reply(
         user_id=user_id,
         can_manage_rules=can_manage_rules,
         page_context=page_context,
+        allowed_tools=harness.allowed_tools,
         on_trace=on_trace,
     )
 
@@ -129,6 +147,7 @@ async def agent_reply(
             cannot=cannot,
             page_context=page_context,
             memory_summary=memory,
+            harness_instructions=harness.instructions,
         )
 
     async def run_loop(history: list[dict], memory: str):
@@ -138,7 +157,7 @@ async def agent_reply(
             model=model,
             # 单步上限 90 秒：慢服务商生成草稿 JSON 可能超过 45 秒，中途砍掉只会报废整轮；
             # 总时长由 runs 的 RUN_TIMEOUT 兜底。
-            timeout=min(timeout, 90),
+            timeout=min(timeout, harness.step_timeout_seconds),
             messages=agent_messages(history, memory),
             tools=tool_scope.definitions,
             executor=tool_scope.execute,
@@ -147,6 +166,8 @@ async def agent_reply(
             on_progress=on_progress,
             on_trace=on_trace,
             on_step=on_step,
+            max_steps=harness.max_steps,
+            temperature=harness.temperature,
         ).run()
 
     try:
@@ -206,24 +227,37 @@ async def handle_assistant_turn(
     if not turns:
         raise ChatError("请输入内容")
     last = turns[-1]
-    if last.get("role") == "user" and _blocked_destructive_request(str(last.get("content") or "")):
+    query = next(
+        (str(item.get("content") or "") for item in reversed(turns) if item.get("role") == "user"),
+        "",
+    )
+    runtime = runtime or AssistantRuntime(
+        on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits,
+    )
+    harness = cast(HarnessRouterService, runtime.service("harness_router")).select(
+        query, page_path=page_path,
+    )
+    await runtime.emit("harness.selected", harness.trace_data())
+    if (
+        last.get("role") == "user"
+        and _blocked_destructive_request(str(last.get("content") or ""))
+    ):
         logger.warning("assistant.blocked_destructive_request tenant=%s user=%s", tenant_id, user_id)
-        return AssistantTurn(text="这个请求涉及删除数据库或批量清空数据，助手不会执行。若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。")
+        return AssistantTurn(
+            text=(
+                "这个请求涉及删除数据库或批量清空数据，助手不会执行。"
+                "若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。"
+            )
+        )
     if len(turns) == 1 and last.get("role") == "user":
-        guide = runtime.service("ui_guide") if runtime else None
-        fixed = (guide.local_reply(str(last.get("content") or ""), page_path) if guide else local_reply(str(last.get("content") or ""), page_path))
+        guide = runtime.service("ui_guide")
+        fixed = guide.local_reply(str(last.get("content") or ""), page_path)
         if fixed:
             logger.info("assistant.turn local id=%s", message_id or "-")
             return AssistantTurn(text=fixed)
     logger.info("assistant.turn llm id=%s", message_id or "-")
-    query = ""
-    for item in reversed(turns):
-        if item.get("role") == "user":
-            query = str(item.get("content") or "")
-            break
     await report_progress(on_progress, "detecting", "正在检查本校模型服务和备用通道")
     # 未配置服务商保持抛错：配置指引必须到达管理员；本地说明模式只留给"配了但全挂"。
-    runtime = runtime or AssistantRuntime(on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits)
     model_gateway = cast(ModelGatewayService, runtime.service("model_gateway"))
     endpoints = await model_gateway.resolve(session, tenant_id)
     # 故障转移共享本轮总预算（runs 的 RUN_TIMEOUT）：逐 endpoint 各自计时会让
@@ -291,12 +325,13 @@ async def handle_assistant_turn(
             base_url=endpoint.base_url, api_key=endpoint.api_key, model=endpoint.model,
             timeout=endpoint.timeout, page_title=page_title, page_path=page_path,
             can=can, cannot=cannot, user_id=user_id, can_manage_rules=can_manage_rules,
-            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary, on_trace=on_trace, runtime=runtime, on_step=on_step,
+            on_progress=on_progress, page_context=page_context, memory_summary=memory_summary,
+            on_trace=on_trace, runtime=runtime, on_step=on_step, harness=harness,
         )
 
     routed = await model_gateway.route(
         endpoints,
-        total_budget_seconds=RUN_TIMEOUT,
+        total_budget_seconds=min(RUN_TIMEOUT, harness.turn_timeout_seconds),
         invoke=invoke,
         on_progress=on_progress,
         on_trace=on_trace,

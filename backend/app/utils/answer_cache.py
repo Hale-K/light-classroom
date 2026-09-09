@@ -66,6 +66,7 @@ def answer_cache_key(
     page_path: str | None,
     can_manage_rules: bool,
     page_context: dict | None,
+    harness_name: str = "",
 ) -> str:
     """同一学校同一模型下，问题原文 + 对话上下文 + 页面 + 权限一致才算同一问。"""
     material = {
@@ -76,6 +77,7 @@ def answer_cache_key(
         "page": page_path or "",
         "rules_flag": can_manage_rules,
         "context": page_context or {},
+        "harness": harness_name,
     }
     raw = json.dumps(material, ensure_ascii=False, sort_keys=True)
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()

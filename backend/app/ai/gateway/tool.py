@@ -19,12 +19,16 @@ class ToolScope:
     user_id: int | None
     can_manage_rules: bool
     page_context: dict | None
+    allowed_tools: frozenset[str] | None = None
     on_trace: TraceCallback | None = None
     plan: dict | None = None
 
     @property
     def definitions(self) -> list[dict]:
-        return [*SCHOOL_TOOLS, *([PROPOSE_RULES_TOOL] if self.can_manage_rules else [])]
+        tools = [*SCHOOL_TOOLS, *([PROPOSE_RULES_TOOL] if self.can_manage_rules else [])]
+        if self.allowed_tools is None:
+            return tools
+        return [item for item in tools if item["function"]["name"] in self.allowed_tools]
 
     async def execute(self, name: str, arguments: str) -> str:
         allowed = {item["function"]["name"] for item in self.definitions}
@@ -77,6 +81,7 @@ class ToolGateway:
         user_id: int | None,
         can_manage_rules: bool,
         page_context: dict | None,
+        allowed_tools: frozenset[str] | None = None,
         on_trace: TraceCallback | None = None,
     ) -> ToolScope:
         return ToolScope(
@@ -85,5 +90,6 @@ class ToolGateway:
             user_id=user_id,
             can_manage_rules=can_manage_rules,
             page_context=page_context,
+            allowed_tools=allowed_tools,
             on_trace=on_trace,
         )

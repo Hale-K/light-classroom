@@ -35,6 +35,7 @@ def test_key_is_stable_and_sensitive_to_context():
     assert base != _key(page_path="/scheduling?tab=rules")
     assert base != _key(can_manage_rules=False)
     assert base != _key(page_context={"rule_group_id": "g1"})
+    assert base != _key(harness_name="diagnosis")
     assert base != _key(turns=[{"role": "user", "content": "换个问题"}])
 
 

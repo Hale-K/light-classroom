@@ -49,6 +49,7 @@ class ToolGatewayService(Protocol):
         user_id: int | None,
         can_manage_rules: bool,
         page_context: dict | None,
+        allowed_tools: frozenset[str] | None = None,
         on_trace: TraceCallback | None = None,
     ) -> ToolScopeService: ...
 
