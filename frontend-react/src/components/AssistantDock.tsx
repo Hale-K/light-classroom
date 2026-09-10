@@ -39,13 +39,17 @@ type ChatMsg = {
 function InboxTaskBar({
   progress,
   chatting,
+  show,
   onSteer,
 }: {
   progress: AssistantRun | null
   chatting: boolean
+  show: boolean
   onSteer: () => void
 }) {
-  if (!chatting && !progress) return null
+  // 任务条属于“调整方向”交互，只在用户已经追加消息后出现。
+  // 首条消息运行时保持对话区干净，避免把普通问候误显示成持续任务。
+  if (!show || (!chatting && !progress)) return null
   return (
     <div className="assist-inbox-taskbar" role="status" aria-live="polite">
       <span className="assist-inbox-task-label">
@@ -1113,6 +1117,7 @@ export default function AssistantDock() {
           <InboxTaskBar
             progress={runProgress}
             chatting={chatting}
+            show={shownThread.filter((item) => item.role === 'user').length > 1}
             onSteer={() => {
               setConnectionNote('请输入新的处理方向，发送后将用于下一步')
               composerRef.current?.focus()
