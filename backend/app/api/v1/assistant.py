@@ -23,6 +23,7 @@ class ChatTurn(BaseModel):
 
 
 class PageContext(BaseModel):
+    knowledge_base_id: int | None = Field(default=None, ge=1)
     academic_year: str | None = Field(default=None, max_length=20)
     term: str | None = Field(default=None, max_length=20)
     class_id: int | None = Field(default=None, ge=1)

@@ -12,6 +12,7 @@ from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.harness import HarnessRouter
 from app.ai.intent import IntentGateway
 from app.ai.intent import PostgresIntentClassifier, SentenceTransformerEmbedding
+from app.ai.knowledge.search import KnowledgeSearchService
 from app.core.config import settings
 from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
 from app.ai.runs.events import TraceCallback
@@ -23,6 +24,9 @@ _intent_gateway = IntentGateway(
     PostgresIntentClassifier(
         SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
     )
+)
+_knowledge_search = KnowledgeSearchService(
+    SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
 )
 
 
@@ -68,6 +72,8 @@ class AssistantRuntime:
             self.services.register("intent_gateway", _intent_gateway)
         if not self.services.has("harness_router"):
             self.services.register("harness_router", HarnessRouter())
+        if not self.services.has("knowledge_search"):
+            self.services.register("knowledge_search", _knowledge_search)
 
     def service(self, name: str) -> Any:
         return self.services.get(name)
