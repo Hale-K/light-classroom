@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from app.ai.knowledge.ingest import chunk_text, content_hash, parse_document
+from app.ai.intent.vector import SentenceTransformerEmbedding
+from app.core.config import settings
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -12,6 +14,7 @@ from app.api.deps import get_current_tenant, get_current_user, require_managemen
 from app.db.session import get_session
 
 router = APIRouter(prefix="/knowledge", tags=["知识库"], dependencies=[Depends(require_management_user)])
+_embedding = SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
 
 
 class KnowledgeBaseIn(BaseModel):
@@ -151,3 +154,37 @@ async def delete_document(
     await session.delete(row)
     await session.commit()
     return {"code": 0, "message": "ok", "data": {"deleted": True}}
+
+
+@router.post("/{base_id}/documents/{document_id}/vectorize", summary="生成文档向量")
+async def vectorize_document(
+    base_id: int, document_id: int, session: AsyncSession = Depends(get_session),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    doc = (await session.execute(select(KnowledgeDocument).where(
+        KnowledgeDocument.id == document_id, KnowledgeDocument.knowledge_base_id == base_id,
+        KnowledgeDocument.tenant_id == tenant_id,
+    ))).scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(404, "文档不存在")
+    chunks = (await session.execute(select(KnowledgeChunk).where(
+        KnowledgeChunk.document_id == document_id, KnowledgeChunk.tenant_id == tenant_id,
+    ).order_by(KnowledgeChunk.chunk_index))).scalars().all()
+    if not chunks:
+        raise HTTPException(400, "文档没有可向量化的分块")
+    doc.status = "embedding"
+    await session.commit()
+    try:
+        vectors = await _embedding.embed([c.content for c in chunks])
+        for chunk, vector in zip(chunks, vectors):
+            chunk.embedding = vector
+            chunk.embedding_model = "bge-base-zh-v1.5"
+            session.add(chunk)
+        doc.status = "ready"
+        await session.commit()
+    except Exception as exc:
+        doc.status = "failed"
+        doc.error_message = str(exc)[:500]
+        await session.commit()
+        raise HTTPException(503, "向量模型暂不可用，文档已标记为失败") from exc
+    return {"code": 0, "message": "ok", "data": {"id": doc.id, "status": doc.status, "chunk_count": len(chunks)}}
