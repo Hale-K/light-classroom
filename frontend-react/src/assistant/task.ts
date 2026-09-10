@@ -1,5 +1,6 @@
 import { assistantApi, type AssistantRun } from '@/api'
 import { ApiError } from '@/api/http'
+import { getAuthHeaders, getSseApiBaseURL } from '@/api/http'
 
 const MAX_READ_FAILURES = 12
 const MAX_WATCH_MS = 300000
@@ -15,6 +16,40 @@ function pause(ms: number, signal: AbortSignal) {
 
 /** 只轮询同一个任务。断网不重新调用模型，终态后停止轮询。 */
 export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdate: (run: AssistantRun) => void, onConnection: (message: string) => void): Promise<AssistantRun> {
+  try {
+    const response = await fetch(`${getSseApiBaseURL()}/assistant/runs/${encodeURIComponent(id)}/stream`, {
+      headers: { ...getAuthHeaders(), Accept: 'text/event-stream' }, signal,
+    })
+    if (!response.ok || !response.body) throw new Error('SSE unavailable')
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let latest: AssistantRun | undefined
+    while (!signal.aborted) {
+      const { value, done } = await reader.read()
+      if (done) break
+      buffer += decoder.decode(value, { stream: true })
+      const frames = buffer.split('\n\n')
+      buffer = frames.pop() || ''
+      for (const frame of frames) {
+        const data = frame.split('\n').find((line) => line.startsWith('data: '))?.slice(6)
+        if (!data) continue
+        try {
+          const payload = JSON.parse(data)
+          if (frame.includes('event: run.status')) {
+            latest = { ...(latest || {} as AssistantRun), ...payload } as AssistantRun
+            onUpdate(latest)
+            onConnection('实时连接中')
+            if (!['queued', 'running'].includes(payload.status)) return latest
+          }
+        } catch { /* ignore malformed frame; polling fallback remains available */ }
+      }
+    }
+    if (latest && !['queued', 'running'].includes(latest.status)) return latest
+  } catch (error) {
+    if (signal.aborted) throw error
+    onConnection('实时连接不可用，正在切换为轮询查看')
+  }
   let failures = 0
   const started = Date.now()
   while (!signal.aborted) {
