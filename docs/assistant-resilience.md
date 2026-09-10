@@ -25,7 +25,7 @@ flowchart LR
     CONFIRM[确认执行\n事务 + 审计]
     DB[(PostgreSQL)]
 
-    U -->|POST /assistant/chat 或 /runs| API --> AGW
+    U -->|POST /assistant/runs| API --> AGW
     AGW -->|同步 Turn| INTENT --> HRT --> AGENT
     AGW -->|后台 Run| RUN --> INTENT
     RUN -->|每 5 秒轮询任务状态| U

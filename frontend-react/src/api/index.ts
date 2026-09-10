@@ -1164,25 +1164,6 @@ export const assistantApi = {
     unwrap<AssistantRun>(http.post(`/assistant/runs/${encodeURIComponent(id)}/cancel`, {}, { timeout: 5000 })),
   decide: (id: string, decision: 'confirm' | 'cancel') =>
     unwrap<AssistantPlan>(http.post(`/assistant/actions/${encodeURIComponent(id)}`, { decision })),
-  chat: (
-    data: {
-      messages: { role: 'user' | 'assistant'; content: string; model_visible?: boolean }[]
-      page_title?: string
-      page_path?: string
-      can?: string[]
-      cannot?: string[]
-      message_id?: string
-    },
-    opts?: { signal?: AbortSignal },
-  ) =>
-    unwrap<{
-      text: string
-      message_id?: string | null
-      think?: string[]
-      choices?: { label: string; send: string }[]
-      plan?: AssistantPlan | null
-      model_visible?: boolean
-    }>(http.post('/assistant/chat', data, { timeout: 120000, signal: opts?.signal })),
 }
 
 export type OnboardingStep = {

@@ -9,7 +9,6 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.actions import decide_action
 from app.ai.gateway.assistant import AssistantRequest, assistant_gateway
-from app.ai.model.chat import ChatError
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
@@ -95,40 +94,6 @@ async def clear_assistant_conversation(
         raise HTTPException(403, "学校与当前账号不一致")
     data = await assistant_gateway.clear_conversation(session, tenant_id, user.id)
     return {"code": 0, "message": "ok", "data": data}
-
-
-@router.post("/chat", summary="助手对话")
-async def assistant_chat(
-    body: ChatIn,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
-):
-    if user.tenant_id != tenant_id:
-        raise HTTPException(403, "学校与当前账号不一致")
-    try:
-        permissions = await get_user_permission_codes(session, user.id)
-        turn = await assistant_gateway.chat(
-            session, tenant_id, user.id, _assistant_request(body),
-            can_manage_rules="scheduling:assign" in permissions,
-        )
-    except TimeoutError as exc:
-        raise HTTPException(504, "本轮处理超时，请重试或把要求拆成几条；未执行规则写入") from exc
-    except ChatError as exc:
-        raise HTTPException(status_code=400, detail=exc.message) from exc
-    return {
-        "code": 0,
-        "message": "ok",
-        "data": {
-            "text": turn.text,
-            "message_id": body.message_id,
-            "think": turn.think,
-            "choices": turn.choices,
-            "plan": turn.plan,
-            "jumps": turn.jumps,
-            "model_visible": turn.model_visible,
-        },
-    }
 
 
 class ActionDecision(BaseModel):

@@ -229,7 +229,7 @@ async def test_failed_commit_rolls_back_rules_and_receipt(database, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_chat_tool_to_confirm_endpoint_complete_flow(database, monkeypatch):
+async def test_gateway_tool_to_confirm_endpoint_complete_flow(database, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     import json
@@ -256,10 +256,16 @@ async def test_chat_tool_to_confirm_endpoint_complete_flow(database, monkeypatch
         ),
     )
     user = SimpleNamespace(id=2, tenant_id=1)
-    result = await assistant.assistant_chat(assistant.ChatIn(messages=[assistant.ChatTurn(role="user", content="数学周三6、7节禁排")]), session, user, 1)
+    result = await assistant.assistant_gateway.chat(
+        session,
+        1,
+        user.id,
+        assistant.AssistantRequest(messages=[{"role": "user", "content": "数学周三6、7节禁排"}]),
+        can_manage_rules=True,
+    )
     assert caller.await_count == 1  # Successful proposal stops before another model call.
-    assert "不可使用模型" not in result["data"]["text"]
-    plan = result["data"]["plan"]
+    assert "不可使用模型" not in result.text
+    plan = result.plan
     assert plan["status"] == "pending"
     sync.commit()
     # Permission revoked between preview and confirmation must block the write.

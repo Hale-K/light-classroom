@@ -1,6 +1,6 @@
 # 排课 Agent
 
-助手复用 FastAPI、OpenAI 兼容模型与现有排课规则引擎。老师描述要求，助手查询本校现状、补齐缺失信息、生成规则草稿；老师点击确认后，服务端保存并返回回执。说明书来自 `app/ai/skill/book`，不检索源码或业务文档，不使用向量库。
+助手复用 FastAPI、OpenAI 兼容模型与现有排课规则引擎。老师描述要求，助手查询本校现状、补齐缺失信息、生成规则草稿；老师点击确认后，服务端保存并返回回执。通用意图由本地 BGE + pgvector 路由到对应 Harness；说明书正文仍来自 `app/ai/skill/book`，不检索源码或业务文档。
 
 ## 第一版能力
 
@@ -26,17 +26,17 @@
 
 ## 调用链
 
-`AssistantDock → POST /api/v1/assistant/runs → execute_run → handle_teacher_turn → run_tool_loop`；前端通过 `GET /runs/{id}` 查看真实阶段和结果。旧 `/chat` 保留兼容。
+`AssistantDock → POST /api/v1/assistant/runs → execute_run → AssistantGateway → handle_assistant_turn → Harness → ReActLoop`；前端通过 `GET /runs/{id}` 查看真实阶段和结果。
 
 模型可调用：`lookup_teachers`、`lookup_schedule_setup`、`lookup_rules`、`lookup_playbook`、`lookup_generation_status`，有配置权限时额外提供 `propose_rules`。查询结果返回模型；成功生成草稿后停止循环，由服务端返回可信摘要和卡片，不再让模型改写草稿内容。
 
 聊天最多保留最近 20 条消息，每条截取 4000 字符；模型循环最多 4 轮，后台助手任务总预算 100 秒。工具失败转成可读观察供模型澄清；不支持工具调用时退回说明书问答，明确本轮没有可执行草稿。
 
-前端保留既有命名导航、操作指南、科目教师查询和课时预览；规则需求进入后端 Agent，进入后端后的后续消息继续携带上下文，不再被本地关键词截断。旧课时确认路径仍独立于规则草稿。
+自由文本全部进入后端 AssistantGateway，由同一份 pgvector 语义路由结果选择 Harness。前端只对老师明确点击的任务按钮执行确定性动作，并保留跳转确认；不再维护关键词意图旁路。旧课时确认路径仍独立于规则草稿。
 
 ## HTTP 契约
 
-`POST /api/v1/assistant/chat` 保留原字段，响应 `data` 新增可空 `plan`：
+`POST /api/v1/assistant/runs` 提交可恢复任务；`GET /api/v1/assistant/runs/{id}` 返回状态，并在完成时通过 `data.result.plan` 返回可空草稿：
 
 ```json
 {
@@ -66,7 +66,7 @@
 
 ## 验证
 
-- 助手相关后端测试：`python -m pytest tests/test_assistant_actions.py tests/test_teacher_agent.py tests/test_agent_messages.py tests/test_assistant_clarify.py tests/test_chat_message.py tests/test_rule_intent.py tests/test_school_tools.py tests/test_skill_retrieve.py tests/test_tool_loop.py -q`。
+- 助手相关后端测试：`python -m pytest tests/test_assistant_guide.py tests/test_intent_vector.py tests/test_assistant_runtime.py tests/test_assistant_runs.py tests/test_assistant_progress.py tests/test_assistant_gateway.py tests/test_assistant_agent.py tests/test_assistant_actions.py -q`。
 - PostgreSQL 并发测试：设置 `ASSISTANT_POSTGRES_TEST=1`，运行 `python -m pytest tests/test_assistant_postgres.py -q`。仅允许本机数据库，使用随机临时 schema 并在结束时清理。
 - 前端：`npm run build`。浏览器：Vite 运行于 5176、Node 可解析 Playwright 且安装 Chrome 后运行 `node tests/assistant-agent.browser.cjs`。
 - 浏览器使用隔离上下文与模拟接口验证预览、确认、取消、冲突、连续对话和窄屏布局，不操作学校真实规则。

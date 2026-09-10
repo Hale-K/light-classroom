@@ -6,8 +6,8 @@
 |-------------------|--------|--------|
 | ChatModel / ChatClient | `model/` | OpenAI 兼容对话（含 tools 参数）、服务商探测；`routing.py` 统一服务商选择、熔断隔离、故障转移和总预算 |
 | PromptTemplate | `prompt/` | 拼本轮 system |
-| Advisor | `advisor/` | 澄清守卫（**无向量 RAG**） |
-| Agent Framework | `agent/` | 教务一轮：首轮本地回复 → 带完整上下文的工具循环 |
+| Intent Gateway | `intent/` | 本地 BGE 生成向量，pgvector 匹配语义样例并选择 Harness |
+| Agent Framework | `agent/` | 教务一轮：安全拦截 → Gateway 路由 → 带完整上下文的工具循环 |
 | Graph Core | `graph/` | 工具循环：模型 → 教务只读工具 → 观察 → 再答，步数封顶 |
 | Agent Skills | `skill/` | `skill/book/` 说明书；循环里模型用 `lookup_playbook` 取正文 |
 | Tool / FunctionCallback | `tools/` | `retrieve_skill`（降级路径）；`school.py` 教务只读查询 |
@@ -19,8 +19,8 @@
 | MCP Client / Registry | `mcp/` | **不接协议**；远程 Tool = 本校 REST |
 | 表模型 | 分域存放 | `AiProvider` 在 `model/store.py`，`AiAction` 在 `actions/models.py`，`AiRun` 在 `runs/models.py` |
 
-入口：`POST /assistant/chat` → `agent.teacher.handle_teacher_turn`。
-模型不支持工具调用时自动降级为「目录路由 + 直接补全」旧路径。
+入口：`POST /assistant/runs` → `AssistantGateway` → `agent.assistant_agent.handle_assistant_turn`。
+模型不支持工具调用时自动降级为「目录路由 + 直接补全」路径。
 同一问题短时间重复提问走回答缓存（`app/utils/answer_cache.py`）：只取说明书的问题缓存 6 小时，
 查过本校实时数据的问题缓存 2 分钟；草稿与降级回答不缓存。
 

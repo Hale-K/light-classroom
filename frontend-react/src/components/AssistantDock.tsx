@@ -9,8 +9,7 @@ import AssistantRulePlan from '@/components/AssistantRulePlan'
 import AssistMarkdown from '@/components/AssistMarkdown'
 import Icon from '@/components/Icon'
 import { type HoursDraft } from '@/assistant/hoursPlan'
-import { routeTeacherMessage, type Extra } from '@/assistant/orchestrate'
-import { runAssistantTool, type JumpLink } from '@/assistant/run'
+import { runAssistantTool, type JumpLink, type ToolExtra } from '@/assistant/run'
 import { assistLog, newMsgId } from '@/assistant/trace'
 import { hereOf, jumpLabel, placeLabel, samePlace } from '@/assistant/place'
 import { decideJumpReply } from '@/assistant/jump-intent'
@@ -257,7 +256,7 @@ export default function AssistantDock() {
   const busyRef = useRef(false)
   const dirtyRef = useRef(false)
   const lockMergeRef = useRef(false)
-  const forcedRef = useRef<{ tool: AssistantTask['tool']; path?: string; extra?: Extra & { hoursDraft?: HoursDraft } } | null>(null)
+  const forcedRef = useRef<{ tool: AssistantTask['tool']; path?: string; extra?: ToolExtra } | null>(null)
   const midRef = useRef('')
   const agentConversationRef = useRef(false)
   const activeRunRef = useRef<string | null>(null)
@@ -401,7 +400,7 @@ export default function AssistantDock() {
         midRef.current = tid
         assistLog(tid, 'turn', merged.slice(0, 80))
         const hereNow = hereOf(location.pathname, location.search)
-        const withTrace = (extra?: Extra & { hoursDraft?: HoursDraft }) => ({ ...extra, here: hereNow, traceId: tid })
+        const withTrace = (extra?: ToolExtra) => ({ ...extra, here: hereNow, traceId: tid })
         const previousAnswer = [...threadRef.current].reverse().find((item) => item.role === 'bot' && item.text)
         const jumpDecision = previousAnswer?.jumps ? decideJumpReply(merged, previousAnswer.jumps) : { kind: 'none' as const }
         if (jumpDecision.kind === 'confirm') {
@@ -453,51 +452,11 @@ export default function AssistantDock() {
           })
           break
         }
-        const hasHistory = threadRef.current.some((item) => item.role === 'bot' && Boolean(item.text))
-        const route = resumeId || agentConversationRef.current
-          ? { kind: 'llm' as const }
-          : routeTeacherMessage(merged, hereNow, hasHistory)
-        assistLog(tid, 'route', route.kind === 'tool' ? `${route.tool} ${route.path}` : route.kind)
+        // 自由文本统一交给后端 AssistantGateway。页面上的明确任务按钮仍通过
+        // forcedRef 调用确定性工具，避免前后端各维护一套关键词意图路由。
+        assistLog(tid, 'route', 'gateway')
         halt()
         if (dirtyRef.current) continue
-        if (route.kind === 'say') {
-          commitThread((prev) => {
-            const next = upsertThink(prev, '按口径直接回复')
-            const thinkBot = [...next].reverse().find((m) => m.role === 'bot' && !m.text)
-            const done = thinkBot?.think?.live
-              ? [...(thinkBot.think.done || []), thinkBot.think.live]
-              : thinkBot?.think?.done || []
-            return replaceThinkBot(next, { role: 'bot', text: route.text, mid: tid, think: { done } })
-          })
-          if (dirtyRef.current) continue
-          break
-        }
-        if (route.kind === 'tool') {
-          lockMergeRef.current = route.tool === 'executeHours'
-          const result = await runAssistantTool(route.tool, route.path || undefined, withTrace(route.extra), (line) => {
-            if (epoch === epochRef.current) commitThread((prev) => upsertThink(prev, line))
-          })
-          halt()
-          if (dirtyRef.current) continue
-          const jumps = confirmJumps(result, hereNow)
-          commitThread((prev) => {
-            const thinkBot = [...prev].reverse().find((m) => m.role === 'bot' && !m.text)
-            const done = thinkBot?.think?.live
-              ? [...(thinkBot.think.done || []), thinkBot.think.live]
-              : thinkBot?.think?.done || []
-            return replaceThinkBot(prev, {
-              role: 'bot',
-              text: result.report,
-              mid: tid,
-              hoursDraft: result.hoursDraft,
-              awaitRules: result.awaitRules,
-              jumps,
-              advice: result.advice,
-              think: done.length ? { done } : undefined,
-            })
-          })
-          break
-        }
         commitThread((prev) => upsertThink(prev, resumeId ? '正在恢复上次任务状态' : '已收到，正在提交任务'))
         agentConversationRef.current = true
         const history = threadRef.current.filter((m) => m.text && m.modelVisible !== false)
@@ -676,7 +635,7 @@ export default function AssistantDock() {
 
   const pushMsg = (msg: ChatMsg) => commitThread((prev) => [...prev, msg])
 
-  const runTask = (item: AssistantTask, extra?: Extra & { hoursDraft?: HoursDraft }) => {
+  const runTask = (item: AssistantTask, extra?: ToolExtra) => {
     followLatestRef.current = true
     forcedRef.current = { tool: item.tool, path: item.path, extra }
     if (!busyRef.current) midRef.current = newMsgId()

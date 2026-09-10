@@ -17,7 +17,7 @@
   "participants": [
     { "id": "teacher", "type": "external", "label": "教务老师", "sublabel": "用户" },
     { "id": "ui", "type": "frontend", "label": "AssistantDock", "sublabel": "React 前端" },
-    { "id": "api", "type": "backend", "label": "Assistant API", "sublabel": "chat · runs" },
+    { "id": "api", "type": "backend", "label": "Assistant API", "sublabel": "runs · inbox" },
     { "id": "run", "type": "backend", "label": "Run Service", "sublabel": "Turn 编排与进度" },
     { "id": "store", "type": "database", "label": "Run Store", "sublabel": "AiRun · 事件" },
     { "id": "inbox", "type": "messagebus", "label": "Agent Inbox", "sublabel": "消息边界" },
@@ -32,7 +32,7 @@
   ],
   "messages": [
     { "from": "teacher", "to": "ui", "y": 180, "label": "输入教务任务", "variant": "emphasis" },
-    { "from": "ui", "to": "api", "y": 222, "label": "POST /assistant/chat 或 /runs", "variant": "emphasis" },
+    { "from": "ui", "to": "api", "y": 222, "label": "POST /assistant/runs", "variant": "emphasis" },
     { "from": "api", "to": "run", "y": 264, "label": "创建 / 恢复 Run", "variant": "default" },
     { "from": "run", "to": "store", "y": 306, "label": "写入用户消息 + turn.started", "variant": "emphasis" },
     { "from": "run", "to": "ui", "y": 348, "label": "推送任务已接收", "variant": "return" },

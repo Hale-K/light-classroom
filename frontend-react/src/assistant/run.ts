@@ -1,8 +1,6 @@
 import { authApi, facilityApi, orgApi, schedulingApi, teacherProfilesApi } from '@/api'
 import { allocateHours, type HoursDraft } from '@/assistant/hoursPlan'
-import type { ConsecutiveHint, PrepSlot } from '@/assistant/intent'
 import { placeLabel, schedTab } from '@/assistant/place'
-import { ruleGuideCopy, type RuleGuide } from '@/assistant/ruleGuide'
 import { assistLog } from '@/assistant/trace'
 import { pageGuidanceText } from '@/assistant/page-guidance'
 
@@ -16,9 +14,6 @@ export type ToolExtra = {
   subject?: string
   weekly?: number
   hoursDraft?: HoursDraft
-  prepSlots?: PrepSlot[]
-  consecutive?: ConsecutiveHint
-  ruleGuide?: RuleGuide
   here?: string
   traceId?: string
 }
@@ -88,83 +83,7 @@ async function yearGridLine() {
   return { year: year || '未设', term, gridLine }
 }
 
-function subjectCovered(name: string, names: Set<string>): boolean {
-  for (const item of names) {
-    if (item === name || item.includes(name) || name.includes(item)) return true
-  }
-  return false
-}
-
 export type ThinkFn = (line: string) => void
-
-async function checkPrepPreconditions(
-  slots: PrepSlot[],
-  think?: ThinkFn,
-): Promise<{ ok: true; year: string; term: string; gridLine: string } | { ok: false; path: string; report: string }> {
-  think?.('核对本校学年和课位')
-  const years = await authApi.academicYears()
-  const year = years.current_academic_year
-  const term = years.current_term || '1'
-  if (!year) {
-    return { ok: false, path: '/settings', report: '还没有当前学年。请先到系统设置核对学年学期，再配备课时段。' }
-  }
-  let periodsPerDay = 0
-  let gridLine = '网格未配置'
-  try {
-    const grid = await schedulingApi.gridConfig({ academic_year: year, term })
-    periodsPerDay = grid.periods_per_day
-    gridLine = `网格 ${grid.days} 天 × ${grid.periods_per_day} 节${grid.enable_evening ? '，含晚自习' : ''}`
-  } catch {
-    return { ok: false, path: '/scheduling?tab=slots', report: '课位结构还没保存，备课时段对不上第几节。请先到排课「课位结构」保存网格。' }
-  }
-  const needMax = Math.max(0, ...slots.flatMap((s) => s.periods))
-  if (needMax > periodsPerDay) {
-    return {
-      ok: false,
-      path: '/scheduling?tab=slots',
-      report: `网格每天只有 ${periodsPerDay} 节，备课时段写到第 ${needMax} 节。请先改课位结构，再配禁排。`,
-    }
-  }
-  const resources = await schedulingApi.resources()
-  if (!resources.classes.length) {
-    return { ok: false, path: '/classes', report: '还没有行政班。请先建班，再填课时和任教，最后才是备课时段禁排。' }
-  }
-  think?.('核对本校课时是否已建')
-  const hours = await schedulingApi.courseHours({ academic_year: year, term })
-  const hourNames = new Set(
-    hours.filter((h) => (h.weekday_periods || 0) > 0).map((h) => h.subject_name || ''),
-  )
-  think?.('核对本校任教是否已建')
-  const asgNames = new Set(
-    resources.assignments
-      .filter((a) => a.academic_year === year && a.term === term && a.teacher_id)
-      .map((a) => a.subject_name || ''),
-  )
-  const missingHours = slots.map((s) => s.subject).filter((name, i, all) => all.indexOf(name) === i && !subjectCovered(name, hourNames))
-  const missingAsg = slots.map((s) => s.subject).filter((name, i, all) => all.indexOf(name) === i && !subjectCovered(name, asgNames))
-  if (missingHours.length && missingAsg.length) {
-    return {
-      ok: false,
-      path: '/scheduling?tab=hours',
-      report: `备课禁排要先有课时和任教。现网课时缺 ${missingHours.join('、')}，任教缺 ${missingAsg.join('、')}。请先在课时管理把这些科的周节数填上，再到任教关系对老师。`,
-    }
-  }
-  if (missingHours.length) {
-    return {
-      ok: false,
-      path: '/scheduling?tab=hours',
-      report: `任教已有。课时还缺 ${missingHours.join('、')}。请先在课时管理填这些科的周节数，再配备课时段禁排。`,
-    }
-  }
-  if (missingAsg.length) {
-    return {
-      ok: false,
-      path: '/scheduling?tab=assignments',
-      report: `课时已有。任教还缺 ${missingAsg.join('、')}。请先在任教关系把这些科对上老师，再配备课时段禁排。`,
-    }
-  }
-  return { ok: true, year, term, gridLine }
-}
 
 export async function runAssistantTool(
   tool: AssistantTool,
@@ -346,67 +265,6 @@ export async function runAssistantTool(
     }
   }
   if (tool === 'explainRulePack') {
-    const guide = extra?.ruleGuide
-    if (guide) {
-      const onRules = schedTab(extra?.here) === 'rules'
-      think?.(`判断路由：当前在${placeLabel(extra?.here)}`)
-      think?.(`对到组件：${guide.template}`)
-      if (onRules && typeof window !== 'undefined') {
-        window.dispatchEvent(new Event('lc-assist-hint-rule-add'))
-      }
-      const copy = ruleGuideCopy(guide, onRules)
-      return {
-        path: '/scheduling?tab=rules',
-        jumps: onRules ? [] : [{ label: '去建立规则', path: '/scheduling?tab=rules' }],
-        report: copy.report,
-        advice: copy.advice,
-      }
-    }
-    const consecutive = extra?.consecutive
-    if (consecutive) {
-      const here = placeLabel(extra?.here)
-      const tab = schedTab(extra?.here)
-      think?.(`判断路由：当前在${here}；课时管理填节数，建立规则加连堂`)
-      const hoursNeed = consecutive.weekly
-        ? `把${consecutive.subject}工作日周课时填成 ${consecutive.weekly} 节（周一到周五总量，不是规则）`
-        : `把${consecutive.subject}工作日周课时填够（连堂不代替节数）`
-      const routeLine =
-        tab === 'hours'
-          ? `当前已在课时管理。请先在本页${hoursNeed}，再点「去建立规则」。`
-          : tab === 'rules'
-            ? `当前已在建立规则。请先点「去课时管理」${hoursNeed}，再回到本页加组件。`
-            : `当前在「${here}」。请先跳到课时管理填节数，再跳到建立规则加组件。`
-      return {
-        path: '/scheduling?tab=hours',
-        jumps: [
-          { label: tab === 'hours' ? '已在课时管理' : '去课时管理', path: '/scheduling?tab=hours' },
-          { label: tab === 'rules' ? '已在建立规则' : '去建立规则', path: '/scheduling?tab=rules' },
-        ],
-        report: routeLine,
-        advice: `建议添加规则组件：学科连堂，目标「${consecutive.subject}」，每周至少 1 天连续 2 节。建立规则里已有模板「${consecutive.subject}连堂规则」。`,
-      }
-    }
-    const slots = extra?.prepSlots
-    if (slots?.length) {
-      think?.(`判断路由：当前在${placeLabel(extra?.here)}；备课时段是建立规则课位禁排`)
-      const ready = await checkPrepPreconditions(slots, think)
-      if (!ready.ok) {
-        return {
-          path: ready.path,
-          report: `当前在「${placeLabel(extra?.here)}」。${ready.report}`,
-          jumps: [{ label: ready.path.includes('hours') ? '去课时管理' : ready.path.includes('assignments') ? '去任教关系' : ready.path.includes('slots') ? '去课位结构' : '去对应页', path: ready.path }],
-        }
-      }
-      think?.('对照课位禁排模板')
-      const lines = slots.map((s) => `${s.subject} ${s.weekday}第${s.periods.join('、')}节`)
-      const tab = schedTab(extra?.here)
-      return {
-        path: '/scheduling?tab=rules',
-        jumps: [{ label: tab === 'rules' ? '已在建立规则' : '去建立规则', path: '/scheduling?tab=rules' }],
-        report: `当前在「${placeLabel(extra?.here)}」。备课时段不排该科，不是排课时数。学年 ${ready.year} 第${ready.term}学期，${ready.gridLine}。课时和任教已齐，请到建立规则添加。`,
-        advice: `建议添加规则组件：课位禁排（按学科、周几、节次）。对照：\n${lines.join('\n')}\n勾选对应模板即可。`,
-      }
-    }
     think?.(`判断路由：当前在${placeLabel(extra?.here)}`)
     think?.('核对本校课时和任教是否已建')
     const { year, term, gridLine } = await yearGridLine()
