@@ -240,6 +240,23 @@ async def handle_assistant_turn(
     runtime = runtime or AssistantRuntime(
         on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits,
     )
+    if (
+        last.get("role") == "user"
+        and _blocked_destructive_request(str(last.get("content") or ""))
+    ):
+        logger.warning("assistant.blocked_destructive_request tenant=%s user=%s", tenant_id, user_id)
+        return AssistantTurn(
+            text=(
+                "这个请求涉及删除数据库或批量清空数据，助手不会执行。"
+                "若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。"
+            )
+        )
+    if len(turns) == 1 and last.get("role") == "user":
+        guide = runtime.service("ui_guide")
+        fixed = guide.local_reply(str(last.get("content") or ""), page_path)
+        if fixed:
+            logger.info("assistant.turn local id=%s", message_id or "-")
+            return AssistantTurn(text=fixed)
     decision = await cast(
         IntentGatewayService, runtime.service("intent_gateway")
     ).classify(
@@ -263,23 +280,6 @@ async def handle_assistant_turn(
                 await runtime.emit("knowledge.retrieved", {"count": len(hits), "knowledge_base_id": int(knowledge_base_id)})
         except Exception as exc:
             logger.warning("assistant.knowledge search unavailable: %s", exc)
-    if (
-        last.get("role") == "user"
-        and _blocked_destructive_request(str(last.get("content") or ""))
-    ):
-        logger.warning("assistant.blocked_destructive_request tenant=%s user=%s", tenant_id, user_id)
-        return AssistantTurn(
-            text=(
-                "这个请求涉及删除数据库或批量清空数据，助手不会执行。"
-                "若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。"
-            )
-        )
-    if len(turns) == 1 and last.get("role") == "user":
-        guide = runtime.service("ui_guide")
-        fixed = guide.local_reply(str(last.get("content") or ""), page_path)
-        if fixed:
-            logger.info("assistant.turn local id=%s", message_id or "-")
-            return AssistantTurn(text=fixed)
     logger.info("assistant.turn llm id=%s", message_id or "-")
     await report_progress(on_progress, "detecting", "正在检查本校模型服务和备用通道")
     # 未配置服务商保持抛错：配置指引必须到达管理员；本地说明模式只留给"配了但全挂"。
