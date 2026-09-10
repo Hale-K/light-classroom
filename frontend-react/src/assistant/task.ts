@@ -6,6 +6,10 @@ const MAX_READ_FAILURES = 12
 const MAX_WATCH_MS = 300000
 const SSE_IDLE_MS = 8000
 
+function isActiveRun(status: AssistantRun['status']) {
+  return status === 'queued' || status === 'running'
+}
+
 function pause(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve, reject) => {
     const stop = () => { clearTimeout(timer); reject(new DOMException('已停止查看', 'AbortError')) }
@@ -58,12 +62,12 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
             latest = { ...(latest || {} as AssistantRun), ...payload } as AssistantRun
             onUpdate(latest)
             onConnection('实时连接中')
-            if (!['queued', 'running'].includes(payload.status)) return latest
+            if (!isActiveRun(payload.status)) return latest
           }
         } catch { /* ignore malformed frame; polling fallback remains available */ }
       }
     }
-    if (latest && !['queued', 'running'].includes(latest.status)) return latest
+    if (latest && !isActiveRun(latest.status)) return latest
   } catch (error) {
     if (signal.aborted) throw error
     await reader?.cancel().catch(() => undefined)
@@ -87,7 +91,7 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
       continue
     }
     onUpdate(run)
-    if (run.status !== 'running') return run
+    if (!isActiveRun(run.status)) return run
     if (Date.now() - started > MAX_WATCH_MS) throw new Error('任务仍在后台运行，暂未收到结束状态。可以稍后恢复查看，不需要重复发送需求。')
     await pause(1500, signal)
   }

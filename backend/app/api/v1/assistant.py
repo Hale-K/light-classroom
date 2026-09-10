@@ -158,17 +158,21 @@ async def stream_assistant_run(
 ):
     if user.tenant_id != tenant_id:
         raise HTTPException(403, "学校与当前账号不一致")
+    current_user_id = user.id
 
     async def events():
         cursor = 0
         while True:
             run = (await session.execute(select(AiRun).where(
-                AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == user.id,
+                AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == current_user_id,
             ).execution_options(populate_existing=True))).scalars().first()
             if run is None:
                 yield "event: error\ndata: {\"message\":\"未找到本账号的助手任务\"}\n\n"
                 return
             view = run_view(run)
+            # End the read transaction before sleeping so every open SSE stream does
+            # not reserve a PostgreSQL connection for the lifetime of the task.
+            await session.rollback()
             items = view["events"]
             for event in items[cursor:]:
                 yield f"id: {cursor + 1}\nevent: run.event\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"

@@ -1136,7 +1136,7 @@ export type AssistantPlan = {
 
 export type AssistantRun = {
   id: string
-  status: 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
   phase: string
   message: string
   elapsed_seconds: number
