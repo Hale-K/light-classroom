@@ -37,24 +37,24 @@ type ChatMsg = {
 }
 
 function InboxTaskBar({
-  progress,
   chatting,
   show,
+  message,
   onSteer,
 }: {
-  progress: AssistantRun | null
   chatting: boolean
   show: boolean
+  message: string
   onSteer: () => void
 }) {
   // 任务条属于“调整方向”交互，只在用户已经追加消息后出现。
   // 首条消息运行时保持对话区干净，避免把普通问候误显示成持续任务。
-  if (!show || (!chatting && !progress)) return null
+  if (!show || !chatting) return null
   return (
     <div className="assist-inbox-taskbar" role="status" aria-live="polite">
-      <span className="assist-inbox-task-label">
+      <span className="assist-inbox-task-label" title={message}>
         <Icon name="sparkles" size={14} />
-        {progress?.message || '轻课堂助手正在处理当前任务'}
+        {message}
       </span>
       <button type="button" className="assist-inbox-steer" onClick={onSteer}>
         <Icon name="arrow-right" size={13} />
@@ -269,6 +269,7 @@ export default function AssistantDock() {
   const [connectionNote, setConnectionNote] = useState('')
   const [recoverable, setRecoverable] = useState(false)
   const [steerVisible, setSteerVisible] = useState(false)
+  const [latestSteer, setLatestSteer] = useState('')
   const commitThread = (updater: (prev: ChatMsg[]) => ChatMsg[]) => {
     const next = updater(threadRef.current)
     threadRef.current = next
@@ -390,6 +391,7 @@ export default function AssistantDock() {
     setConnectionNote('')
     setRunProgress(null)
     setSteerVisible(false)
+    setLatestSteer('')
     let failed = false
     const halt = () => {
       if (abortedRef.current || epoch !== epochRef.current) throw new DOMException('已停止', 'AbortError')
@@ -547,6 +549,7 @@ export default function AssistantDock() {
       abortRef.current = null
       setChatting(false)
       setSteerVisible(false)
+      setLatestSteer('')
       const last = threadRef.current[threadRef.current.length - 1]
       if (!failed && !abortedRef.current && last?.role === 'user') {
         queueMicrotask(() => {
@@ -634,6 +637,7 @@ export default function AssistantDock() {
         return
       }
       setSteerVisible(true)
+      setLatestSteer(content)
       commitThread((prev) => {
         const next = [...prev]
         let pending = -1
@@ -699,6 +703,7 @@ export default function AssistantDock() {
     setRecoverable(false)
     setRunProgress(null)
     setSteerVisible(false)
+    setLatestSteer('')
     forcedRef.current = null
     dirtyRef.current = false
     threadRef.current = []
@@ -1139,9 +1144,9 @@ export default function AssistantDock() {
             )}
           </div>
           <InboxTaskBar
-            progress={runProgress}
             chatting={chatting}
             show={steerVisible}
+            message={latestSteer}
             onSteer={() => {
               setConnectionNote('请输入新的处理方向，发送后将用于下一步')
               composerRef.current?.focus()
