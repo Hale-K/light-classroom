@@ -36,13 +36,15 @@ class SentenceTransformerEmbedding:
                 path = Path(self.model_path)
                 if not self.model_path or not path.is_dir():
                     raise RuntimeError("未配置可用的本地向量模型目录")
-                from sentence_transformers import SentenceTransformer
 
-                self._model = await asyncio.to_thread(
-                    SentenceTransformer,
-                    str(path),
-                    local_files_only=True,
-                )
+                def load_model() -> Any:
+                    # sentence-transformers/torch 首次 import 可能耗时几十秒，
+                    # 必须连同模型构造一起移出 FastAPI 事件循环。
+                    from sentence_transformers import SentenceTransformer
+
+                    return SentenceTransformer(str(path), local_files_only=True)
+
+                self._model = await asyncio.to_thread(load_model)
         return self._model
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
