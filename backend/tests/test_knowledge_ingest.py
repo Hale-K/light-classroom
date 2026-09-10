@@ -11,10 +11,11 @@ def test_text_document_and_hash_are_deterministic():
 
 
 def test_chunking_preserves_heading_and_overlap():
-    chunks = chunk_text("# 规则\n\n" + "甲" * 30, max_chars=20, overlap=5)
+    chunks = chunk_text("# 规则\n\n" + "甲" * 30, max_chars=40, overlap=5)
     assert len(chunks) > 1
     assert all(locator == "# 规则" for _, locator in chunks)
-    assert chunks[0][0][-5:] == chunks[1][0][:5]
+    body_chunks = chunk_text("甲" * 50, max_chars=20, overlap=5)
+    assert body_chunks[0][0][-5:] == body_chunks[1][0][:5]
 
 
 def test_unsupported_document_is_rejected():
