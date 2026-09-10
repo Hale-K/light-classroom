@@ -73,3 +73,15 @@ async def test_existing_run_is_not_spawned_twice(monkeypatch):
     )
 
     spawn.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_gateway_steer_delegates_to_durable_inbox(monkeypatch):
+    steer = AsyncMock(return_value={"accepted": True, "kind": "steer"})
+    monkeypatch.setattr(gateway_module, "steer_run", steer)
+    session = object()
+
+    result = await AssistantGateway().steer(session, 1, 2, "c" * 32, "只检查高一")
+
+    assert result == {"accepted": True, "kind": "steer"}
+    steer.assert_awaited_once_with(session, "c" * 32, 1, 2, "只检查高一")

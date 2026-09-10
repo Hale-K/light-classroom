@@ -81,3 +81,7 @@ class AssistantGatewayService(Protocol):
         self, session: AsyncSession, tenant_id: int, user_id: int, run_id: str,
         *, cancel: bool = False,
     ) -> dict: ...
+
+    async def steer(
+        self, session: AsyncSession, tenant_id: int, user_id: int, run_id: str, content: str,
+    ) -> dict: ...

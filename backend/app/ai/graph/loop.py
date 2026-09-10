@@ -89,7 +89,8 @@ async def _run_react_loop(loop: ReactLoop) -> AgentOutcome:
     for index in range(loop.max_steps):
         final = index == loop.max_steps - 1
         if loop.on_step:
-            convo.extend(await loop.on_step(index + 1))
+            incoming = await loop.on_step(index + 1)
+            convo.extend({k: v for k, v in item.items() if k != "_wake"} for item in incoming)
         await report_progress(loop.on_progress, "model", "正在等待模型理解需求" if index == 0 else "正在等待模型整理查询结果")
         if loop.on_trace:
             await loop.on_trace("model.request", {
@@ -112,6 +113,15 @@ async def _run_react_loop(loop: ReactLoop) -> AgentOutcome:
                 raise ChatError("模型没有返回文本，请重试。", "empty")
             return AgentOutcome(text=outcome.text, steps=steps)
         if not outcome.tool_calls:
+            # steer 可能在模型请求期间到达；它必须唤醒下一 Step。
+            # inject 只同步上下文，不会单独延长本轮执行。
+            if loop.on_step and not final:
+                incoming = await loop.on_step(index + 1)
+                if any(bool(item.get("_wake")) for item in incoming):
+                    if (outcome.text or "").strip():
+                        convo.append({"role": "assistant", "content": outcome.text})
+                    convo.extend({k: v for k, v in item.items() if k != "_wake"} for item in incoming)
+                    continue
             return AgentOutcome(text=outcome.text, steps=steps)
         convo.append(_assistant_msg(outcome))
         for tc in outcome.tool_calls:

@@ -1160,6 +1160,10 @@ export const assistantApi = {
     unwrap<AssistantRun>(http.post('/assistant/runs', data, { timeout: 8000, signal })),
   readRun: (id: string, signal?: AbortSignal) =>
     unwrap<AssistantRun>(http.get(`/assistant/runs/${encodeURIComponent(id)}`, { timeout: 5000, signal })),
+  steerRun: (id: string, content: string) =>
+    unwrap<{ accepted: boolean; kind: 'steer'; message_id: string }>(
+      http.post(`/assistant/runs/${encodeURIComponent(id)}/steer`, { content }, { timeout: 5000 }),
+    ),
   cancelRun: (id: string) =>
     unwrap<AssistantRun>(http.post(`/assistant/runs/${encodeURIComponent(id)}/cancel`, {}, { timeout: 5000 })),
   decide: (id: string, decision: 'confirm' | 'cancel') =>

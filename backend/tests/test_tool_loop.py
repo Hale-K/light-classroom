@@ -38,6 +38,66 @@ def test_loop_answers_directly_without_tools():
     assert seen[0]["tools"] == _TOOLS
 
 
+def test_steer_arriving_during_model_call_wakes_next_step():
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([
+            ChatOutcome(text="原方向的临时回答"),
+            ChatOutcome(text="已按新方向回答"),
+        ], seen)
+        inbox_calls = 0
+
+        async def on_step(_step):
+            nonlocal inbox_calls
+            inbox_calls += 1
+            if inbox_calls == 2:
+                return [{"role": "user", "content": "执行方向调整：只看高一", "_wake": True}]
+            return []
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "检查全校"}],
+            tools=_TOOLS, executor=executor, caller=caller, on_step=on_step,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert outcome.text == "已按新方向回答"
+    assert len(seen) == 2
+    assert seen[1]["messages"][-1] == {"role": "user", "content": "执行方向调整：只看高一"}
+
+
+def test_inject_arriving_during_model_call_does_not_wake_next_step():
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([ChatOutcome(text="已完成")], seen)
+        inbox_calls = 0
+
+        async def on_step(_step):
+            nonlocal inbox_calls
+            inbox_calls += 1
+            if inbox_calls == 2:
+                return [{"role": "system", "content": "页签发生变化", "_wake": False}]
+            return []
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "检查全校"}],
+            tools=_TOOLS, executor=executor, caller=caller, on_step=on_step,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert outcome.text == "已完成"
+    assert len(seen) == 1
+
+
 def test_loop_executes_tool_and_feeds_result_back():
     async def main():
         seen: list[dict] = []

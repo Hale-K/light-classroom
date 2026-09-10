@@ -17,7 +17,7 @@ from app.ai.conversations import (
     project_summary,
     sync_conversation,
 )
-from app.ai.runs import create_run, get_run, spawn_run
+from app.ai.runs import create_run, get_run, spawn_run, steer_run
 from app.ai.runs.service import RUN_TIMEOUT
 
 logger = logging.getLogger(__name__)
@@ -129,6 +129,11 @@ class AssistantGateway:
         *, cancel: bool = False,
     ) -> dict:
         return await get_run(session, run_id, tenant_id, user_id, cancel=cancel)
+
+    async def steer(
+        self, session: AsyncSession, tenant_id: int, user_id: int, run_id: str, content: str,
+    ) -> dict:
+        return await steer_run(session, run_id, tenant_id, user_id, content)
 
 
 assistant_gateway = AssistantGateway()

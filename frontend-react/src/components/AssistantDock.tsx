@@ -268,6 +268,7 @@ export default function AssistantDock() {
   const [runProgress, setRunProgress] = useState<AssistantRun | null>(null)
   const [connectionNote, setConnectionNote] = useState('')
   const [recoverable, setRecoverable] = useState(false)
+  const [steerVisible, setSteerVisible] = useState(false)
   const commitThread = (updater: (prev: ChatMsg[]) => ChatMsg[]) => {
     const next = updater(threadRef.current)
     threadRef.current = next
@@ -388,6 +389,7 @@ export default function AssistantDock() {
     setRecoverable(false)
     setConnectionNote('')
     setRunProgress(null)
+    setSteerVisible(false)
     let failed = false
     const halt = () => {
       if (abortedRef.current || epoch !== epochRef.current) throw new DOMException('已停止', 'AbortError')
@@ -544,6 +546,7 @@ export default function AssistantDock() {
       lockMergeRef.current = false
       abortRef.current = null
       setChatting(false)
+      setSteerVisible(false)
       const last = threadRef.current[threadRef.current.length - 1]
       if (!failed && !abortedRef.current && last?.role === 'user') {
         queueMicrotask(() => {
@@ -622,16 +625,36 @@ export default function AssistantDock() {
     setDraft('')
     setPanel('home')
     if (!busyRef.current) midRef.current = newMsgId()
-    const mid = midRef.current
-    assistLog(mid, busyRef.current ? 'supplement' : 'send', content.slice(0, 80))
+    const mid = busyRef.current ? newMsgId() : midRef.current
+    assistLog(mid, busyRef.current ? 'steer' : 'followup', content.slice(0, 80))
     if (busyRef.current) {
-      if (lockMergeRef.current) {
+      const runId = activeRunRef.current
+      if (!runId || lockMergeRef.current) {
         commitThread((prev) => [...prev, { role: 'user', text: content, mid }])
         return
       }
-      dirtyRef.current = true
-      if (activeRunRef.current) void assistantApi.cancelRun(activeRunRef.current).catch(() => undefined)
-      commitThread((prev) => upsertThink([...prev, { role: 'user', text: content, mid }], '收到补充，正在结束旧请求后重新核对'))
+      setSteerVisible(true)
+      commitThread((prev) => {
+        const next = [...prev]
+        let pending = -1
+        for (let i = next.length - 1; i >= 0; i -= 1) {
+          if (next[i].role === 'bot' && !next[i].text) {
+            pending = i
+            break
+          }
+        }
+        if (pending >= 0) next.splice(pending, 1)
+        return upsertThink([...next, { role: 'user', text: content, mid }], '已收到方向调整，将在下一步处理')
+      })
+      void assistantApi.steerRun(runId, content).catch((err) => {
+        if (err instanceof ApiError && err.status === 409) {
+          // run 恰好结束时，把消息留给下一 Turn，不丢失用户输入。
+          dirtyRef.current = true
+          setConnectionNote('当前任务刚刚结束，正在作为后续任务继续处理')
+          return
+        }
+        setConnectionNote('方向调整暂时未送达，请稍后重试')
+      })
       return
     }
     commitThread((prev) => upsertThink([...prev, { role: 'user', text: content, mid }], '分析意图'))
@@ -675,6 +698,7 @@ export default function AssistantDock() {
     setChatting(false)
     setRecoverable(false)
     setRunProgress(null)
+    setSteerVisible(false)
     forcedRef.current = null
     dirtyRef.current = false
     threadRef.current = []
@@ -1117,7 +1141,7 @@ export default function AssistantDock() {
           <InboxTaskBar
             progress={runProgress}
             chatting={chatting}
-            show={shownThread.filter((item) => item.role === 'user').length > 1}
+            show={steerVisible}
             onSteer={() => {
               setConnectionNote('请输入新的处理方向，发送后将用于下一步')
               composerRef.current?.focus()
@@ -1145,11 +1169,11 @@ export default function AssistantDock() {
                 type="button"
                 className={`assist-send${chatting ? ' is-wait' : ''}`}
                 disabled={!chatting && !draft.trim()}
-                onClick={() => (chatting ? stopTurn() : send())}
-                aria-label={chatting ? '停止' : '发送'}
-                title={chatting ? '停止' : '发送'}
+                onClick={() => (chatting && !draft.trim() ? stopTurn() : send())}
+                aria-label={chatting && !draft.trim() ? '停止' : '发送'}
+                title={chatting && !draft.trim() ? '停止' : '发送'}
               >
-                {chatting ? <i className="assist-send-dot" /> : <Icon name="send" size={13} />}
+                {chatting && !draft.trim() ? <i className="assist-send-dot" /> : <Icon name="send" size={13} />}
               </button>
             </div>
           </div>

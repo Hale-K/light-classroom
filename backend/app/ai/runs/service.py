@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from app.ai.actions import fingerprint
 from app.ai.runs.models import AiRun
 from app.ai.runs.events import run_event, trace_event
-from app.ai.runs.inbox import consume
+from app.ai.runs.inbox import consume, receive
 from app.ai.runs.progress import drive_turn
 from app.db.session import AsyncSessionLocal
 
@@ -51,6 +51,25 @@ async def get_run(session, run_id: str, tenant_id: int, user_id: int, *, cancel=
             run.updated_at = datetime.utcnow()
     await session.commit()  # Release the status row before the next poll/heartbeat.
     return run_view(run)
+
+
+async def steer_run(session, run_id: str, tenant_id: int, user_id: int, content: str) -> dict:
+    """把运行中的用户补充写入 Inbox，由下一个 Step 消费。"""
+    run = (await session.execute(select(AiRun).where(
+        AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == user_id,
+    ).with_for_update().execution_options(populate_existing=True))).scalars().first()
+    if run is None:
+        raise HTTPException(404, "未找到本账号的助手任务")
+    if run.status != "running":
+        raise HTTPException(409, "当前任务已经结束，请作为新消息继续")
+    stored = list(run.events or [])
+    event = receive("steer", content)
+    stored.append(event)
+    run.events = stored[-100:]
+    run.message = "已收到方向调整，将在下一步处理"
+    run.updated_at = datetime.utcnow()
+    await session.commit()
+    return {"accepted": True, "kind": "steer", "message_id": event["data"]["id"]}
 
 
 async def get_run_trace(session, run_id: str, tenant_id: int) -> dict:
@@ -123,11 +142,11 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
         out = []
         for item in messages:
             if item.kind == "steer":
-                out.append({"role": "user", "content": f"执行方向调整：{item.content}"})
+                out.append({"role": "user", "content": f"执行方向调整：{item.content}", "_wake": item.wake})
             elif item.kind == "inject":
-                out.append({"role": "system", "content": f"运行时上下文补充：{item.content}"})
+                out.append({"role": "system", "content": f"运行时上下文补充：{item.content}", "_wake": item.wake})
             else:
-                out.append({"role": "user", "content": str(item.content)})
+                out.append({"role": "user", "content": str(item.content), "_wake": item.wake})
         return out
 
     async def consume_inbox(boundary: str) -> list[dict]:
@@ -153,6 +172,25 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
 
     async def persist(**values) -> bool:
         async with sessions() as session:
+            if "events" in values:
+                current = (await session.execute(select(AiRun).where(
+                    AiRun.id == run_id, AiRun.tenant_id == tenant_id,
+                    AiRun.user_id == user_id, AiRun.status == "running",
+                ).with_for_update())).scalars().first()
+                if current is None:
+                    return False
+                proposed = list(values["events"] or [])
+                known = {
+                    str((event.get("data") or {}).get("id") or "")
+                    for event in proposed if event.get("type") == "assistant.inbox.received"
+                }
+                pending = [
+                    event for event in list(current.events or [])
+                    if event.get("type") == "assistant.inbox.received"
+                    and str((event.get("data") or {}).get("id") or "") not in known
+                ]
+                values["events"] = (proposed + pending)[-100:]
+                events[:] = values["events"]
             result = await session.execute(update(AiRun).where(
                 AiRun.id == run_id, AiRun.tenant_id == tenant_id,
                 AiRun.user_id == user_id, AiRun.status == "running",

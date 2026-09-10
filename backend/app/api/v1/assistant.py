@@ -111,6 +111,10 @@ class RunIn(ChatIn):
     request_id: str = Field(pattern=r"^[a-f0-9]{32}$")
 
 
+class SteerIn(BaseModel):
+    content: str = Field(min_length=1, max_length=4000)
+
+
 @router.post("/runs", summary="提交可恢复查看的助手任务")
 async def start_assistant_run(
     body: RunIn, session: AsyncSession = Depends(get_session),
@@ -130,6 +134,20 @@ async def read_assistant_run(
     user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
 ):
     data = await assistant_gateway.read_run(session, tenant_id, user.id, run_id)
+    return {"code": 0, "message": "ok", "data": data}
+
+
+@router.post("/runs/{run_id}/steer", summary="调整运行中助手任务的方向")
+async def steer_assistant_run(
+    run_id: str, body: SteerIn, session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
+):
+    if user.tenant_id != tenant_id:
+        raise HTTPException(403, "学校与当前账号不一致")
+    content = body.content.strip()
+    if not content:
+        raise HTTPException(422, "调整内容不能为空")
+    data = await assistant_gateway.steer(session, tenant_id, user.id, run_id, content)
     return {"code": 0, "message": "ok", "data": data}
 
 
