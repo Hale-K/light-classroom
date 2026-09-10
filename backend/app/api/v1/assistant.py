@@ -3,7 +3,11 @@ from __future__ import annotations
 
 from typing import Literal
 
+import asyncio
+import json
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -12,6 +16,8 @@ from app.ai.gateway.assistant import AssistantRequest, assistant_gateway
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
+from app.ai.runs.models import AiRun
+from app.ai.runs.service import run_view
 
 router = APIRouter(prefix="/assistant", tags=["轻课堂助手"])
 
@@ -125,6 +131,38 @@ async def read_assistant_run(
 ):
     data = await assistant_gateway.read_run(session, tenant_id, user.id, run_id)
     return {"code": 0, "message": "ok", "data": data}
+
+
+@router.get("/runs/{run_id}/stream", summary="通过 SSE 实时订阅助手任务")
+async def stream_assistant_run(
+    run_id: str, session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
+):
+    if user.tenant_id != tenant_id:
+        raise HTTPException(403, "学校与当前账号不一致")
+
+    async def events():
+        cursor = 0
+        while True:
+            run = (await session.execute(select(AiRun).where(
+                AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == user.id,
+            ))).scalars().first()
+            if run is None:
+                yield "event: error\ndata: {\"message\":\"未找到本账号的助手任务\"}\n\n"
+                return
+            view = run_view(run)
+            items = view["events"]
+            for event in items[cursor:]:
+                yield f"id: {cursor + 1}\nevent: run.event\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+                cursor += 1
+            yield f"event: run.status\ndata: {json.dumps({k: view[k] for k in ('id','status','phase','message','result')}, ensure_ascii=False)}\n\n"
+            if view["status"] not in {"queued", "running"}:
+                return
+            await asyncio.sleep(1.0)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache", "X-Accel-Buffering": "no",
+    })
 
 
 @router.get("/runs/{run_id}/trace", summary="查看助手诊断轨迹（学校管理员）")
