@@ -1166,6 +1166,24 @@ export const assistantApi = {
     unwrap<AssistantPlan>(http.post(`/assistant/actions/${encodeURIComponent(id)}`, { decision })),
 }
 
+export type KnowledgeBase = {
+  id: number
+  name: string
+  description: string
+  embedding_model: string
+  enabled: boolean
+  created_at?: string | null
+}
+
+export const knowledgeApi = {
+  list: () => unwrap<KnowledgeBase[]>(http.get('/knowledge')),
+  create: (data: Pick<KnowledgeBase, 'name' | 'description' | 'embedding_model'>) =>
+    unwrap<KnowledgeBase>(http.post('/knowledge', data)),
+  setStatus: (id: number, enabled: boolean) =>
+    unwrap<KnowledgeBase>(http.patch(`/knowledge/${id}/status`, null, { params: { enabled } })),
+  remove: (id: number) => unwrap<{ deleted: boolean }>(http.delete(`/knowledge/${id}`)),
+}
+
 export type OnboardingStep = {
   key: string
   title: string
