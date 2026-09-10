@@ -60,6 +60,14 @@ docker compose up -d postgres redis
 docker compose ps
 ```
 
+上线数据库变更优先执行项目迁移：
+
+```powershell
+alembic upgrade head
+```
+
+如果上线环境由 DBA 手工执行 SQL，可使用 `backend/scripts/knowledge_rag.sql`。该脚本只负责 RAG 基础表和索引，文档内容与向量数据仍由应用入库。
+
 数据库必须启用 `vector` 扩展。应用启动时会执行：
 
 ```sql
