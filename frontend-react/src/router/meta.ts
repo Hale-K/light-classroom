@@ -56,6 +56,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   '/settings': { title: '系统设置', roles: ['director'] },
   '/staff-positions': { title: '岗位与权限', roles: ['director', 'school_admin'] },
   '/ai-providers': { title: '服务商管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/knowledge': { title: '知识库', roles: ['academic_director', 'school_admin', 'director'] },
 }
 
 /**

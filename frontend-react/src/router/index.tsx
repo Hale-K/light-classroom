@@ -38,6 +38,7 @@ import StatsView from '@/pages/stats'
 import TeacherProfilesView from '@/pages/teacher-profiles'
 import FileCenterView from '@/pages/file-center'
 import AiProvidersView from '@/pages/ai-providers'
+import KnowledgeView from '@/pages/knowledge'
 import TeacherModulePlaceholder from '@/pages/dashboard/TeacherModulePlaceholder'
 import TeacherCourses from '@/pages/dashboard/TeacherCourses'
 import TeacherPreparation from '@/pages/teacher/TeacherPreparation'
@@ -117,6 +118,7 @@ export const router = createBrowserRouter([
           { path: 'onboarding', element: <OnboardingView /> },
           { path: 'file-center', element: <FileCenterView /> },
           { path: 'ai-providers', element: <AiProvidersView /> },
+          { path: 'knowledge', element: <KnowledgeView /> },
           { path: 'students', element: <StudentsView /> },
           { path: 'classes', element: <ClassesView /> },
           { path: 'organization', element: <Navigate to="/staff?tab=organization" replace /> },
