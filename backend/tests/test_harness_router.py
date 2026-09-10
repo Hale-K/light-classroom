@@ -7,6 +7,7 @@ from app.ai.gateway import model as gateway_model
 from app.ai.gateway.tool import ToolGateway
 from app.ai.harness import HarnessRouter
 from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
+from app.ai.runtime import AssistantRuntime, ServiceRegistry
 from app.ai.model.chat import ChatEndpoint, ChatOutcome
 
 
@@ -21,25 +22,29 @@ def test_router_maps_structured_intent_to_registered_harness():
 
 
 @pytest.mark.asyncio
-async def test_intent_gateway_classifies_business_and_page_context():
-    gateway = IntentGateway()
+async def test_intent_gateway_uses_semantic_classifier_without_phrase_enumeration():
+    async def semantic(session, query, page_path, recent_turns):
+        assert session == "db"
+        assert page_path == "/scheduling"
+        return IntentDecision(AssistantIntent.DIAGNOSIS, 0.87, "pgvector")
 
-    assert (await gateway.classify("这个页面怎么使用")).kind is AssistantIntent.GUIDE
-    assert (await gateway.classify("帮我检查排课准备情况，还缺什么")).kind is AssistantIntent.READINESS
-    assert (await gateway.classify("排课生成失败，为什么卡住了")).kind is AssistantIntent.DIAGNOSIS
-    assert (await gateway.classify("为什么会这样", page_path="/scheduling")).kind is AssistantIntent.DIAGNOSIS
-    assert (await gateway.classify("创建数学晚课禁排规则")).kind is AssistantIntent.CONFIGURATION
+    decision = await IntentGateway(semantic).classify(
+        "db", "它怎么又停了", page_path="/scheduling"
+    )
+
+    assert decision.kind is AssistantIntent.DIAGNOSIS
+    assert decision.source == "pgvector"
 
 
 @pytest.mark.asyncio
 async def test_intent_gateway_delegates_ambiguous_language_to_semantic_classifier():
-    async def semantic(query, page_path, recent_turns):
+    async def semantic(session, query, page_path, recent_turns):
         assert query == "照刚才说的处理"
         assert recent_turns[-1]["content"] == query
         return IntentDecision(AssistantIntent.CONFIGURATION, 0.82, "semantic")
 
     decision = await IntentGateway(semantic).classify(
-        "照刚才说的处理",
+        None, "照刚才说的处理",
         page_path="/rules",
         recent_turns=[{"role": "user", "content": "照刚才说的处理"}],
     )
@@ -78,11 +83,19 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     async def trace(kind, data):
         events.append((kind, data))
 
+    async def semantic(session, query, page_path, recent_turns):
+        return IntentDecision(AssistantIntent.READINESS, 0.91, "pgvector")
+
+    services = ServiceRegistry()
+    services.register("intent_gateway", IntentGateway(semantic))
+    runtime = AssistantRuntime(services=services, on_trace=trace)
+
     result = await assistant_agent.handle_assistant_turn(
         None,
         1,
         [{"role": "user", "content": "帮我检查排课准备情况"}],
         on_trace=trace,
+        runtime=runtime,
     )
 
     assert result.text == "已检查"
@@ -110,6 +123,7 @@ async def test_agent_applies_harness_prompt_and_tool_budget(monkeypatch):
         api_key="",
         model="test",
         timeout=120,
+        harness=HarnessRouter().profiles["diagnosis"],
     )
 
     assert result.text == "诊断完成"

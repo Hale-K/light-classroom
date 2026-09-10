@@ -7,8 +7,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
-from types import MappingProxyType
 from typing import Awaitable, Callable, Protocol
+
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 class AssistantIntent(StrEnum):
@@ -36,7 +37,7 @@ class IntentDecision:
 
 
 SemanticClassifier = Callable[
-    [str, str | None, list[dict]],
+    [AsyncSession | None, str, str | None, list[dict]],
     Awaitable[IntentDecision | None],
 ]
 
@@ -44,6 +45,7 @@ SemanticClassifier = Callable[
 class IntentGatewayService(Protocol):
     async def classify(
         self,
+        session: AsyncSession | None,
         query: str,
         *,
         page_path: str | None = None,
@@ -51,66 +53,26 @@ class IntentGatewayService(Protocol):
     ) -> IntentDecision: ...
 
 
-_PHRASES = MappingProxyType({
-    AssistantIntent.CONFIGURATION: (
-        "禁排", "连堂", "规则草稿", "新增规则", "添加规则", "创建规则", "修改规则",
-        "配置规则", "设置规则", "建立规则",
-    ),
-    AssistantIntent.DIAGNOSIS: (
-        "排课失败", "生成失败", "生成未完成", "重新生成", "不能排", "排不出来",
-        "排课冲突", "卡住", "中断", "任务状态", "排课过程", "为什么失败",
-    ),
-    AssistantIntent.READINESS: (
-        "排课准备", "准备情况", "还缺什么", "缺少什么", "核对排课", "检查排课",
-        "课时方案", "课位结构", "任教关系", "任教覆盖",
-    ),
-})
-
-
 class IntentGateway:
-    """Hybrid intent gate with deterministic fallback and optional semantics.
-
-    High-signal business phrases stay deterministic and reviewable. Ambiguous
-    language can be delegated to an injected semantic classifier without
-    coupling the runtime to a model vendor or embedding library.
-    """
+    """Semantic intent gate with a safe guide fallback."""
 
     def __init__(self, semantic_classifier: SemanticClassifier | None = None):
         self._semantic_classifier = semantic_classifier
 
     async def classify(
         self,
+        session: AsyncSession | None,
         query: str,
         *,
         page_path: str | None = None,
         recent_turns: list[dict] | None = None,
     ) -> IntentDecision:
-        text = " ".join((query or "").lower().split())
+        text = " ".join((query or "").split())
         turns = list((recent_turns or [])[-6:])
 
-        scores = {
-            kind: sum(1 for phrase in phrases if phrase in text)
-            for kind, phrases in _PHRASES.items()
-        }
-        matched_kind, matched_count = max(scores.items(), key=lambda item: item[1])
-        if matched_count:
-            return IntentDecision(
-                kind=matched_kind,
-                confidence=min(0.99, 0.86 + 0.04 * (matched_count - 1)),
-                source="business_rule",
-            )
-
-        path = (page_path or "").lower()
-        if "scheduling" in path and any(word in text for word in ("为什么", "怎么回事", "异常")):
-            return IntentDecision(
-                kind=AssistantIntent.DIAGNOSIS,
-                confidence=0.78,
-                source="page_context",
-            )
-
         if self._semantic_classifier is not None:
-            semantic = await self._semantic_classifier(query, page_path, turns)
-            if semantic is not None and semantic.kind is not AssistantIntent.UNKNOWN:
+            semantic = await self._semantic_classifier(session, query, page_path, turns)
+            if semantic is not None:
                 return semantic
 
         if text:

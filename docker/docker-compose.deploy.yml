@@ -11,7 +11,7 @@ name: light-classroom-api
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:0.8.6-pg16
     environment:
       POSTGRES_USER: zhiheng
       POSTGRES_PASSWORD: zhiheng

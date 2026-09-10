@@ -6,10 +6,13 @@ from app.ai.intent.gateway import (
     IntentGateway,
     IntentGatewayService,
 )
+from app.ai.intent.vector import PostgresIntentClassifier, SentenceTransformerEmbedding
 
 __all__ = [
     "AssistantIntent",
     "IntentDecision",
     "IntentGateway",
     "IntentGatewayService",
+    "PostgresIntentClassifier",
+    "SentenceTransformerEmbedding",
 ]

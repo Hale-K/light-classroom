@@ -11,10 +11,19 @@ from app.ai.guide import AssistantUiGuide
 from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.harness import HarnessRouter
 from app.ai.intent import IntentGateway
+from app.ai.intent import PostgresIntentClassifier, SentenceTransformerEmbedding
+from app.core.config import settings
 from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.inbox import InboxKind, InboxMessage, consume, receive
 from app.ai.runs.progress import Progress, report_progress
+
+
+_intent_gateway = IntentGateway(
+    PostgresIntentClassifier(
+        SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
+    )
+)
 
 
 class ServiceRegistry:
@@ -56,7 +65,7 @@ class AssistantRuntime:
         if not self.services.has("ui_guide"):
             self.services.register("ui_guide", AssistantUiGuide)
         if not self.services.has("intent_gateway"):
-            self.services.register("intent_gateway", IntentGateway())
+            self.services.register("intent_gateway", _intent_gateway)
         if not self.services.has("harness_router"):
             self.services.register("harness_router", HarnessRouter())
 

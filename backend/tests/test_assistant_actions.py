@@ -236,6 +236,7 @@ async def test_chat_tool_to_confirm_endpoint_complete_flow(database, monkeypatch
     from app.api.v1 import assistant
     from app.ai.agent import assistant_agent
     from app.ai.gateway import model as gateway_model
+    from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
     from app.ai.model.chat import ChatOutcome, ToolCallOut
     session, sync = database
     monkeypatch.setattr(assistant, "get_user_permission_codes", AsyncMock(return_value={"scheduling:assign"}))
@@ -245,6 +246,15 @@ async def test_chat_tool_to_confirm_endpoint_complete_flow(database, monkeypatch
         "group_name": "高一规则", "rules": [{"code": "slot_forbidden", "target_names": ["数学"], "priority": "hard", "weekdays": [3], "periods": [6, 7]}],
     }))]))
     monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
+    monkeypatch.setattr(
+        IntentGateway,
+        "classify",
+        AsyncMock(
+            return_value=IntentDecision(
+                AssistantIntent.CONFIGURATION, 0.91, "pgvector"
+            )
+        ),
+    )
     user = SimpleNamespace(id=2, tenant_id=1)
     result = await assistant.assistant_chat(assistant.ChatIn(messages=[assistant.ChatTurn(role="user", content="数学周三6、7节禁排")]), session, user, 1)
     assert caller.await_count == 1  # Successful proposal stops before another model call.

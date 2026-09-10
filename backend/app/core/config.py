@@ -49,6 +49,7 @@ class Settings(BaseSettings):
     # 教务助手模型服务的进程内熔断策略。多实例部署时会由 Redis 实现接管同一接口。
     assistant_provider_failure_threshold: int = 2
     assistant_provider_cooldown_seconds: float = 60.0
+    assistant_embedding_model_path: str = ""
 
     # 对象存储 COS
     cos_secret_id: str = ""

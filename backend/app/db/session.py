@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy import event, select
+from sqlalchemy import event, select, text
 from sqlalchemy.orm import with_loader_criteria
 from loguru import logger
 from app.core.config import settings
@@ -94,6 +94,7 @@ async def tenant_middleware(request, call_next):
 async def init_db() -> None:
     """初始化数据库（建表 + 默认租户/平台超管种子，开发期用；生产走 Alembic 迁移）"""
     async with engine.begin() as conn:
+        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
         await conn.run_sync(SQLModel.metadata.create_all)
 
     # 开发期种子：默认租户，保证 default_school_code 可解析（A3）

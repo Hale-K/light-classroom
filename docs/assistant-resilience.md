@@ -64,7 +64,9 @@ flowchart LR
 
 当前采用受约束的 JIT 思路：`IntentGateway` 负责识别老师要说明页面、核对准备、诊断故障还是配置规则，并产生 `IntentDecision`；`HarnessRouter` 不再读取自然语言，只把 `AssistantIntent` 枚举映射到服务端注册并经过测试的 Harness。两步分别以 `intent.classified` 和 `harness.selected` 记录在 `AiRun.events` 的内部诊断轨迹中。
 
-当前默认识别器对高置信度业务表达采用可审查规则，对含糊表达可注入语义分类器；没有语义分类结果时安全回落到 `guide`。意图结果只选择任务策略，不能授予权限，也不能执行模型生成的 Python、SQL 或 Shell。
+当前识别器用本地 `bge-base-zh-v1.5` 生成查询向量，在 PostgreSQL `pgvector` 中检索经过审核的意图样例，并用相似度与领先差值决定是否采用结果。低置信度或向量服务不可用时安全回落到 `guide`。意图结果只选择任务策略，不能授予权限，也不能执行模型生成的 Python、SQL 或 Shell。
+
+意图向量初始化顺序：先为 PostgreSQL 服务器安装 `pgvector`，执行 `alembic upgrade head`，配置 `ASSISTANT_EMBEDDING_MODEL_PATH`，最后在 `backend` 目录运行 `python -m scripts.seed_assistant_intents`。意图样例可以持续扩充；后续文档 RAG 复用同一个 BGE 生成服务和 PostgreSQL 向量扩展，但使用独立的租户隔离文档表。
 
 | Harness | 策略 | 能力范围 | 预算 |
 |---|---|---|---|

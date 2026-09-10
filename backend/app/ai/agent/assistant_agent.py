@@ -107,7 +107,7 @@ async def agent_reply(
         decision = await cast(
             IntentGatewayService, runtime.service("intent_gateway")
         ).classify(
-            last_user, page_path=page_path, recent_turns=turns,
+            session, last_user, page_path=page_path, recent_turns=turns,
         )
         harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     cache_key = answer_cache_key(
@@ -241,7 +241,7 @@ async def handle_assistant_turn(
     decision = await cast(
         IntentGatewayService, runtime.service("intent_gateway")
     ).classify(
-        query, page_path=page_path, recent_turns=turns,
+        session, query, page_path=page_path, recent_turns=turns,
     )
     await runtime.emit("intent.classified", decision.trace_data())
     harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
