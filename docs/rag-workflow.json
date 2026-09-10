@@ -1,0 +1,57 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "轻课堂 RAG 知识库工作流",
+    "quality_profile": "showcase",
+    "locale": "zh-CN",
+    "output": "docs/rag-workflow.html"
+  },
+  "lanes": [
+    {"id":"authoring","label":"知识库管理"},
+    {"id":"ingest","label":"文档入库"},
+    {"id":"runtime","label":"助手运行时"},
+    {"id":"evidence","label":"检索与回答"}
+  ],
+  "phases": [
+    {"id":"manage","label":"创建与上传","fromCol":0,"toCol":1},
+    {"id":"index","label":"解析与向量化","fromCol":2,"toCol":3,"variant":"emphasis"},
+    {"id":"answer","label":"检索与生成","fromCol":4,"toCol":5,"variant":"dashed"}
+  ],
+  "mainPath":["teacher","base","upload","parse","embed","store"],
+  "nodes":[
+    {"id":"teacher","lane":"authoring","col":0,"type":"external","label":"教务管理员","sublabel":"创建知识库","width":132},
+    {"id":"base","lane":"authoring","col":1,"type":"backend","label":"Knowledge Base","sublabel":"租户隔离","width":132},
+    {"id":"upload","lane":"authoring","col":2,"type":"frontend","label":"文档上传","sublabel":"TXT / MD / PDF / DOCX","width":132},
+    {"id":"parse","lane":"ingest","col":3,"type":"backend","label":"解析与分块","sublabel":"哈希去重 + chunk","width":132},
+    {"id":"embed","lane":"ingest","col":4,"type":"backend","label":"BGE Embedding","sublabel":"768 维向量","width":132},
+    {"id":"store","lane":"evidence","col":5,"type":"database","label":"pgvector","sublabel":"HNSW cosine","width":132},
+    {"id":"question","lane":"runtime","col":1,"type":"external","label":"老师提问","sublabel":"Assistant Run","width":132},
+    {"id":"search","lane":"runtime","col":3,"type":"backend","label":"KnowledgeSearch","sublabel":"tenant + top-k","width":132},
+    {"id":"model","lane":"evidence","col":4,"type":"cloud","label":"Ollama qwen3:8b","sublabel":"结合证据回答","width":132},
+    {"id":"answer","lane":"evidence","col":3,"type":"frontend","label":"回答与引用","sublabel":"来源可追溯","width":132},
+    {"id":"failed","lane":"ingest","col":2,"type":"security","label":"处理失败","sublabel":"记录原因 / 可重试","width":132}
+  ],
+  "groups":[
+    {"id":"ingestion","label":"文档索引管线","lane":"ingest","fromCol":2,"toCol":5,"variant":"dashed"},
+    {"id":"retrieval","label":"受控知识检索","lane":"evidence","fromCol":3,"toCol":5,"variant":"security"}
+  ],
+  "edges":[
+    {"id":"create-base","from":"teacher","to":"base","label":"创建 / 配置","variant":"emphasis"},
+    {"id":"upload-file","from":"base","to":"upload","label":"上传文档","variant":"default"},
+    {"id":"parse-file","from":"upload","to":"parse","label":"解析并切分","variant":"emphasis"},
+    {"id":"parse-fail","from":"parse","to":"failed","label":"格式或空文本","variant":"security","role":"error"},
+    {"id":"make-vector","from":"parse","to":"embed","label":"批量生成向量","variant":"default"},
+    {"id":"save-vector","from":"embed","to":"store","label":"写入 chunk.embedding","variant":"emphasis"},
+    {"id":"ask","from":"teacher","to":"question","label":"提问","variant":"default"},
+    {"id":"retrieve","from":"question","to":"search","label":"按需检索","variant":"emphasis"},
+    {"id":"vector-query","from":"search","to":"store","label":"cosine top-k + 租户过滤","variant":"security"},
+    {"id":"evidence-to-model","from":"store","to":"model","label":"文档片段 + 来源","variant":"dashed"},
+    {"id":"generate","from":"model","to":"answer","label":"回答并附引用","variant":"emphasis"}
+  ],
+  "cards":[
+    {"dot":"cyan","title":"入库可信","items":["文件哈希防重复上传","解析失败记录原因，不进入检索"]},
+    {"dot":"orange","title":"检索隔离","items":["每次查询强制 tenant_id 过滤","top-k 和上下文长度受限"]},
+    {"dot":"emerald","title":"回答可追溯","items":["模型只参考检索片段","回答携带文件名和来源定位"]}
+  ]
+}
