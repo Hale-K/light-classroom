@@ -561,6 +561,7 @@ export const schedulingApi = {
             'Cache-Control': 'no-cache',
           },
           cache: 'no-store',
+          credentials: 'include',
           signal,
         })
         if (!response.ok) {

@@ -164,7 +164,7 @@ async def stream_assistant_run(
         while True:
             run = (await session.execute(select(AiRun).where(
                 AiRun.id == run_id, AiRun.tenant_id == tenant_id, AiRun.user_id == user.id,
-            ))).scalars().first()
+            ).execution_options(populate_existing=True))).scalars().first()
             if run is None:
                 yield "event: error\ndata: {\"message\":\"未找到本账号的助手任务\"}\n\n"
                 return

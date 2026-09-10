@@ -19,6 +19,8 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
   try {
     const response = await fetch(`${getSseApiBaseURL()}/assistant/runs/${encodeURIComponent(id)}/stream`, {
       headers: { ...getAuthHeaders(), Accept: 'text/event-stream' }, signal,
+      credentials: 'include',
+      cache: 'no-store',
     })
     if (!response.ok || !response.body) throw new Error('SSE unavailable')
     const reader = response.body.getReader()
@@ -29,7 +31,7 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
       const { value, done } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
-      const frames = buffer.split('\n\n')
+      const frames = buffer.split(/\r?\n\r?\n/)
       buffer = frames.pop() || ''
       for (const frame of frames) {
         const data = frame.split('\n').find((line) => line.startsWith('data: '))?.slice(6)
