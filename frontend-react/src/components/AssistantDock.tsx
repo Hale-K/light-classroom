@@ -486,8 +486,9 @@ export default function AssistantDock() {
         halt()
         const outcome = await watchAssistantRun(runId, abortRef.current!.signal, (run) => {
           if (epoch !== epochRef.current || dirtyRef.current) return
-          setRunProgress(run)
-          commitThread((prev) => upsertThink(prev, run.message))
+          const terminal = !['queued', 'running'].includes(run.status)
+          setRunProgress(terminal ? null : run)
+          if (!terminal) commitThread((prev) => upsertThink(prev, run.message))
         }, (note) => { if (epoch === epochRef.current) setConnectionNote(note) })
         halt()
         sessionStorage.removeItem(runStorageKey)
