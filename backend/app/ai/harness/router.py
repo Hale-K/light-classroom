@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Protocol
 
-from app.ai.intent import AssistantIntent, IntentDecision
+from app.ai.intent import AssistantIntent, AssistantRoute, IntentDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,6 +55,17 @@ GUIDE_HARNESS = HarnessProfile(
     max_steps=3,
     step_timeout_seconds=60,
     turn_timeout_seconds=90,
+)
+
+DIRECT_HARNESS = HarnessProfile(
+    name="direct",
+    label="快速回答",
+    strategy="direct",
+    instructions="直接回答当前问题，不读取学校数据，不调用工具，不创建任何草稿。",
+    allowed_tools=frozenset(),
+    max_steps=1,
+    step_timeout_seconds=30,
+    turn_timeout_seconds=45,
 )
 
 READINESS_HARNESS = HarnessProfile(
@@ -115,6 +126,7 @@ class HarnessRouter:
         profile.name: profile
         for profile in (
             GUIDE_HARNESS, READINESS_HARNESS, DIAGNOSIS_HARNESS, CONFIGURATION_HARNESS,
+            DIRECT_HARNESS,
         )
     })
 
@@ -127,4 +139,6 @@ class HarnessRouter:
     })
 
     def select(self, decision: IntentDecision) -> HarnessProfile:
+        if decision.route is AssistantRoute.DIRECT:
+            return DIRECT_HARNESS
         return self._intent_profiles[decision.kind]

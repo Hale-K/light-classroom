@@ -2,6 +2,7 @@
 
 from app.ai.intent.gateway import (
     AssistantIntent,
+    AssistantRoute,
     IntentDecision,
     IntentGateway,
     IntentGatewayService,
@@ -10,6 +11,7 @@ from app.ai.intent.vector import PostgresIntentClassifier, SentenceTransformerEm
 
 __all__ = [
     "AssistantIntent",
+    "AssistantRoute",
     "IntentDecision",
     "IntentGateway",
     "IntentGatewayService",

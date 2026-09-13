@@ -6,7 +6,7 @@ from app.ai.agent import assistant_agent
 from app.ai.gateway import model as gateway_model
 from app.ai.gateway.tool import ToolGateway
 from app.ai.harness import HarnessRouter
-from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
+from app.ai.intent import AssistantIntent, AssistantRoute, IntentDecision, IntentGateway
 from app.ai.runtime import AssistantRuntime, ServiceRegistry
 from app.ai.model.chat import ChatEndpoint, ChatOutcome
 
@@ -18,7 +18,19 @@ def test_router_maps_structured_intent_to_registered_harness():
         decision = IntentDecision(kind=kind, confidence=1, source="test")
         expected = "guide" if kind is AssistantIntent.UNKNOWN else kind.value
         assert router.select(decision).name == expected
-    assert set(router.profiles) == {"guide", "readiness", "diagnosis", "configuration"}
+    assert set(router.profiles) == {"direct", "guide", "readiness", "diagnosis", "configuration"}
+
+
+def test_router_selects_direct_harness_for_fast_path():
+    router = HarnessRouter()
+    decision = IntentDecision(
+        kind=AssistantIntent.GUIDE, confidence=1, source="fast_path",
+        route=AssistantRoute.DIRECT,
+    )
+    profile = router.select(decision)
+    assert profile.name == "direct"
+    assert profile.max_steps == 1
+    assert profile.allowed_tools == frozenset()
 
 
 @pytest.mark.asyncio
@@ -34,6 +46,16 @@ async def test_intent_gateway_uses_semantic_classifier_without_phrase_enumeratio
 
     assert decision.kind is AssistantIntent.DIAGNOSIS
     assert decision.source == "pgvector"
+
+
+@pytest.mark.asyncio
+async def test_intent_gateway_fast_path_skips_semantic_classifier_for_arithmetic():
+    async def semantic(*_args):
+        raise AssertionError("fast path must not load semantic classification")
+
+    decision = await IntentGateway(semantic).classify(None, "1 + 1 = ?")
+    assert decision.route is AssistantRoute.DIRECT
+    assert decision.source == "fast_path"
 
 
 @pytest.mark.asyncio
