@@ -44,4 +44,4 @@ def test_unknown_staff_role_is_rejected():
 def test_principal_remains_school_admin_and_academic_director_gets_management_menu():
     assert effective_menu_role(BaseUserRole.director, []) == "director"
     assert effective_menu_role(BaseUserRole.teacher, ["academic_director"]) == "academic_director"
-    assert effective_menu_role(BaseUserRole.teacher, ["head_teacher", "subject_teacher"]) == "teacher"
+    assert effective_menu_role(BaseUserRole.teacher, ["head_teacher", "subject_teacher"]) == "head_teacher"

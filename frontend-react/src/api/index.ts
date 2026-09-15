@@ -224,7 +224,7 @@ export const orgApi = {
 
 export const staffApi = {
   list: () => unwrap<StaffDirectory>(http.get('/staff')),
-  create: (data: { name: string; phone: string; password: string; roles: StaffRoleCode[]; teacher_level?: string }) =>
+  create: (data: { name: string; phone: string; password: string; roles: StaffRoleCode[]; teacher_level?: string; unit_ids?: number[] }) =>
     unwrap<StaffAccount>(http.post('/staff', data)),
   update: (id: number, data: { name: string; phone: string; roles: StaffRoleCode[]; teacher_level?: string | null }) =>
     unwrap<StaffAccount>(http.patch(`/staff/${id}`, data)),

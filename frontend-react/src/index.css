@@ -4161,6 +4161,9 @@ body[data-theme='tech'] .ant-input-affix-wrapper input::placeholder,
 body[data-theme='tech'] .ant-select-selection-placeholder {
   color: rgba(255, 255, 255, 0.45) !important;
 }
+body[data-theme='tech'] .ant-select-single .ant-select-selection-item {
+  color: #ffffff !important;
+}
 body[data-theme='tech'] .ant-input-affix-wrapper .ant-input-prefix,
 body[data-theme='tech'] .ant-input-affix-wrapper .ant-input-suffix,
 body[data-theme='tech'] .ant-select-arrow,

@@ -11,7 +11,7 @@ import { academicYearOptions } from '@/academicYear'
 import { flattenOrganizationUnits, organizationExpandedKeys } from '@/pages/organization/tree-utils'
 import PersonnelTree, { type PersonnelTreeKey } from './personnel-tree'
 
-interface AccountForm { name: string; phone: string; password: string; roles?: StaffRoleCode[]; teacher_level?: string }
+interface AccountForm { name: string; phone: string; password: string; roles?: StaffRoleCode[]; teacher_level?: string; unit_ids?: number[] }
 interface PersonEditForm {
   name: string
   phone: string
@@ -135,12 +135,23 @@ export default function PersonnelView() {
     accountForm.setFieldsValue({ roles: kind === 'teacher' ? ['subject_teacher'] : [], teacher_level: kind === 'teacher' ? '普通教师' : undefined })
     setAccountOpen(true)
   }
+  const changeAccountKind = (kind: 'staff' | 'teacher') => {
+    if (kind === accountKind) return
+    const roles = accountForm.getFieldValue('roles') || []
+    setAccountKind(kind)
+    accountForm.setFieldsValue({
+      roles: kind === 'teacher'
+        ? Array.from(new Set<StaffRoleCode>([...roles, 'subject_teacher']))
+        : roles.filter((role: StaffRoleCode) => role !== 'subject_teacher'),
+      teacher_level: kind === 'teacher' ? accountForm.getFieldValue('teacher_level') || '普通教师' : undefined,
+    })
+  }
   const createAccount = async () => {
     const values = await accountForm.validateFields().catch(() => null); if (!values) return
     setSaving(true)
     try {
       const roles = Array.from(new Set([...(values.roles || []), ...(accountKind === 'teacher' ? ['subject_teacher' as const] : [])]))
-      await staffApi.create({ ...values, roles, teacher_level: accountKind === 'teacher' ? values.teacher_level : undefined })
+      await staffApi.create({ ...values, roles, teacher_level: accountKind === 'teacher' ? values.teacher_level : undefined, unit_ids: values.unit_ids || [] })
       setAccountOpen(false)
       accountForm.resetFields()
       message.success(accountKind === 'teacher' ? '教师账号已创建' : '人员账号已创建')
@@ -337,8 +348,20 @@ export default function PersonnelView() {
         <Form.Item name="name" label="姓名" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="phone" label="登录手机号" rules={[{ required: true }]}><Input /></Form.Item>
         <Form.Item name="password" label="初始密码" rules={[{ required: true, min: 6 }]}><Input.Password /></Form.Item>
-        <Form.Item label="人员类型"><Select value={accountKind} onChange={(value) => openCreateAccount(value)} options={[{ value: 'staff', label: '普通人员' }, { value: 'teacher', label: '教师' }]} /></Form.Item>
+        <Form.Item label="人员类型"><Select value={accountKind} onChange={changeAccountKind} options={[{ value: 'staff', label: '普通人员' }, { value: 'teacher', label: '教师' }]} /></Form.Item>
         <Form.Item name="roles" label="职位角色"><Select mode="multiple" placeholder="选择职位角色" options={[{ value: 'academic_director', label: '教导主任' }, { value: 'head_teacher', label: '班主任' }, { value: 'subject_teacher', label: '任教老师' }]} /></Form.Item>
+        <Form.Item name="unit_ids" label="所属组织" extra="可以选择多个组织；同一人员只能同时归属一个年级部。">
+          <TreeSelect
+            treeData={unitTreeData}
+            multiple
+            allowClear
+            showSearch
+            treeNodeFilterProp="title"
+            treeDefaultExpandAll
+            placeholder="选择教务处、年级部、教研组等，可多选"
+            notFoundContent={unitTreeData.length === 0 ? '暂无组织节点，请先在左侧建立组织架构' : undefined}
+          />
+        </Form.Item>
         {accountKind === 'teacher' && (
           <>
             <Form.Item label="教师职级" name="teacher_level" rules={[{ required: true, message: '请选择教师职级' }]}>

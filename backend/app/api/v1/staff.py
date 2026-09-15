@@ -8,7 +8,7 @@ from app.api.deps import get_current_tenant, get_current_user
 from app.core.security import get_password_hash
 from app.db.session import get_session
 from app.models.enums import BaseUserRole, UserStatus
-from app.models.org import User
+from app.models.org import OrganizationUnit, StaffAppointment, User
 from app.models.rbac import Role, UserRole
 from app.services.org.staff_roles import ASSIGNABLE_STAFF_ROLES, normalize_staff_roles, replace_staff_roles
 
@@ -23,6 +23,7 @@ class StaffCreateIn(BaseModel):
     password: str = Field(min_length=6, max_length=64)
     roles: list[str] = Field(default_factory=list)
     teacher_level: str | None = Field(default=None, max_length=30)
+    unit_ids: list[int] = Field(default_factory=list, max_length=50)
 
 
 class StaffRolesIn(BaseModel):
@@ -117,6 +118,17 @@ async def create_staff(
         raise HTTPException(status_code=409, detail="该手机号已存在")
     if body.teacher_level is not None and body.teacher_level not in TEACHER_LEVELS:
         raise HTTPException(status_code=422, detail="教师职级不合法")
+    unit_ids = list(dict.fromkeys(body.unit_ids))
+    if unit_ids:
+        units = list((await session.execute(select(OrganizationUnit).where(
+            OrganizationUnit.id.in_(unit_ids),
+            OrganizationUnit.tenant_id == tenant_id,
+            OrganizationUnit.status == "active",
+        ))).scalars().all())
+        if len(units) != len(unit_ids):
+            raise HTTPException(status_code=422, detail="所选组织不存在、已归档或不属于本校")
+        if sum(unit.unit_type == "grade_group" for unit in units) > 1:
+            raise HTTPException(status_code=422, detail="同一人员只能同时归属一个年级部")
     account = User(
         name=body.name,
         phone=body.phone,
@@ -128,6 +140,14 @@ async def create_staff(
     session.add(account)
     await session.flush()
     await replace_staff_roles(session, account.id, role_codes, tenant_id)
+    for unit_id in unit_ids:
+        session.add(StaffAppointment(
+            tenant_id=tenant_id,
+            organization_unit_id=unit_id,
+            staff_id=account.id,
+            position_code="member",
+            appointed_by=user.id,
+        ))
     await session.commit()
     await session.refresh(account)
     return {"code": 0, "message": "ok", "data": _staff_data(account, role_codes)}
