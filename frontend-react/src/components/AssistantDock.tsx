@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/api/http'
-import { assistantApi, authApi, orgApi, schedulingApi, type AssistantPlan, type AssistantRun } from '@/api'
+import { assistantApi, authApi, orgApi, schedulingApi, type AssistantExecution, type AssistantPlan, type AssistantRun } from '@/api'
 import { watchAssistantRun } from '@/assistant/task'
 import { assistantPageContext } from '@/assistant/context'
 import { useAuthStore } from '@/store/auth'
@@ -32,6 +32,7 @@ type ChatMsg = {
   advice?: string
   choices?: { label: string; send: string; act?: () => void }[]
   think?: { done: string[]; live?: string }
+  execution?: AssistantExecution
   /** False for transport/recovery/degraded UI notices that must not enter an LLM prompt. */
   modelVisible?: boolean
 }
@@ -77,6 +78,7 @@ function storedThread(key: string): ChatMsg[] {
         text: value.text.slice(0, 8000),
         mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
         modelVisible: value.modelVisible !== false,
+        execution: readExecution(value.execution),
       }]
     })
     const seen = new Set<string>()
@@ -100,12 +102,51 @@ function rememberThread(key: string, messages: ChatMsg[]) {
       text: (message.plan ? `${message.text}\n\n${message.plan.summary}` : message.text).slice(0, 8000),
       mid: message.mid,
       modelVisible: message.modelVisible !== false,
+      execution: message.execution,
     }))
   try {
     localStorage.setItem(key, JSON.stringify(safe))
   } catch {
     // Storage can be unavailable or full; the live conversation must keep working.
   }
+}
+
+function readExecution(raw: unknown): AssistantExecution | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Record<string, unknown>
+  if (!['direct', 'agent', 'supervisor'].includes(String(value.mode))) return undefined
+  const tasks: AssistantExecution['tasks'] = Array.isArray(value.tasks) ? value.tasks.slice(0, 5).flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const task = item as Record<string, unknown>
+    if (typeof task.id !== 'string' || typeof task.label !== 'string' || !['running', 'succeeded', 'failed'].includes(String(task.status))) return []
+    return [{ id: task.id.slice(0, 40), label: task.label.slice(0, 40), status: task.status as AssistantExecution['tasks'][number]['status'] }]
+  }) : []
+  return {
+    mode: value.mode as AssistantExecution['mode'],
+    multi_agent: value.multi_agent === true,
+    kind: value.kind === 'readiness' || value.kind === 'diagnosis' ? value.kind : null,
+    tasks,
+  }
+}
+
+function ExecutionBadge({ execution }: { execution?: AssistantExecution }) {
+  if (!execution || execution.mode === 'pending') return null
+  const label = execution.mode === 'supervisor'
+    ? `${execution.kind === 'diagnosis' ? '排课诊断' : '排课准备'} · Supervisor 编排`
+    : execution.mode === 'agent' ? '单 Agent 执行' : '直接处理'
+  return (
+    <div className="assist-execution" role="status">
+      <strong>{label}</strong>
+      {execution.mode === 'supervisor' && <span>多 Agent：{execution.multi_agent ? '已启用' : '未启用独立子 Agent'}</span>}
+      {execution.tasks.length > 0 && (
+        <ul aria-label="检查项状态">
+          {execution.tasks.map((task) => (
+            <li key={task.id}>{task.status === 'succeeded' ? '✓' : task.status === 'failed' ? '!' : '…'} {task.label} · {task.status === 'succeeded' ? '完成' : task.status === 'failed' ? '失败' : '进行中'}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 type Panel = 'support' | 'notice' | 'docs' | 'home' | 'rate' | null
@@ -127,7 +168,7 @@ function Face({ className }: { className?: string }) {
 function ThinkDial({ live, progress, connection }: { live: string; progress: AssistantRun | null; connection: string }) {
   const heartbeatRecent = progress && Date.now() - Date.parse(progress.heartbeat_at) < 12000
   return (
-    <div className="assist-dial is-live">
+    <div className={`assist-dial is-live${progress ? ' has-progress' : ''}`}>
       <span className="assist-dial-kicker">处理进度</span>
       <div className="assist-dial-window" aria-live="polite">
         <div key={live} className="assist-dial-face">
@@ -135,6 +176,7 @@ function ThinkDial({ live, progress, connection }: { live: string; progress: Ass
         </div>
       </div>
       {progress && <div className="assist-progress-detail">
+        <ExecutionBadge execution={progress.execution} />
         <span>已等待 {progress.elapsed_seconds} 秒 · 当前阶段 {progress.phase_elapsed_seconds} 秒</span>
         <span>{connection || (heartbeatRecent ? '后台仍在响应' : '暂未收到新的后台心跳，正在核对状态')}</span>
         {progress.phase_elapsed_seconds >= 15 && <span>当前阶段暂未返回新结果。你可以继续使用其他页面，或停止本轮处理。</span>}
@@ -514,6 +556,7 @@ export default function AssistantDock() {
             role: 'bot',
             text: data.text,
             mid: tid,
+            execution: outcome.execution,
             choices: data.choices,
             plan: data.plan ?? undefined,
             jumps: data.jumps,
@@ -581,6 +624,7 @@ export default function AssistantDock() {
           role: item.role === 'assistant' ? 'bot' : 'user',
           text: item.content,
           modelVisible: item.model_visible !== false,
+          execution: restored.find((saved) => saved.role === (item.role === 'assistant' ? 'bot' : 'user') && saved.text === item.content)?.execution,
         }))
         threadRef.current = restoredRemote
         setThread(restoredRemote)
@@ -1042,6 +1086,7 @@ export default function AssistantDock() {
                     {msg.role === 'bot' && !msg.text && msg.think?.live ? <ThinkDial live={msg.think.live} progress={runProgress} connection={connectionNote} /> : null}
                     {msg.text ? (
                       <div className={`assist-bubble is-${msg.role}`}>
+                        {msg.role === 'bot' && <ExecutionBadge execution={msg.execution} />}
                         {msg.role === 'bot' ? <AssistMarkdown text={msg.text} /> : msg.text}
                         {msg.mid ? <MidCopy id={msg.mid} /> : null}
                       </div>

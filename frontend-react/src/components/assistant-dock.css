@@ -568,6 +568,11 @@
   max-width: 168px;
 }
 
+.assist-dial.has-progress {
+  width: min(100%, 340px);
+  max-width: 340px;
+}
+
 .assist-dial-kicker {
   display: block;
   margin-bottom: 4px;
@@ -1283,5 +1288,20 @@ body[data-theme='tech'] .assist-dock-icon.is-on {
 .assist-rule-plan [role="alert"] { color: #a33d2e; }
 .assist-rule-plan button:disabled { opacity: .5; cursor: not-allowed; }
 .assist-progress-detail { display: grid; gap: 6px; padding-top: 8px; font-size: 12px; line-height: 1.6; color: #53634e; }
+.assist-execution {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #bed4fa;
+  border-radius: 9px;
+  background: #f0f6ff;
+  color: #17386f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.assist-execution strong { font-size: 12px; }
+.assist-execution span { color: #435c82; }
+.assist-execution ul { display: grid; gap: 3px; margin: 2px 0 0; padding-left: 17px; }
 .assist-progress-detail ol { padding-left: 20px; margin: 6px 0; }
 .assist-progress-detail summary { cursor: pointer; }

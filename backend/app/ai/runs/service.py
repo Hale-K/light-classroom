@@ -22,12 +22,60 @@ RUN_TIMEOUT = 180
 STALE_SECONDS = 30
 
 
+def execution_view(events: list[dict], *, status: str) -> dict:
+    """从内部轨迹投影安全的执行摘要，不公开上下文、工具结果或错误详情。"""
+    mode = "pending"
+    kind = None
+    tasks: dict[str, dict] = {}
+    for event in events:
+        event_type = event.get("type")
+        data = event.get("data") or {}
+        if event_type == "assistant.harness.selected":
+            mode = "direct" if data.get("name") == "direct" else "agent"
+        elif event_type == "assistant.turn.agent_started":
+            mode = "agent"
+        elif event_type == "assistant.intent.classified" and data.get("kind") in {"readiness", "diagnosis"}:
+            kind = data["kind"]
+        elif event_type in {
+            "assistant.supervisor.task_started",
+            "assistant.supervisor.task_succeeded",
+            "assistant.supervisor.task_failed",
+        }:
+            mode = "supervisor"
+            task_id = data.get("task_id")
+            if task_id not in {"schedule_setup", "teacher_assignments", "rules", "generation_status"}:
+                continue
+            task = tasks.setdefault(task_id, {
+                "id": task_id,
+                "label": str(data.get("label") or task_id)[:40],
+                "status": "running",
+            })
+            if event_type.endswith("task_succeeded"):
+                task["status"] = "succeeded"
+            elif event_type.endswith("task_failed"):
+                task["status"] = "failed"
+        elif event_type == "assistant.supervisor.completed":
+            mode = "supervisor"
+            if data.get("kind") in {"readiness", "diagnosis"}:
+                kind = data["kind"]
+    if mode == "pending" and status == "done":
+        mode = "direct"
+    return {
+        "mode": mode,
+        # 目前 Supervisor 顺序执行固定只读工具，没有独立模型子 Agent。
+        "multi_agent": False,
+        "kind": kind if mode == "supervisor" else None,
+        "tasks": list(tasks.values()) if mode == "supervisor" else [],
+    }
+
+
 def run_view(run: AiRun) -> dict:
     now = datetime.utcnow()
     return {
         "id": run.id, "status": run.status, "phase": run.phase, "message": run.message,
         # 原始轨迹可能含模型上下文和查询结果，只保留给受控诊断通道；老师界面只收进度投影。
         "events": [event for event in run.events if event.get("visibility") != "internal"], "result": run.result,
+        "execution": execution_view(run.events or [], status=run.status),
         "elapsed_seconds": max(0, int(((now if run.status == 'running' else run.updated_at) - run.created_at).total_seconds())),
         "phase_elapsed_seconds": max(0, int((now - run.phase_started_at).total_seconds())),
         "heartbeat_at": run.updated_at.isoformat() + "Z",

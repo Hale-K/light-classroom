@@ -62,7 +62,9 @@ async def test_stream_keeps_queued_run_open_and_releases_read_transaction(monkey
     async for chunk in response.body_iterator:
         text = chunk.decode() if isinstance(chunk, bytes) else chunk
         if "event: run.status" in text:
-            statuses.append(json.loads(text.split("data: ", 1)[1]).get("status"))
+            payload = json.loads(text.split("data: ", 1)[1])
+            statuses.append(payload.get("status"))
+            assert payload["execution"]["mode"] in {"pending", "direct"}
 
     assert statuses == ["queued", "done"]
     assert session.rollbacks == 2

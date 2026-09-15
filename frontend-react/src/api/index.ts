@@ -1134,6 +1134,13 @@ export type AssistantPlan = {
   result?: { text: string; path: string; count: number } | null
 }
 
+export type AssistantExecution = {
+  mode: 'pending' | 'direct' | 'agent' | 'supervisor'
+  multi_agent: boolean
+  kind: 'readiness' | 'diagnosis' | null
+  tasks: { id: string; label: string; status: 'running' | 'succeeded' | 'failed' }[]
+}
+
 export type AssistantRun = {
   id: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
@@ -1143,6 +1150,7 @@ export type AssistantRun = {
   phase_elapsed_seconds: number
   heartbeat_at: string
   events: { phase: string; message: string; at: string }[]
+  execution?: AssistantExecution
   result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[]; model_visible?: boolean } | null
 }
 

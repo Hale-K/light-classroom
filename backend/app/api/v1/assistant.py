@@ -181,6 +181,7 @@ async def stream_assistant_run(
                 k: view[k] for k in (
                     "id", "status", "phase", "message", "result", "elapsed_seconds",
                     "phase_elapsed_seconds", "heartbeat_at", "events",
+                    "execution",
                 )
             }
             yield f"event: run.status\ndata: {json.dumps(status_view, ensure_ascii=False)}\n\n"
