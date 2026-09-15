@@ -1,6 +1,7 @@
 """排课系统 API：基础资源、任教关系、周课表和日期课表。"""
 import asyncio
 import logging
+import os
 import random
 import secrets
 import time
@@ -2160,7 +2161,9 @@ async def _execute_schedule_generation(
             daily = grid.get("daily_periods") if isinstance(grid, dict) else None
             if isinstance(daily, list) and len(daily) >= 6 and daily[5]:
                 saturday_cap = int(daily[5])
-            max_solve = 150.0
+            # 单轮求解时限可用环境变量放宽；2 核小服务器 + 单双周课时结构下
+            # 150s 常搜不到首个可行解（UNKNOWN→误报无解），实测 300s 内 170s 即出解。
+            max_solve = float(os.environ.get("SCHEDULING_MAX_SOLVE_SECONDS", "300"))
             seed_attempts = 5
             # 不传 seed：每次任务随机起步；某一组超时/晚课对不上时换独立种子，不要整单失败。
             if body.random_seed is not None:
