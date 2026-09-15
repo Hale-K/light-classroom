@@ -56,12 +56,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   async login(phone, password) {
     const data = await authApi.login(phone, password)
     const schoolCode = normalizeSchoolCode(data.school?.code || get().schoolCode)
-    localStorage.removeItem(TOKEN_KEY)
+    localStorage.setItem(TOKEN_KEY, data.access_token)
     localStorage.setItem(USER_KEY, JSON.stringify(data.user))
     localStorage.setItem(SCHOOL_KEY, schoolCode)
     const activeRole = resolveActiveRole(data.user)
     if (activeRole) localStorage.setItem(ACTIVE_ROLE_KEY, activeRole)
-    set({ token: '', user: data.user, schoolCode, activeRole })
+    set({ token: data.access_token, user: data.user, schoolCode, activeRole })
   },
   async fetchMe() {
     try {

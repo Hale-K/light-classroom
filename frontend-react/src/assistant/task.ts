@@ -39,7 +39,7 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
   try {
     const response = await fetch(`${getSseApiBaseURL()}/assistant/runs/${encodeURIComponent(id)}/stream`, {
       headers: { ...getAuthHeaders(), Accept: 'text/event-stream' }, signal,
-      credentials: 'include',
+      credentials: 'omit',
       cache: 'no-store',
     })
     if (!response.ok || !response.body) throw new Error('SSE unavailable')

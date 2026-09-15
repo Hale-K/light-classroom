@@ -3,7 +3,7 @@
 - get_current_user：解析 JWT，返回当前登录用户
 - require_permission：RBAC 权限点校验（缓存角色→权限映射）
 """
-from fastapi import Cookie, Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from sqlalchemy import select
@@ -20,17 +20,18 @@ bearer = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
-    access_cookie: str | None = Cookie(default=None, alias="lc_access"),
     session: AsyncSession = Depends(get_session),
 ) -> User:
     """认证依赖：校验 Bearer Token，返回当前用户；失败抛 401。"""
-    token = creds.credentials if creds else access_cookie
+    token = creds.credentials if creds else None
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少令牌")
     try:
         payload = decode_access_token(token)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌无效或已过期")
+    if payload.get("scope") is not None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="非学校用户令牌")
 
     user_id = payload.get("sub")
     if user_id is None:
@@ -65,11 +66,10 @@ async def get_current_tenant() -> int:
 
 async def get_current_admin(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
-    access_cookie: str | None = Cookie(default=None, alias="lc_admin_access"),
     session: AsyncSession = Depends(get_session),
 ) -> PlatformAdmin:
     """平台超管认证依赖：仅接受 scope=admin 的令牌（与学校内用户令牌隔离）。"""
-    token = creds.credentials if creds else access_cookie
+    token = creds.credentials if creds else None
     if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少令牌")
     try:

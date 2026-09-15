@@ -48,9 +48,9 @@ export const useAdminStore = create<AdminState>()((set, get) => ({
   schools: [],
   async login(username, password) {
     const data = await adminApi.login(username, password)
-    localStorage.removeItem(ADMIN_TOKEN_KEY)
+    localStorage.setItem(ADMIN_TOKEN_KEY, data.access_token)
     localStorage.setItem(ADMIN_KEY, JSON.stringify(data.admin))
-    set({ token: '', admin: data.admin })
+    set({ token: data.access_token, admin: data.admin })
   },
   async fetchMe() {
     try {

@@ -1,14 +1,13 @@
 """认证 API - 登录 / 注册 / 当前用户（A4）"""
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import SQLModel
 
 from app.core.security import create_access_token, get_password_hash, verify_password
-from app.core.config import settings
 from app.db.session import AsyncSessionLocal, get_session, school_code_ctx, tenant_id_ctx
 from app.api.deps import get_current_user, get_user_permission_codes
 from app.models.org import User, Tenant, TenantConfig, Class, Student, Grade, OrganizationUnit
@@ -107,7 +106,7 @@ def _default_entry_year() -> int:
 
 
 @router.post("/login", summary="登录")
-async def login(body: LoginIn, response: Response, session: AsyncSession = Depends(_public_session)):
+async def login(body: LoginIn, session: AsyncSession = Depends(_public_session)):
     # 凭手机号（全局唯一）定位账号，登录前无需预知学校代码
     stmt = select(User).where(User.phone == body.phone)
     user = (await session.execute(stmt)).scalar_one_or_none()
@@ -125,8 +124,9 @@ async def login(body: LoginIn, response: Response, session: AsyncSession = Depen
     tenant = await session.get(Tenant, user.tenant_id)
     role_codes = await get_staff_role_codes(session, user.id)
     token = create_access_token(user.id, extra={"tid": user.tenant_id})
-    response.set_cookie("lc_access", token, httponly=True, secure=settings.app_env == "prod", samesite="lax", max_age=settings.jwt_access_token_expire_minutes * 60, path="/")
     return {"code": 0, "message": "ok", "data": {
+        "access_token": token,
+        "token_type": "bearer",
         "user": UserOut(id=user.id, name=user.name, phone=user.phone, role=user.role.value,
                         roles=role_codes).model_dump(),
         "school": {

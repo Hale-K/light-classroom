@@ -59,7 +59,7 @@ import type {
 
 /** 登录响应：后端 `{access_token, token_type, user, school}` */
 export interface LoginResult {
-  access_token?: string
+  access_token: string
   token_type: string
   user: UserInfo
   /** 账号所属学校，登录后由后端决定，前端无需预选 */
@@ -133,7 +133,7 @@ export const authApi = {
 /** 平台超管 API（创建学校后台） */
 export const adminApi = {
     login: (username: string, password: string) =>
-    unwrap<{ access_token?: string; admin: PlatformAdminInfo }>(
+    unwrap<{ access_token: string; token_type: string; admin: PlatformAdminInfo }>(
       http.post('/admin/login', { username, password }),
     ),
   me: () => unwrap<PlatformAdminInfo>(http.get('/admin/me')),
@@ -563,7 +563,7 @@ export const schedulingApi = {
             'Cache-Control': 'no-cache',
           },
           cache: 'no-store',
-          credentials: 'include',
+          credentials: 'omit',
           signal,
         })
         if (!response.ok) {
