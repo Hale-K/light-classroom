@@ -10,6 +10,21 @@ teacher = assistant
 
 
 @pytest.mark.asyncio
+async def test_greeting_with_history_uses_local_fast_path():
+    result = await assistant.handle_assistant_turn(
+        None,
+        1,
+        [
+            {"role": "user", "content": "之前的问题"},
+            {"role": "assistant", "content": "之前的回答"},
+            {"role": "user", "content": "你好"},
+        ],
+    )
+
+    assert result.text == assistant.local_reply("你好")
+
+
+@pytest.mark.asyncio
 async def test_short_followup_keeps_history_and_rules_query_uses_agent(monkeypatch):
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "test", 5)]))
     agent = AsyncMock(return_value=teacher.AssistantTurn(text="已查询"))

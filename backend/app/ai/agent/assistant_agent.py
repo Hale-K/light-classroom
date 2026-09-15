@@ -251,7 +251,10 @@ async def handle_assistant_turn(
                 "若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。"
             )
         )
-    if len(turns) == 1 and last.get("role") == "user":
+    # 本地问候是按“最新一条用户消息”判断的。对话带有历史时，重复问候
+    # 仍然不需要经过意图分类、向量检索和模型调用，否则简单的“你好”会被
+    # 历史上下文拖进完整 Agent 流程。
+    if last.get("role") == "user":
         guide = runtime.service("ui_guide")
         fixed = guide.local_reply(str(last.get("content") or ""), page_path)
         if fixed:
