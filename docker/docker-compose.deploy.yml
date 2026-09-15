@@ -33,6 +33,16 @@ services:
       timeout: 3s
       retries: 5
 
+  ollama:
+    image: ollama/ollama:latest
+    volumes: ["ollamadata:/root/.ollama"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+
   rabbitmq:
     image: docker.m.daocloud.io/library/rabbitmq:3.13-management-alpine
     environment:
@@ -115,7 +125,10 @@ services:
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       minio: {condition: service_healthy}
+      ollama: {condition: service_healthy}
     env_file: ../.env
+    volumes:
+      - ${BGE_MODEL_HOST_PATH:-../models/bge-base-zh-v1.5}:/models/bge-base-zh-v1.5:ro
     ports: ["8000:8000"]
     restart: unless-stopped
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -133,7 +146,10 @@ services:
       postgres: {condition: service_healthy}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
+      ollama: {condition: service_healthy}
     env_file: ../.env
+    volumes:
+      - ${BGE_MODEL_HOST_PATH:-../models/bge-base-zh-v1.5}:/models/bge-base-zh-v1.5:ro
     command: celery -A app.workers.celery_app worker -Q scheduling,academic --concurrency=2 --loglevel=info
     restart: unless-stopped
 
@@ -142,3 +158,4 @@ volumes:
   redisdata:
   rabbitmqdata:
   miniodata:
+  ollamadata:
