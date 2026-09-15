@@ -3,6 +3,7 @@ import type { CSSProperties } from 'react'
 import type { Key } from 'react'
 import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tree } from 'antd'
 import type { DataNode } from 'antd/es/tree'
+import { useNavigate } from 'react-router-dom'
 import { organizationApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import Icon from '@/components/Icon'
@@ -38,6 +39,7 @@ function toTreeData(units: OrganizationUnit[]): DataNode[] {
 
 export default function OrganizationView({ embedded = false }: { embedded?: boolean }) {
   const { message, modal } = App.useApp()
+  const navigate = useNavigate()
   const [data, setData] = useState<OrganizationTreeResult>()
   const [grades, setGrades] = useState<Array<{ id: number; name: string }>>([])
   const [subjects, setSubjects] = useState<SubjectInfo[]>([])
@@ -254,7 +256,20 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(prev, next) => prev.unit_type !== next.unit_type}>
           {({ getFieldValue }) => getFieldValue('unit_type') === 'subject_group' ? <Form.Item name="subject_id" label="关联科目" rules={[{ required: true, message: '请选择学科组关联的科目' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择该学科组负责的科目" options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))} />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择该学科组负责的科目"
+              options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))}
+              notFoundContent={subjects.length === 0 ? (
+                <div className="zh-select-empty-guide">
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可关联的科目" />
+                  <Button type="link" onMouseDown={(event) => event.preventDefault()} onClick={() => navigate('/subjects')}>
+                    去科目管理创建
+                  </Button>
+                </div>
+              ) : undefined}
+            />
           </Form.Item> : null}
         </Form.Item>
         <div className="zh-form-grid">

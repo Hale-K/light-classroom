@@ -4039,6 +4039,25 @@ body[data-theme='tech'] .st-subject-self-study {
   box-shadow: 0 6px 20px rgba(14, 165, 233, 0.42);
 }
 .ant-btn-primary:not(:disabled):active { transform: translateY(0) scale(0.98); }
+.zh-select-empty-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 8px;
+}
+.zh-select-empty-guide .ant-empty {
+  margin: 8px 0;
+}
+.zh-select-empty-guide .ant-empty-description {
+  color: var(--text-2);
+  white-space: nowrap;
+}
+.zh-select-empty-guide-title {
+  color: var(--text-2);
+  font-size: 13px;
+  white-space: nowrap;
+}
 .ant-card { border-radius: 16px; }
 .ant-modal .ant-modal-content {
   border-radius: 18px;
