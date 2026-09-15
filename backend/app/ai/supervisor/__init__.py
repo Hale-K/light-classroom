@@ -8,6 +8,7 @@ from app.ai.supervisor.contracts import (
     SupervisorTask,
 )
 from app.ai.supervisor.readiness import READINESS_TASKS, SchedulingReadinessSupervisor
+from app.ai.supervisor.diagnosis import DIAGNOSIS_TASKS, SchedulingDiagnosisSupervisor
 
 __all__ = [
     "SupervisorKind",
@@ -17,4 +18,6 @@ __all__ = [
     "SupervisorTask",
     "READINESS_TASKS",
     "SchedulingReadinessSupervisor",
+    "DIAGNOSIS_TASKS",
+    "SchedulingDiagnosisSupervisor",
 ]
