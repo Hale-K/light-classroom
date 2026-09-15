@@ -2,9 +2,10 @@ import asyncio
 
 import pytest
 
-from app.ai.graph.loop import run_tool_loop
+from app.ai.graph.loop import ReactLoop
 from app.ai.model.chat import ChatOutcome, ToolCallOut
 from app.ai.runs.progress import drive_turn
+from app.ai.tools.school import SCHOOL_TOOLS
 
 
 @pytest.mark.asyncio
@@ -19,7 +20,7 @@ async def test_progress_precedes_slow_model_and_tool():
     async def executor(*args):
         assert events[-1] == ("tool", "正在查询本校规则组")
         return "有一个规则组"
-    await run_tool_loop(base_url="x", api_key="", model="x", timeout=1, messages=[], tools=[], executor=executor, caller=caller, on_progress=report)
+    await run_loop(base_url="x", api_key="", model="x", timeout=1, messages=[], tools=SCHOOL_TOOLS, executor=executor, caller=caller, on_progress=report)
     assert [phase for phase, _ in events] == ["model", "tool", "observed", "model"]
 
 
@@ -50,3 +51,5 @@ async def test_cancel_and_timeout_stop_underlying_work():
         with pytest.raises(asyncio.CancelledError if cancelled else TimeoutError):
             await drive_turn(work(), heartbeat, interval=.005, timeout=.02)
         assert stopped.is_set()
+async def run_loop(**kwargs):
+    return await ReactLoop(**kwargs).run()

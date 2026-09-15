@@ -4,12 +4,13 @@
 以便跨租户创建/查询学校与校长号；鉴权走 get_current_admin（scope=admin 令牌）。
 """
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, func, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.security import create_admin_access_token, get_password_hash, verify_password
+from app.core.config import settings
 from app.db.session import AsyncSessionLocal
 from app.api.deps import get_current_admin
 from app.models.admin import PlatformAdmin
@@ -82,15 +83,15 @@ async def get_admin_session():
 
 # ---------- 认证 ----------
 @router.post("/login", summary="平台超管登录")
-async def login(body: AdminLoginIn, session: AsyncSession = Depends(get_admin_session)):
+async def login(body: AdminLoginIn, response: Response, session: AsyncSession = Depends(get_admin_session)):
     admin = (await session.execute(
         select(PlatformAdmin).where(PlatformAdmin.username == body.username))).scalar_one_or_none()
     if admin is None or admin.status != "active" or not verify_password(body.password, admin.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
     admin.last_login_at = datetime.utcnow()
     await session.flush()
+    response.set_cookie("lc_admin_access", create_admin_access_token(admin.id), httponly=True, secure=settings.app_env == "prod", samesite="lax", max_age=settings.jwt_access_token_expire_minutes * 60, path="/")
     return {"code": 0, "message": "ok", "data": {
-        "access_token": create_admin_access_token(admin.id),
         "admin": AdminOut(id=admin.id, username=admin.username, name=admin.name).model_dump(),
     }}
 

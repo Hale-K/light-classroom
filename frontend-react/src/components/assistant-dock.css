@@ -519,6 +519,27 @@
   white-space: nowrap;
 }
 
+.assist-recover-button {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 10px 16px 0;
+  padding: 9px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 8px;
+  background: #eff6ff;
+  color: #1d4ed8;
+  font-size: 13px;
+  line-height: 1.4;
+  text-align: center;
+  cursor: pointer;
+}
+
+.assist-recover-button:hover,
+.assist-recover-button:focus-visible {
+  background: #dbeafe;
+  outline: none;
+}
+
 .assist-thread {
   display: flex;
   flex-direction: column;
@@ -545,6 +566,11 @@
   align-self: flex-start;
   width: fit-content;
   max-width: 168px;
+}
+
+.assist-dial.has-progress {
+  width: min(100%, 340px);
+  max-width: 340px;
 }
 
 .assist-dial-kicker {
@@ -910,6 +936,57 @@
   color: #374151;
 }
 
+.assist-inbox-taskbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  margin: 0 16px;
+  padding: 7px 10px;
+  border: 1px solid #e5e7eb;
+  border-bottom: 0;
+  border-radius: 10px 10px 0 0;
+  background: #fafafa;
+  color: #4b5563;
+  font-size: 12px;
+}
+
+.assist-inbox-task-label {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 7px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.assist-inbox-task-label svg {
+  flex: 0 0 auto;
+  color: #1677ff;
+}
+
+.assist-inbox-steer {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #1677ff;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.assist-inbox-steer:hover,
+.assist-inbox-steer:focus-visible {
+  background: rgba(22, 119, 255, 0.1);
+  outline: none;
+}
+
 .assist-composer {
   margin: 0 16px;
   padding: 6px 8px;
@@ -1211,5 +1288,20 @@ body[data-theme='tech'] .assist-dock-icon.is-on {
 .assist-rule-plan [role="alert"] { color: #a33d2e; }
 .assist-rule-plan button:disabled { opacity: .5; cursor: not-allowed; }
 .assist-progress-detail { display: grid; gap: 6px; padding-top: 8px; font-size: 12px; line-height: 1.6; color: #53634e; }
+.assist-execution {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 8px;
+  padding: 8px 10px;
+  border: 1px solid #bed4fa;
+  border-radius: 9px;
+  background: #f0f6ff;
+  color: #17386f;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.assist-execution strong { font-size: 12px; }
+.assist-execution span { color: #435c82; }
+.assist-execution ul { display: grid; gap: 3px; margin: 2px 0 0; padding-left: 17px; }
 .assist-progress-detail ol { padding-left: 20px; margin: 6px 0; }
 .assist-progress-detail summary { cursor: pointer; }

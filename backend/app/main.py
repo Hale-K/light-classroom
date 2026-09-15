@@ -58,13 +58,16 @@ app = FastAPI(
 )
 
 # ---------- 中间件链 ----------
-# 1. CORS（开发期全开，生产按域名白名单）
+# 1. CORS：生产必须使用明确的前端来源白名单，禁止通配符。
+_cors_origins = [item.strip() for item in settings.cors_origins.split(",") if item.strip()]
+if not _cors_origins and settings.app_env == "dev":
+    _cors_origins = ["http://localhost:5173", "http://127.0.0.1:5173"]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "X-School-Code", "X-Trace-Id"],
     expose_headers=[TRACE_HEADER],
 )
 
@@ -120,7 +123,7 @@ async def health():
 
 
 # ---------- 路由挂载（按模块陆续加） ----------
-from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding
+from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(org.router, prefix="/api/v1")
@@ -142,6 +145,7 @@ app.include_router(student_import.router, prefix="/api/v1")
 app.include_router(file_center.router, prefix="/api/v1")
 app.include_router(ai_provider.router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")
+app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
 # from app.api.v1 import exam, grading, ...
 # 待业务实现后陆续挂载：权限/组织学籍/考试试卷/扫描进卷/打分/画像诊断/巩固卷/押题/AI编排/打印

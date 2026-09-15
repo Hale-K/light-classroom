@@ -622,6 +622,21 @@
   border-color: #66c5f3;
   color: #fff;
 }
+/* 极简模式下 Ant Design 的 disabled 默认文字过淡，深色控制舱里几乎不可读。
+   保留禁用状态的弱化感，同时保证按钮名称和图标达到可读对比度。 */
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary):disabled,
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary).ant-btn-disabled {
+  border-color: #45617e !important;
+  background: #243b57 !important;
+  color: #c1d1e1 !important;
+  opacity: 1;
+}
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary):disabled > span,
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary).ant-btn-disabled > span,
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary):disabled .anticon,
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary).ant-btn-disabled .anticon {
+  color: inherit !important;
+}
 .sk-grade-schedules {
   display: grid;
   gap: 10px;

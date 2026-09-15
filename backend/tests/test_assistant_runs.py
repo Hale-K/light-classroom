@@ -7,7 +7,8 @@ from sqlalchemy.orm import Session
 
 from app.ai.runs.models import AiRun
 from app.ai.runs import create_run, get_run
-from app.ai.runs.events import run_event
+from app.ai.runs.events import run_event, trace_event
+from app.ai.runs.service import run_view
 
 
 def test_run_event_has_stable_type_and_source():
@@ -15,6 +16,29 @@ def test_run_event_has_stable_type_and_source():
     assert event["type"] == "assistant.recovering"
     assert event["source"] == "model"
     assert event["message"] == "正在切换备用模型"
+
+
+def test_public_run_view_exposes_supervisor_status_without_private_trace():
+    run = AiRun(id="a" * 32, tenant_id=1, user_id=2, request_hash="x" * 64)
+    run.status = "done"
+    run.events = [
+        trace_event("intent.classified", {"kind": "readiness", "query": "私有问题"}),
+        trace_event("harness.selected", {"name": "readiness"}),
+        trace_event("supervisor.task_started", {"task_id": "schedule_setup", "label": "学期与课位"}),
+        trace_event("supervisor.task_succeeded", {"task_id": "schedule_setup", "result": "私有结果"}),
+        trace_event("supervisor.completed", {"kind": "readiness"}),
+    ]
+
+    view = run_view(run)
+
+    assert view["events"] == []
+    assert view["execution"] == {
+        "mode": "supervisor",
+        "multi_agent": False,
+        "kind": "readiness",
+        "tasks": [{"id": "schedule_setup", "label": "学期与课位", "status": "succeeded"}],
+    }
+    assert "私有" not in str(view["execution"])
 
 
 def _sqlite_session():

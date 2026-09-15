@@ -40,6 +40,9 @@ dependencies = [
     # 工具
     "python-multipart>=0.0.9",  # 文件上传
     "httpx>=0.27.0",            # HTTP 客户端
+    "tiktoken>=0.14.0",         # LLM 上下文 Token 计数与预算
+    "pgvector>=0.4,<1",         # PostgreSQL vector 类型与 SQLAlchemy/SQLModel 集成
+    "sentence-transformers>=5.0,<6",  # 本地 BGE 向量生成
     "loguru>=0.7.0",           # 日志
 ]
 

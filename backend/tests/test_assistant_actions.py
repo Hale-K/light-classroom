@@ -229,27 +229,43 @@ async def test_failed_commit_rolls_back_rules_and_receipt(database, monkeypatch)
 
 
 @pytest.mark.asyncio
-async def test_chat_tool_to_confirm_endpoint_complete_flow(database, monkeypatch):
+async def test_gateway_tool_to_confirm_endpoint_complete_flow(database, monkeypatch):
     from types import SimpleNamespace
     from unittest.mock import AsyncMock
     import json
     from app.api.v1 import assistant
-    from app.ai.agent import teacher
-    from app.ai.graph import loop
+    from app.ai.agent import assistant_agent
+    from app.ai.gateway import model as gateway_model
+    from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
     from app.ai.model.chat import ChatOutcome, ToolCallOut
     session, sync = database
     monkeypatch.setattr(assistant, "get_user_permission_codes", AsyncMock(return_value={"scheduling:assign"}))
     from app.ai.model.chat import ChatEndpoint
-    monkeypatch.setattr(teacher, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "fixture", 5)]))
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "fixture", 5)]))
     caller = AsyncMock(return_value=ChatOutcome(text="不可使用模型声称的已保存", tool_calls=[ToolCallOut(id="1", name="propose_rules", arguments=json.dumps({
         "group_name": "高一规则", "rules": [{"code": "slot_forbidden", "target_names": ["数学"], "priority": "hard", "weekdays": [3], "periods": [6, 7]}],
     }))]))
-    monkeypatch.setattr(loop, "complete_chat_tools", caller)
+    monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
+    monkeypatch.setattr(
+        IntentGateway,
+        "classify",
+        AsyncMock(
+            return_value=IntentDecision(
+                AssistantIntent.CONFIGURATION, 0.91, "pgvector"
+            )
+        ),
+    )
     user = SimpleNamespace(id=2, tenant_id=1)
-    result = await assistant.assistant_chat(assistant.ChatIn(messages=[assistant.ChatTurn(role="user", content="数学周三6、7节禁排")]), session, user, 1)
+    result = await assistant.assistant_gateway.chat(
+        session,
+        1,
+        user.id,
+        assistant.AssistantRequest(messages=[{"role": "user", "content": "数学周三6、7节禁排"}]),
+        can_manage_rules=True,
+    )
     assert caller.await_count == 1  # Successful proposal stops before another model call.
-    assert "不可使用模型" not in result["data"]["text"]
-    plan = result["data"]["plan"]
+    assert "不可使用模型" not in result.text
+    plan = result.plan
     assert plan["status"] == "pending"
     sync.commit()
     # Permission revoked between preview and confirmation must block the write.

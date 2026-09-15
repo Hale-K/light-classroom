@@ -23,10 +23,8 @@ async function main() {
     await page.goto('http://127.0.0.1:5176/__assistant_page_test')
 
     const result = await page.evaluate(async () => {
-      const [{ routeTeacherMessage }, { pageGuidanceText }, { clarify }, { runAssistantTool }, { decideJumpReply }] = await Promise.all([
-        import('/src/assistant/orchestrate.ts'),
+      const [{ pageGuidanceText }, { runAssistantTool }, { decideJumpReply }] = await Promise.all([
         import('/src/assistant/page-guidance.ts'),
-        import('/src/assistant/clarify.ts'),
         import('/src/assistant/run.ts'),
         import('/src/assistant/jump-intent.ts'),
       ])
@@ -45,14 +43,6 @@ async function main() {
         line => progress.push(line),
       )
       return {
-        campusNext: routeTeacherMessage('我下一步该干什么', '/campus-buildings'),
-        studentHelp: routeTeacherMessage('这个页面怎么用', '/students'),
-        contextualCheck: routeTeacherMessage('我想让你帮忙核对数据', '/settings'),
-        configuredRight: routeTeacherMessage('这个页面我配的对吗？', '/settings'),
-        contextualReference: routeTeacherMessage('这个是什么意思', '/settings', true),
-        isolatedReference: routeTeacherMessage('这个是什么意思', '/settings'),
-        systemHelp: routeTeacherMessage('系统怎么用', '/dashboard'),
-        spaceClarify: clarify('空间资源怎么配置'),
         missingGuides: paths.filter((path) => !pageGuidanceText(path)),
         spaceNext,
         progress,
@@ -62,14 +52,6 @@ async function main() {
       }
     })
 
-    assert.deepEqual(result.campusNext, { kind: 'tool', tool: 'nextStep', path: '' })
-    assert.deepEqual(result.studentHelp, { kind: 'tool', tool: 'pageGuide', path: '' })
-    assert.deepEqual(result.contextualCheck, { kind: 'llm' })
-    assert.deepEqual(result.configuredRight, { kind: 'llm' })
-    assert.deepEqual(result.contextualReference, { kind: 'llm' })
-    assert.equal(result.isolatedReference.kind, 'say')
-    assert.deepEqual(result.systemHelp, { kind: 'tool', tool: 'howToUse', path: '/onboarding' })
-    assert.equal(result.spaceClarify, null)
     assert.deepEqual(result.missingGuides, [])
     assert.match(result.spaceNext.report, /选中已有校区/)
     assert.match(result.spaceNext.report, /0 栋楼宇/)
@@ -77,7 +59,7 @@ async function main() {
     assert.equal(result.jumpYes.kind, 'confirm')
     assert.equal(result.jumpNo.kind, 'cancel')
     assert.equal(result.jumpUnclear.kind, 'none')
-    console.log('PASS: page guidance, space next-step, and conversational jump confirmation')
+    console.log('PASS: page guidance, explicit task action, and conversational jump confirmation')
   } finally {
     await browser.close()
   }

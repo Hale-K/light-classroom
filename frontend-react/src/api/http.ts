@@ -93,10 +93,12 @@ function createHttp(baseURL: string): AxiosInstance {
   const http = axios.create({
     baseURL,
     timeout: 20000,
+    withCredentials: true,
   })
 
   http.interceptors.request.use((config) => {
     const token = isAdminUrl(config.url) ? resolver.getAdminToken() : resolver.getToken()
+    // 新会话使用 HttpOnly Cookie；保留 Bearer 读取仅用于旧版会话迁移。
     if (token) config.headers.Authorization = `Bearer ${token}`
     config.headers['X-School-Code'] = resolver.getSchoolCode()
     config.headers['X-Trace-Id'] = newTraceId()
@@ -148,16 +150,8 @@ export function getApiBaseURL(): string {
   return baseURL
 }
 
-/**
- * SSE 专用基址：开发期若走 Vite 代理，小块 event-stream 常被缓冲，
- * 进度会卡在前几秒；改为直连后端，避免代理攒包。
- */
+/** SSE 与普通 API 使用同一基址，开发环境交给已配置为不缓冲的 Vite 代理。 */
 export function getSseApiBaseURL(): string {
-  const configured = import.meta.env?.VITE_API_BASE_URL as string | undefined
-  if (import.meta.env.DEV && (!configured || configured === '/api/v1')) {
-    const target = (import.meta.env.VITE_DEV_PROXY as string | undefined) || 'http://127.0.0.1:8001'
-    return `${String(target).replace(/\/$/, '')}/api/v1`
-  }
   return baseURL
 }
 

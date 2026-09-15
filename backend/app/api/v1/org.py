@@ -11,7 +11,7 @@ from sqlalchemy import select, func, update, or_
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import get_session
-from app.api.deps import get_current_user, get_current_tenant
+from app.api.deps import get_current_user, get_current_tenant, require_management_user
 from app.models.facility import Campus, Room, RoomCohortAllocation
 from app.models.org import Grade, Class, OrganizationUnit, Student, StudentGradeMembership, Subject, TeachingAssignment, User
 from app.models.scan import Submission
@@ -22,7 +22,7 @@ from app.services.org.naming import normalize_entity_name
 from app.services.org.cohort import cohort_labels_match, current_academic_year, expected_cohort_label, normalize_cohort_label
 from app.services.academic.student_membership import sync_student_grade_membership
 
-router = APIRouter(prefix="/org", tags=["组织学籍"])
+router = APIRouter(prefix="/org", tags=["组织学籍"], dependencies=[Depends(require_management_user)])
 
 
 # ---------- Pydantic 请求/响应模型 ----------

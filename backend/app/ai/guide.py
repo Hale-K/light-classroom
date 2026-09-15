@@ -1,7 +1,6 @@
 """助手页面引导：只提供说明和跳转建议，不直接改变教师所在页面。"""
 from __future__ import annotations
 
-from app.ai.advisor.clarify import clarify
 from app.ai.prompt.messages import GREET_REPLY
 
 _GREET = {"你好", "您好", "hi", "hello", "在吗", "在么", "嗨"}
@@ -30,8 +29,7 @@ class AssistantUiGuide:
             return GREET_REPLY
         if page_path and any(word in q for word in ("下一步", "接下来", "该干什么", "该做什么", "先做什么")):
             return None
-        hit = clarify(text or "")
-        return hit.text if hit else None
+        return None
 
     @staticmethod
     def degraded_reply(query: str, page_path: str | None) -> str:

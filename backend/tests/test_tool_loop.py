@@ -3,7 +3,7 @@ import asyncio
 
 import pytest
 
-from app.ai.graph.loop import run_tool_loop
+from app.ai.graph.loop import ReactLoop
 from app.ai.model.chat import ChatError, ChatOutcome, ToolCallOut
 
 _TOOLS = [{"type": "function", "function": {"name": "lookup_teachers", "parameters": {}}}]
@@ -25,7 +25,7 @@ def test_loop_answers_directly_without_tools():
         async def executor(name, arguments):
             raise AssertionError("不应执行工具")
 
-        outcome = await run_tool_loop(
+        outcome = await run_loop(
             base_url="http://x", api_key="k", model="m", timeout=10,
             messages=[{"role": "user", "content": "查课"}],
             tools=_TOOLS, executor=executor, caller=caller,
@@ -36,6 +36,66 @@ def test_loop_answers_directly_without_tools():
     assert outcome.text == "周一第5节是空堂"
     assert outcome.steps == []
     assert seen[0]["tools"] == _TOOLS
+
+
+def test_steer_arriving_during_model_call_wakes_next_step():
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([
+            ChatOutcome(text="原方向的临时回答"),
+            ChatOutcome(text="已按新方向回答"),
+        ], seen)
+        inbox_calls = 0
+
+        async def on_step(_step):
+            nonlocal inbox_calls
+            inbox_calls += 1
+            if inbox_calls == 2:
+                return [{"role": "user", "content": "执行方向调整：只看高一", "_wake": True}]
+            return []
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "检查全校"}],
+            tools=_TOOLS, executor=executor, caller=caller, on_step=on_step,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert outcome.text == "已按新方向回答"
+    assert len(seen) == 2
+    assert seen[1]["messages"][-1] == {"role": "user", "content": "执行方向调整：只看高一"}
+
+
+def test_inject_arriving_during_model_call_does_not_wake_next_step():
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([ChatOutcome(text="已完成")], seen)
+        inbox_calls = 0
+
+        async def on_step(_step):
+            nonlocal inbox_calls
+            inbox_calls += 1
+            if inbox_calls == 2:
+                return [{"role": "system", "content": "页签发生变化", "_wake": False}]
+            return []
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "检查全校"}],
+            tools=_TOOLS, executor=executor, caller=caller, on_step=on_step,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert outcome.text == "已完成"
+    assert len(seen) == 1
 
 
 def test_loop_executes_tool_and_feeds_result_back():
@@ -56,7 +116,7 @@ def test_loop_executes_tool_and_feeds_result_back():
             assert '"数学"' in arguments
             return "2026学年第1学期，任教「数学」的在职教师共 3 人：\n- 张三：数学"
 
-        outcome = await run_tool_loop(
+        outcome = await run_loop(
             base_url="http://x", api_key="k", model="m", timeout=10,
             messages=[{"role": "user", "content": "数学老师有谁"}],
             tools=_TOOLS, executor=executor, caller=caller,
@@ -91,7 +151,7 @@ def test_loop_emits_replayable_model_and_tool_events():
         async def record(kind, data):
             trace.append((kind, data))
 
-        outcome = await run_tool_loop(
+        outcome = await run_loop(
             base_url="http://x", api_key="k", model="m", timeout=10,
             messages=[{"role": "user", "content": "教师有谁"}], tools=_TOOLS,
             executor=executor, caller=caller, on_trace=record,
@@ -120,7 +180,7 @@ def test_loop_forces_text_on_last_step():
         async def executor(name, arguments):
             return "规则组 2 个"
 
-        outcome = await run_tool_loop(
+        outcome = await run_loop(
             base_url="http://x", api_key="k", model="m", timeout=10,
             messages=[{"role": "user", "content": "规则"}],
             tools=_TOOLS, executor=executor, caller=caller, max_steps=2,
@@ -145,7 +205,7 @@ def test_loop_converts_executor_error_into_tool_result():
         async def executor(name, arguments):
             raise RuntimeError("db down")
 
-        outcome = await run_tool_loop(
+        outcome = await run_loop(
             base_url="http://x", api_key="k", model="m", timeout=10,
             messages=[{"role": "user", "content": "王老师是谁"}],
             tools=_TOOLS, executor=executor, caller=caller,
@@ -174,7 +234,7 @@ def test_final_step_hallucinated_tool_calls_are_dropped():
         async def executor(name, arguments):
             raise AssertionError("收口轮不应执行工具")
 
-        outcome = await run_tool_loop(
+        outcome = await run_loop(
             base_url="http://x", api_key="k", model="m", timeout=10,
             messages=[{"role": "user", "content": "规则"}],
             tools=_TOOLS, executor=executor, caller=caller, max_steps=2,
@@ -195,7 +255,7 @@ def test_final_step_hallucinated_calls_with_empty_text_raise_empty():
             raise AssertionError("收口轮不应执行工具")
 
         with pytest.raises(ChatError) as ei:
-            await run_tool_loop(
+            await run_loop(
                 base_url="http://x", api_key="k", model="m", timeout=10,
                 messages=[{"role": "user", "content": "规则"}],
                 tools=_TOOLS, executor=executor, caller=caller, max_steps=1,
@@ -204,3 +264,5 @@ def test_final_step_hallucinated_calls_with_empty_text_raise_empty():
 
     ei = asyncio.run(main())
     assert ei.value.error_class == "empty"
+async def run_loop(**kwargs):
+    return await ReactLoop(**kwargs).run()

@@ -3,7 +3,7 @@
 - get_current_user：解析 JWT，返回当前登录用户
 - require_permission：RBAC 权限点校验（缓存角色→权限映射）
 """
-from fastapi import Depends, HTTPException, status
+from fastapi import Cookie, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import JWTError
 from sqlalchemy import select
@@ -20,13 +20,15 @@ bearer = HTTPBearer(auto_error=False)
 
 async def get_current_user(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    access_cookie: str | None = Cookie(default=None, alias="lc_access"),
     session: AsyncSession = Depends(get_session),
 ) -> User:
     """认证依赖：校验 Bearer Token，返回当前用户；失败抛 401。"""
-    if creds is None:
+    token = creds.credentials if creds else access_cookie
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少令牌")
     try:
-        payload = decode_access_token(creds.credentials)
+        payload = decode_access_token(token)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌无效或已过期")
 
@@ -63,13 +65,15 @@ async def get_current_tenant() -> int:
 
 async def get_current_admin(
     creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    access_cookie: str | None = Cookie(default=None, alias="lc_admin_access"),
     session: AsyncSession = Depends(get_session),
 ) -> PlatformAdmin:
     """平台超管认证依赖：仅接受 scope=admin 的令牌（与学校内用户令牌隔离）。"""
-    if creds is None:
+    token = creds.credentials if creds else access_cookie
+    if not token:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少令牌")
     try:
-        payload = decode_access_token(creds.credentials)
+        payload = decode_access_token(token)
     except JWTError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="令牌无效或已过期")
     if payload.get("scope") != "admin":
@@ -110,4 +114,18 @@ class require_permission:
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"无权限: {self.code}",
             )
-        return user
+
+
+async def require_management_user(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """保护学校级管理模块；教师端必须使用专用的个人/班级接口。"""
+    if user.role != "director":
+        from app.services.org.staff_roles import get_staff_role_codes
+        roles = await get_staff_role_codes(session, user.id)
+        if "academic_director" not in roles:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅教务管理人员可访问此模块")
+    if user.role not in ("director", "teacher"):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅教务管理人员可访问此模块")
+    return user

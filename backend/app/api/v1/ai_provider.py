@@ -10,10 +10,11 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.model.providers import ProbeError, load_model_ids, test_connection
 from app.ai.model.store import AiProvider
-from app.api.deps import get_current_tenant, get_current_user
+from app.core.secret_store import decrypt_secret, encrypt_secret
+from app.api.deps import get_current_tenant, get_current_user, require_management_user
 from app.db.session import get_session
 
-router = APIRouter(prefix="/ai-providers", tags=["服务商管理"])
+router = APIRouter(prefix="/ai-providers", tags=["服务商管理"], dependencies=[Depends(require_management_user)])
 
 
 class ProviderIn(BaseModel):
@@ -112,7 +113,7 @@ async def create_provider(
         name=body.name.strip(),
         provider_type=body.provider_type.upper(),
         base_url=body.base_url.strip(),
-        api_key=(body.api_key or "").strip(),
+        api_key=encrypt_secret(body.api_key),
         chat_model=body.chat_model,
         vision_model=body.vision_model,
         image_model=body.image_model,
@@ -147,7 +148,7 @@ async def update_provider(
     row.provider_type = body.provider_type.upper()
     row.base_url = body.base_url.strip()
     if body.api_key is not None and body.api_key.strip():
-        row.api_key = body.api_key.strip()
+        row.api_key = encrypt_secret(body.api_key)
     row.chat_model = body.chat_model
     row.vision_model = body.vision_model
     row.image_model = body.image_model
@@ -228,7 +229,7 @@ async def test_provider(
     if row is None or row.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="服务商不存在")
     try:
-        ok = await test_connection(row.provider_type, row.base_url, row.api_key)
+        ok = await test_connection(row.provider_type, row.base_url, decrypt_secret(row.api_key))
     except Exception:
         ok = False
     row.last_test_status = 1 if ok else 0

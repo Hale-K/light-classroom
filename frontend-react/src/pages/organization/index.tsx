@@ -7,6 +7,7 @@ import type { DataNode } from 'antd/es/tree'
 import { organizationApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import Icon from '@/components/Icon'
+import SelectEmptyGuide from '@/components/SelectEmptyGuide'
 import type { OrganizationTreeResult, OrganizationUnit, OrganizationUnitType, SubjectInfo } from '@/types'
 import { academicYearOptions } from '@/academicYear'
 import { flattenOrganizationUnits, organizationExpandedKeys } from './tree-utils'
@@ -280,7 +281,13 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
         </Form.Item>
         <Form.Item noStyle shouldUpdate={(prev, next) => prev.unit_type !== next.unit_type}>
           {({ getFieldValue }) => getFieldValue('unit_type') === 'subject_group' ? <Form.Item name="subject_id" label="关联科目" rules={[{ required: true, message: '请选择学科组关联的科目' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择该学科组负责的科目" options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))} />
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="选择该学科组负责的科目"
+              options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))}
+              notFoundContent={subjects.length === 0 ? <SelectEmptyGuide description="暂无可关联的科目" path="/subjects" actionLabel="去科目管理创建" /> : undefined}
+            />
           </Form.Item> : null}
         </Form.Item>
         <div className="zh-form-grid">

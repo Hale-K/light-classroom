@@ -221,7 +221,7 @@ export default function SchedulingView() {
     weekly_periods: 4,
     room: '',
   })
-  const [teacherForm, setTeacherForm] = useState({ name: '', phone: '', password: '123456' })
+  const [teacherForm, setTeacherForm] = useState({ name: '', phone: '', password: '' })
   const [conditions, setConditions] = useState<ScheduleRuleConfig>({
       days: 5,
       periods_per_day: 6,
@@ -1157,7 +1157,7 @@ export default function SchedulingView() {
     try {
       await schedulingApi.createTeacher(teacherForm)
       setTeacherVisible(false)
-      setTeacherForm({ name: '', phone: '', password: '123456' })
+      setTeacherForm({ name: '', phone: '', password: '' })
       await loadResources()
       message.success('教师账号已创建')
     } catch (e) {

@@ -59,7 +59,7 @@ import type {
 
 /** 登录响应：后端 `{access_token, token_type, user, school}` */
 export interface LoginResult {
-  access_token: string
+  access_token?: string
   token_type: string
   user: UserInfo
   /** 账号所属学校，登录后由后端决定，前端无需预选 */
@@ -132,8 +132,8 @@ export const authApi = {
 
 /** 平台超管 API（创建学校后台） */
 export const adminApi = {
-  login: (username: string, password: string) =>
-    unwrap<{ access_token: string; admin: PlatformAdminInfo }>(
+    login: (username: string, password: string) =>
+    unwrap<{ access_token?: string; admin: PlatformAdminInfo }>(
       http.post('/admin/login', { username, password }),
     ),
   me: () => unwrap<PlatformAdminInfo>(http.get('/admin/me')),
@@ -224,7 +224,7 @@ export const orgApi = {
 
 export const staffApi = {
   list: () => unwrap<StaffDirectory>(http.get('/staff')),
-  create: (data: { name: string; phone: string; password: string; roles: StaffRoleCode[]; teacher_level?: string }) =>
+  create: (data: { name: string; phone: string; password: string; roles: StaffRoleCode[]; teacher_level?: string; unit_ids?: number[] }) =>
     unwrap<StaffAccount>(http.post('/staff', data)),
   update: (id: number, data: { name: string; phone: string; roles: StaffRoleCode[]; teacher_level?: string | null }) =>
     unwrap<StaffAccount>(http.patch(`/staff/${id}`, data)),
@@ -563,6 +563,7 @@ export const schedulingApi = {
             'Cache-Control': 'no-cache',
           },
           cache: 'no-store',
+          credentials: 'include',
           signal,
         })
         if (!response.ok) {
@@ -1135,20 +1136,28 @@ export type AssistantPlan = {
   result?: { text: string; path: string; count: number } | null
 }
 
+export type AssistantExecution = {
+  mode: 'pending' | 'direct' | 'agent' | 'supervisor'
+  multi_agent: boolean
+  kind: 'readiness' | 'diagnosis' | null
+  tasks: { id: string; label: string; status: 'running' | 'succeeded' | 'failed' }[]
+}
+
 export type AssistantRun = {
   id: string
-  status: 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'timed_out' | 'interrupted'
   phase: string
   message: string
   elapsed_seconds: number
   phase_elapsed_seconds: number
   heartbeat_at: string
   events: { phase: string; message: string; at: string }[]
-  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[] } | null
+  execution?: AssistantExecution
+  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[]; model_visible?: boolean } | null
 }
 
 export type AssistantConversation = {
-  messages: { role: 'user' | 'assistant'; content: string }[]
+  messages: { role: 'user' | 'assistant'; content: string; model_visible?: boolean }[]
   summary: string
   updated_at?: string | null
 }
@@ -1162,28 +1171,32 @@ export const assistantApi = {
     unwrap<AssistantRun>(http.post('/assistant/runs', data, { timeout: 8000, signal })),
   readRun: (id: string, signal?: AbortSignal) =>
     unwrap<AssistantRun>(http.get(`/assistant/runs/${encodeURIComponent(id)}`, { timeout: 5000, signal })),
+  steerRun: (id: string, content: string) =>
+    unwrap<{ accepted: boolean; kind: 'steer'; message_id: string }>(
+      http.post(`/assistant/runs/${encodeURIComponent(id)}/steer`, { content }, { timeout: 5000 }),
+    ),
   cancelRun: (id: string) =>
     unwrap<AssistantRun>(http.post(`/assistant/runs/${encodeURIComponent(id)}/cancel`, {}, { timeout: 5000 })),
   decide: (id: string, decision: 'confirm' | 'cancel') =>
     unwrap<AssistantPlan>(http.post(`/assistant/actions/${encodeURIComponent(id)}`, { decision })),
-  chat: (
-    data: {
-      messages: { role: 'user' | 'assistant'; content: string }[]
-      page_title?: string
-      page_path?: string
-      can?: string[]
-      cannot?: string[]
-      message_id?: string
-    },
-    opts?: { signal?: AbortSignal },
-  ) =>
-    unwrap<{
-      text: string
-      message_id?: string | null
-      think?: string[]
-      choices?: { label: string; send: string }[]
-      plan?: AssistantPlan | null
-    }>(http.post('/assistant/chat', data, { timeout: 120000, signal: opts?.signal })),
+}
+
+export type KnowledgeBase = {
+  id: number
+  name: string
+  description: string
+  embedding_model: string
+  enabled: boolean
+  created_at?: string | null
+}
+
+export const knowledgeApi = {
+  list: () => unwrap<KnowledgeBase[]>(http.get('/knowledge')),
+  create: (data: Pick<KnowledgeBase, 'name' | 'description' | 'embedding_model'>) =>
+    unwrap<KnowledgeBase>(http.post('/knowledge', data)),
+  setStatus: (id: number, enabled: boolean) =>
+    unwrap<KnowledgeBase>(http.patch(`/knowledge/${id}/status`, null, { params: { enabled } })),
+  remove: (id: number) => unwrap<{ deleted: boolean }>(http.delete(`/knowledge/${id}`)),
 }
 
 export type OnboardingStep = {

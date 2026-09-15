@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/api/http'
-import { assistantApi, authApi, orgApi, schedulingApi, type AssistantPlan, type AssistantRun } from '@/api'
+import { assistantApi, authApi, orgApi, schedulingApi, type AssistantExecution, type AssistantPlan, type AssistantRun } from '@/api'
 import { watchAssistantRun } from '@/assistant/task'
 import { assistantPageContext } from '@/assistant/context'
 import { useAuthStore } from '@/store/auth'
@@ -9,8 +9,7 @@ import AssistantRulePlan from '@/components/AssistantRulePlan'
 import AssistMarkdown from '@/components/AssistMarkdown'
 import Icon from '@/components/Icon'
 import { type HoursDraft } from '@/assistant/hoursPlan'
-import { routeTeacherMessage, type Extra } from '@/assistant/orchestrate'
-import { runAssistantTool, type JumpLink } from '@/assistant/run'
+import { runAssistantTool, type JumpLink, type ToolExtra } from '@/assistant/run'
 import { assistLog, newMsgId } from '@/assistant/trace'
 import { hereOf, jumpLabel, placeLabel, samePlace } from '@/assistant/place'
 import { decideJumpReply } from '@/assistant/jump-intent'
@@ -33,13 +32,44 @@ type ChatMsg = {
   advice?: string
   choices?: { label: string; send: string; act?: () => void }[]
   think?: { done: string[]; live?: string }
+  execution?: AssistantExecution
+  /** False for transport/recovery/degraded UI notices that must not enter an LLM prompt. */
+  modelVisible?: boolean
+}
+
+function InboxTaskBar({
+  chatting,
+  show,
+  message,
+  onSteer,
+}: {
+  chatting: boolean
+  show: boolean
+  message: string
+  onSteer: () => void
+}) {
+  // 任务条属于“调整方向”交互，只在用户已经追加消息后出现。
+  // 首条消息运行时保持对话区干净，避免把普通问候误显示成持续任务。
+  if (!show || !chatting) return null
+  return (
+    <div className="assist-inbox-taskbar" role="status" aria-live="polite">
+      <span className="assist-inbox-task-label" title={message}>
+        <Icon name="sparkles" size={14} />
+        {message}
+      </span>
+      <button type="button" className="assist-inbox-steer" onClick={onSteer}>
+        <Icon name="arrow-right" size={13} />
+        调整方向
+      </button>
+    </div>
+  )
 }
 
 function storedThread(key: string): ChatMsg[] {
   try {
     const raw = JSON.parse(localStorage.getItem(key) || '[]') as unknown
     if (!Array.isArray(raw)) return []
-    return raw.slice(-THREAD_LIMIT).flatMap((item): ChatMsg[] => {
+    const restored = raw.slice(-THREAD_LIMIT).flatMap((item): ChatMsg[] => {
       if (!item || typeof item !== 'object') return []
       const value = item as Record<string, unknown>
       if ((value.role !== 'user' && value.role !== 'bot') || typeof value.text !== 'string' || !value.text.trim()) return []
@@ -47,7 +77,16 @@ function storedThread(key: string): ChatMsg[] {
         role: value.role,
         text: value.text.slice(0, 8000),
         mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
+        modelVisible: value.modelVisible !== false,
+        execution: readExecution(value.execution),
       }]
+    })
+    const seen = new Set<string>()
+    return restored.filter((item) => {
+      const identity = `${item.role}:${item.mid || ''}:${item.text}`
+      if (seen.has(identity)) return false
+      seen.add(identity)
+      return true
     })
   } catch {
     return []
@@ -62,12 +101,52 @@ function rememberThread(key: string, messages: ChatMsg[]) {
       role: message.role,
       text: (message.plan ? `${message.text}\n\n${message.plan.summary}` : message.text).slice(0, 8000),
       mid: message.mid,
+      modelVisible: message.modelVisible !== false,
+      execution: message.execution,
     }))
   try {
     localStorage.setItem(key, JSON.stringify(safe))
   } catch {
     // Storage can be unavailable or full; the live conversation must keep working.
   }
+}
+
+function readExecution(raw: unknown): AssistantExecution | undefined {
+  if (!raw || typeof raw !== 'object') return undefined
+  const value = raw as Record<string, unknown>
+  if (!['direct', 'agent', 'supervisor'].includes(String(value.mode))) return undefined
+  const tasks: AssistantExecution['tasks'] = Array.isArray(value.tasks) ? value.tasks.slice(0, 5).flatMap((item) => {
+    if (!item || typeof item !== 'object') return []
+    const task = item as Record<string, unknown>
+    if (typeof task.id !== 'string' || typeof task.label !== 'string' || !['running', 'succeeded', 'failed'].includes(String(task.status))) return []
+    return [{ id: task.id.slice(0, 40), label: task.label.slice(0, 40), status: task.status as AssistantExecution['tasks'][number]['status'] }]
+  }) : []
+  return {
+    mode: value.mode as AssistantExecution['mode'],
+    multi_agent: value.multi_agent === true,
+    kind: value.kind === 'readiness' || value.kind === 'diagnosis' ? value.kind : null,
+    tasks,
+  }
+}
+
+function ExecutionBadge({ execution }: { execution?: AssistantExecution }) {
+  if (!execution || execution.mode === 'pending') return null
+  const label = execution.mode === 'supervisor'
+    ? `${execution.kind === 'diagnosis' ? '排课诊断' : '排课准备'} · Supervisor 编排`
+    : execution.mode === 'agent' ? '单 Agent 执行' : '直接处理'
+  return (
+    <div className="assist-execution" role="status">
+      <strong>{label}</strong>
+      {execution.mode === 'supervisor' && <span>多 Agent：{execution.multi_agent ? '已启用' : '未启用独立子 Agent'}</span>}
+      {execution.tasks.length > 0 && (
+        <ul aria-label="检查项状态">
+          {execution.tasks.map((task) => (
+            <li key={task.id}>{task.status === 'succeeded' ? '✓' : task.status === 'failed' ? '!' : '…'} {task.label} · {task.status === 'succeeded' ? '完成' : task.status === 'failed' ? '失败' : '进行中'}</li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
 }
 
 type Panel = 'support' | 'notice' | 'docs' | 'home' | 'rate' | null
@@ -89,7 +168,7 @@ function Face({ className }: { className?: string }) {
 function ThinkDial({ live, progress, connection }: { live: string; progress: AssistantRun | null; connection: string }) {
   const heartbeatRecent = progress && Date.now() - Date.parse(progress.heartbeat_at) < 12000
   return (
-    <div className="assist-dial is-live">
+    <div className={`assist-dial is-live${progress ? ' has-progress' : ''}`}>
       <span className="assist-dial-kicker">处理进度</span>
       <div className="assist-dial-window" aria-live="polite">
         <div key={live} className="assist-dial-face">
@@ -97,10 +176,11 @@ function ThinkDial({ live, progress, connection }: { live: string; progress: Ass
         </div>
       </div>
       {progress && <div className="assist-progress-detail">
+        <ExecutionBadge execution={progress.execution} />
         <span>已等待 {progress.elapsed_seconds} 秒 · 当前阶段 {progress.phase_elapsed_seconds} 秒</span>
         <span>{connection || (heartbeatRecent ? '后台仍在响应' : '暂未收到新的后台心跳，正在核对状态')}</span>
         {progress.phase_elapsed_seconds >= 15 && <span>当前阶段暂未返回新结果。你可以继续使用其他页面，或停止本轮处理。</span>}
-        <details><summary>查看执行记录</summary><ol>{progress.events.map((event, i) => <li key={i}>{event.message}</li>)}</ol></details>
+        <details><summary>查看执行记录</summary><ol>{(progress.events ?? []).map((event, i) => <li key={i}>{event.message}</li>)}</ol></details>
       </div>}
       {!progress && connection && <div role="status">{connection}</div>}
     </div>
@@ -222,7 +302,7 @@ export default function AssistantDock() {
   const busyRef = useRef(false)
   const dirtyRef = useRef(false)
   const lockMergeRef = useRef(false)
-  const forcedRef = useRef<{ tool: AssistantTask['tool']; path?: string; extra?: Extra & { hoursDraft?: HoursDraft } } | null>(null)
+  const forcedRef = useRef<{ tool: AssistantTask['tool']; path?: string; extra?: ToolExtra } | null>(null)
   const midRef = useRef('')
   const agentConversationRef = useRef(false)
   const activeRunRef = useRef<string | null>(null)
@@ -230,6 +310,8 @@ export default function AssistantDock() {
   const [runProgress, setRunProgress] = useState<AssistantRun | null>(null)
   const [connectionNote, setConnectionNote] = useState('')
   const [recoverable, setRecoverable] = useState(false)
+  const [steerVisible, setSteerVisible] = useState(false)
+  const [latestSteer, setLatestSteer] = useState('')
   const commitThread = (updater: (prev: ChatMsg[]) => ChatMsg[]) => {
     const next = updater(threadRef.current)
     threadRef.current = next
@@ -350,6 +432,8 @@ export default function AssistantDock() {
     setRecoverable(false)
     setConnectionNote('')
     setRunProgress(null)
+    setSteerVisible(false)
+    setLatestSteer('')
     let failed = false
     const halt = () => {
       if (abortedRef.current || epoch !== epochRef.current) throw new DOMException('已停止', 'AbortError')
@@ -366,7 +450,7 @@ export default function AssistantDock() {
         midRef.current = tid
         assistLog(tid, 'turn', merged.slice(0, 80))
         const hereNow = hereOf(location.pathname, location.search)
-        const withTrace = (extra?: Extra & { hoursDraft?: HoursDraft }) => ({ ...extra, here: hereNow, traceId: tid })
+        const withTrace = (extra?: ToolExtra) => ({ ...extra, here: hereNow, traceId: tid })
         const previousAnswer = [...threadRef.current].reverse().find((item) => item.role === 'bot' && item.text)
         const jumpDecision = previousAnswer?.jumps ? decideJumpReply(merged, previousAnswer.jumps) : { kind: 'none' as const }
         if (jumpDecision.kind === 'confirm') {
@@ -418,54 +502,14 @@ export default function AssistantDock() {
           })
           break
         }
-        const hasHistory = threadRef.current.some((item) => item.role === 'bot' && Boolean(item.text))
-        const route = resumeId || agentConversationRef.current
-          ? { kind: 'llm' as const }
-          : routeTeacherMessage(merged, hereNow, hasHistory)
-        assistLog(tid, 'route', route.kind === 'tool' ? `${route.tool} ${route.path}` : route.kind)
+        // 自由文本统一交给后端 AssistantGateway。页面上的明确任务按钮仍通过
+        // forcedRef 调用确定性工具，避免前后端各维护一套关键词意图路由。
+        assistLog(tid, 'route', 'gateway')
         halt()
         if (dirtyRef.current) continue
-        if (route.kind === 'say') {
-          commitThread((prev) => {
-            const next = upsertThink(prev, '按口径直接回复')
-            const thinkBot = [...next].reverse().find((m) => m.role === 'bot' && !m.text)
-            const done = thinkBot?.think?.live
-              ? [...(thinkBot.think.done || []), thinkBot.think.live]
-              : thinkBot?.think?.done || []
-            return replaceThinkBot(next, { role: 'bot', text: route.text, mid: tid, think: { done } })
-          })
-          if (dirtyRef.current) continue
-          break
-        }
-        if (route.kind === 'tool') {
-          lockMergeRef.current = route.tool === 'executeHours'
-          const result = await runAssistantTool(route.tool, route.path || undefined, withTrace(route.extra), (line) => {
-            if (epoch === epochRef.current) commitThread((prev) => upsertThink(prev, line))
-          })
-          halt()
-          if (dirtyRef.current) continue
-          const jumps = confirmJumps(result, hereNow)
-          commitThread((prev) => {
-            const thinkBot = [...prev].reverse().find((m) => m.role === 'bot' && !m.text)
-            const done = thinkBot?.think?.live
-              ? [...(thinkBot.think.done || []), thinkBot.think.live]
-              : thinkBot?.think?.done || []
-            return replaceThinkBot(prev, {
-              role: 'bot',
-              text: result.report,
-              mid: tid,
-              hoursDraft: result.hoursDraft,
-              awaitRules: result.awaitRules,
-              jumps,
-              advice: result.advice,
-              think: done.length ? { done } : undefined,
-            })
-          })
-          break
-        }
         commitThread((prev) => upsertThink(prev, resumeId ? '正在恢复上次任务状态' : '已收到，正在提交任务'))
         agentConversationRef.current = true
-        const history = threadRef.current.filter((m) => m.text)
+        const history = threadRef.current.filter((m) => m.text && m.modelVisible !== false)
         halt()
         // HTTP 部署（非安全上下文）下浏览器不提供 crypto.randomUUID，走 getRandomValues 回退
         const runId = resumeId || (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
@@ -478,6 +522,7 @@ export default function AssistantDock() {
             messages: history.slice(-20).map((m) => ({
               role: m.role === 'bot' ? 'assistant' : 'user',
               content: m.plan ? `${m.text}\n草稿状态：${m.plan.status}\n${m.plan.summary}` : m.text,
+              model_visible: m.modelVisible !== false,
             })),
             page_title: pageName,
             page_path: hereNow,
@@ -491,8 +536,9 @@ export default function AssistantDock() {
         halt()
         const outcome = await watchAssistantRun(runId, abortRef.current!.signal, (run) => {
           if (epoch !== epochRef.current || dirtyRef.current) return
-          setRunProgress(run)
-          commitThread((prev) => upsertThink(prev, run.message))
+          const terminal = !['queued', 'running'].includes(run.status)
+          setRunProgress(terminal ? null : run)
+          if (!terminal) commitThread((prev) => upsertThink(prev, run.message))
         }, (note) => { if (epoch === epochRef.current) setConnectionNote(note) })
         halt()
         sessionStorage.removeItem(runStorageKey)
@@ -510,10 +556,12 @@ export default function AssistantDock() {
             role: 'bot',
             text: data.text,
             mid: tid,
+            execution: outcome.execution,
             choices: data.choices,
             plan: data.plan ?? undefined,
             jumps: data.jumps,
             think: { done },
+            modelVisible: data.model_visible !== false,
           })
         })
         break
@@ -528,7 +576,13 @@ export default function AssistantDock() {
       const stopped = abortedRef.current
       const msg = stopped ? '已停止。' : err instanceof Error ? err.message : '对话失败'
       assistLog(midRef.current || '-', stopped ? 'stop' : 'fail', msg)
-      commitThread((prev) => replaceThinkBot(prev, { role: 'bot', text: msg, mid: midRef.current }))
+      commitThread((prev) => {
+        // 恢复查看同一个 run 时不要重复追加相同错误气泡，避免重试改变对话布局。
+        if (prev.some((item) => item.role === 'bot' && item.text === msg)) return prev
+        return replaceThinkBot(prev, {
+          role: 'bot', text: msg, mid: midRef.current, modelVisible: false,
+        })
+      })
       setRecoverable(Boolean(activeRunRef.current))
     } finally {
       if (epoch !== epochRef.current) return
@@ -537,6 +591,8 @@ export default function AssistantDock() {
       lockMergeRef.current = false
       abortRef.current = null
       setChatting(false)
+      setSteerVisible(false)
+      setLatestSteer('')
       const last = threadRef.current[threadRef.current.length - 1]
       if (!failed && !abortedRef.current && last?.role === 'user') {
         queueMicrotask(() => {
@@ -567,6 +623,8 @@ export default function AssistantDock() {
         const restoredRemote: ChatMsg[] = remote.messages.map((item) => ({
           role: item.role === 'assistant' ? 'bot' : 'user',
           text: item.content,
+          modelVisible: item.model_visible !== false,
+          execution: restored.find((saved) => saved.role === (item.role === 'assistant' ? 'bot' : 'user') && saved.text === item.content)?.execution,
         }))
         threadRef.current = restoredRemote
         setThread(restoredRemote)
@@ -575,6 +633,7 @@ export default function AssistantDock() {
         void assistantApi.saveConversation(restored.map((item) => ({
           role: item.role === 'bot' ? 'assistant' : 'user',
           content: item.text,
+          model_visible: item.modelVisible !== false,
         }))).catch(() => undefined)
       }
       setConversationReady(true)
@@ -598,6 +657,7 @@ export default function AssistantDock() {
       .map((item) => ({
         role: item.role === 'bot' ? 'assistant' as const : 'user' as const,
         content: (item.plan ? `${item.text}\n\n${item.plan.summary}` : item.text).slice(0, 8000),
+        model_visible: item.modelVisible !== false,
       }))
     const timer = window.setTimeout(() => {
       void assistantApi.saveConversation(messages).catch(() => undefined)
@@ -612,16 +672,37 @@ export default function AssistantDock() {
     setDraft('')
     setPanel('home')
     if (!busyRef.current) midRef.current = newMsgId()
-    const mid = midRef.current
-    assistLog(mid, busyRef.current ? 'supplement' : 'send', content.slice(0, 80))
+    const mid = busyRef.current ? newMsgId() : midRef.current
+    assistLog(mid, busyRef.current ? 'steer' : 'followup', content.slice(0, 80))
     if (busyRef.current) {
-      if (lockMergeRef.current) {
+      const runId = activeRunRef.current
+      if (!runId || lockMergeRef.current) {
         commitThread((prev) => [...prev, { role: 'user', text: content, mid }])
         return
       }
-      dirtyRef.current = true
-      if (activeRunRef.current) void assistantApi.cancelRun(activeRunRef.current).catch(() => undefined)
-      commitThread((prev) => upsertThink([...prev, { role: 'user', text: content, mid }], '收到补充，正在结束旧请求后重新核对'))
+      setSteerVisible(true)
+      setLatestSteer(content)
+      commitThread((prev) => {
+        const next = [...prev]
+        let pending = -1
+        for (let i = next.length - 1; i >= 0; i -= 1) {
+          if (next[i].role === 'bot' && !next[i].text) {
+            pending = i
+            break
+          }
+        }
+        if (pending >= 0) next.splice(pending, 1)
+        return upsertThink([...next, { role: 'user', text: content, mid }], '已收到方向调整，将在下一步处理')
+      })
+      void assistantApi.steerRun(runId, content).catch((err) => {
+        if (err instanceof ApiError && err.status === 409) {
+          // run 恰好结束时，把消息留给下一 Turn，不丢失用户输入。
+          dirtyRef.current = true
+          setConnectionNote('当前任务刚刚结束，正在作为后续任务继续处理')
+          return
+        }
+        setConnectionNote('方向调整暂时未送达，请稍后重试')
+      })
       return
     }
     commitThread((prev) => upsertThink([...prev, { role: 'user', text: content, mid }], '分析意图'))
@@ -630,7 +711,7 @@ export default function AssistantDock() {
 
   const pushMsg = (msg: ChatMsg) => commitThread((prev) => [...prev, msg])
 
-  const runTask = (item: AssistantTask, extra?: Extra & { hoursDraft?: HoursDraft }) => {
+  const runTask = (item: AssistantTask, extra?: ToolExtra) => {
     followLatestRef.current = true
     forcedRef.current = { tool: item.tool, path: item.path, extra }
     if (!busyRef.current) midRef.current = newMsgId()
@@ -665,6 +746,8 @@ export default function AssistantDock() {
     setChatting(false)
     setRecoverable(false)
     setRunProgress(null)
+    setSteerVisible(false)
+    setLatestSteer('')
     forcedRef.current = null
     dirtyRef.current = false
     threadRef.current = []
@@ -1003,6 +1086,7 @@ export default function AssistantDock() {
                     {msg.role === 'bot' && !msg.text && msg.think?.live ? <ThinkDial live={msg.think.live} progress={runProgress} connection={connectionNote} /> : null}
                     {msg.text ? (
                       <div className={`assist-bubble is-${msg.role}`}>
+                        {msg.role === 'bot' && <ExecutionBadge execution={msg.execution} />}
                         {msg.role === 'bot' ? <AssistMarkdown text={msg.text} /> : msg.text}
                         {msg.mid ? <MidCopy id={msg.mid} /> : null}
                       </div>
@@ -1104,6 +1188,15 @@ export default function AssistantDock() {
               </div>
             )}
           </div>
+          <InboxTaskBar
+            chatting={chatting}
+            show={steerVisible}
+            message={latestSteer}
+            onSteer={() => {
+              setConnectionNote('请输入新的处理方向，发送后将用于下一步')
+              composerRef.current?.focus()
+            }}
+          />
           <div className="assist-composer">
             <div className="assist-composer-row">
               <button type="button" className="assist-plus" title="新对话" aria-label="新对话" onClick={newChat}>
@@ -1113,7 +1206,7 @@ export default function AssistantDock() {
                 ref={composerRef}
                 rows={1}
                 value={draft}
-                placeholder={chatting ? '思考中也可补充，会并入这一轮' : '排课、档案、设置，有问题都可以问'}
+                placeholder={chatting ? '随心输入新的处理方向' : '随心输入'}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1126,16 +1219,24 @@ export default function AssistantDock() {
                 type="button"
                 className={`assist-send${chatting ? ' is-wait' : ''}`}
                 disabled={!chatting && !draft.trim()}
-                onClick={() => (chatting ? stopTurn() : send())}
-                aria-label={chatting ? '停止' : '发送'}
-                title={chatting ? '停止' : '发送'}
+                onClick={() => (chatting && !draft.trim() ? stopTurn() : send())}
+                aria-label={chatting && !draft.trim() ? '停止' : '发送'}
+                title={chatting && !draft.trim() ? '停止' : '发送'}
               >
-                {chatting ? <i className="assist-send-dot" /> : <Icon name="send" size={13} />}
+                {chatting && !draft.trim() ? <i className="assist-send-dot" /> : <Icon name="send" size={13} />}
               </button>
             </div>
           </div>
-          <p className="assist-here">{chatting ? '思考中 · 可补充' : `当前页 · ${pageName}`}</p>
-          {recoverable && <button type="button" className="assist-task" onClick={() => activeRunRef.current && void runLoop(activeRunRef.current)}>恢复查看上次任务</button>}
+          <p className="assist-here">{chatting ? '当前任务进行中 · 可调整方向' : `当前页 · ${pageName}`}</p>
+          {recoverable && (
+            <button
+              type="button"
+              className="assist-recover-button"
+              onClick={() => activeRunRef.current && void runLoop(activeRunRef.current)}
+            >
+              恢复查看上次任务
+            </button>
+          )}
         </section>
       )}
     </>

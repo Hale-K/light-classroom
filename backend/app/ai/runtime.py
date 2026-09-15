@@ -8,10 +8,27 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from app.ai.guide import AssistantUiGuide
-from app.ai.model.routing import ModelProviderRouter
+from app.ai.gateway import ModelGateway, ToolGateway
+from app.ai.harness import HarnessRouter
+from app.ai.intent import IntentGateway
+from app.ai.intent import PostgresIntentClassifier, SentenceTransformerEmbedding
+from app.ai.knowledge.search import KnowledgeSearchService
+from app.core.config import settings
 from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
 from app.ai.runs.events import TraceCallback
+from app.ai.runs.inbox import InboxKind, InboxMessage, consume, receive
 from app.ai.runs.progress import Progress, report_progress
+from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor
+
+
+_intent_gateway = IntentGateway(
+    PostgresIntentClassifier(
+        SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
+    )
+)
+_knowledge_search = KnowledgeSearchService(
+    SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
+)
 
 
 class ServiceRegistry:
@@ -46,10 +63,22 @@ class AssistantRuntime:
 
     def __post_init__(self) -> None:
         # 调用方可预先注册同名服务，以替换默认实现（例如测试、灰度或备用实现）。
-        if not self.services.has("model_router"):
-            self.services.register("model_router", ModelProviderRouter(self.circuits))
+        if not self.services.has("model_gateway"):
+            self.services.register("model_gateway", ModelGateway(self.circuits))
+        if not self.services.has("tool_gateway"):
+            self.services.register("tool_gateway", ToolGateway())
         if not self.services.has("ui_guide"):
             self.services.register("ui_guide", AssistantUiGuide)
+        if not self.services.has("intent_gateway"):
+            self.services.register("intent_gateway", _intent_gateway)
+        if not self.services.has("harness_router"):
+            self.services.register("harness_router", HarnessRouter())
+        if not self.services.has("knowledge_search"):
+            self.services.register("knowledge_search", _knowledge_search)
+        if not self.services.has("readiness_supervisor"):
+            self.services.register("readiness_supervisor", SchedulingReadinessSupervisor())
+        if not self.services.has("diagnosis_supervisor"):
+            self.services.register("diagnosis_supervisor", SchedulingDiagnosisSupervisor())
 
     def service(self, name: str) -> Any:
         return self.services.get(name)
@@ -60,3 +89,12 @@ class AssistantRuntime:
     async def emit(self, kind: str, data: dict[str, Any]) -> None:
         if self.on_trace:
             await self.on_trace(kind, data)
+
+    def inbox_event(self, kind: InboxKind, content: str | dict[str, Any]) -> dict[str, Any]:
+        """生成可写入 AiRun.events 的 Inbox 事实事件。"""
+        return receive(kind, content)
+
+    def consume_inbox(self, events: list[dict], boundary: str) -> list[InboxMessage]:
+        if boundary not in {"turn", "step"}:
+            raise ValueError(f"未知 Inbox 消费边界：{boundary}")
+        return consume(events, boundary)  # type: ignore[arg-type]

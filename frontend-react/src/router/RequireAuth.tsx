@@ -19,8 +19,8 @@ export default function RequireAuth({
 }) {
   const location = useLocation()
   const token = admin
-    ? localStorage.getItem('zh_admin_token')
-    : localStorage.getItem('zh_token')
+    ? localStorage.getItem('zh_admin_info')
+    : localStorage.getItem('zh_user')
 
   if (!token) {
     return (

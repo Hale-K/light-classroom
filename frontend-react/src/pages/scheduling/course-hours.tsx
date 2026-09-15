@@ -3,6 +3,7 @@ import { App, Button, Form, InputNumber, Modal, Select, Space, Table, Tag } from
 import type { ColumnsType } from 'antd/es/table'
 import { schedulingApi } from '@/api'
 import type { ClassInfo, CourseHourPlanInfo, EveningParity, SubjectInfo, WeekParity } from '@/types'
+import SelectEmptyGuide from '@/components/SelectEmptyGuide'
 
 interface CourseHoursPanelProps {
   classes: ClassInfo[]
@@ -272,10 +273,10 @@ export default function CourseHoursPanel({
       <Modal title={editing ? '编辑课时方案' : '新增课时方案'} open={open} centered onCancel={close} onOk={() => form.submit()} okText="保存" cancelText="取消" confirmLoading={saving}>
         <Form form={form} layout="vertical" onFinish={submit}>
           <Form.Item name="class_id" label="班级" rules={[{ required: true, message: '请选择班级' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择班级" options={classes.map((item) => ({ label: item.name, value: item.id }))} />
+            <Select showSearch optionFilterProp="label" placeholder="选择班级" options={classes.map((item) => ({ label: item.name, value: item.id }))} notFoundContent={<SelectEmptyGuide description="暂无可用班级" path="/classes" actionLabel="去班级管理创建" compact />} />
           </Form.Item>
           <Form.Item name="subject_id" label="科目" rules={[{ required: true, message: '请选择科目' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择科目" options={subjects.map((item) => ({ label: item.name, value: item.id }))} />
+            <Select showSearch optionFilterProp="label" placeholder="选择科目" options={subjects.map((item) => ({ label: item.name, value: item.id }))} notFoundContent={<SelectEmptyGuide description="暂无可用科目" path="/subjects" actionLabel="去科目管理创建" compact />} />
           </Form.Item>
           <Form.Item name="weekday_periods" label="工作日课时" rules={[{ required: true, message: '请输入工作日课时' }]} extra="周一至周五的合计课时。">
             <InputNumber min={0} max={20} step={0.5} addonAfter="节" style={{ width: '100%' }} />

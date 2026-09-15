@@ -12,8 +12,21 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.model.store import AiProvider
 from app.core.config import settings
+from app.core.secret_store import decrypt_secret
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_chat_base(provider_type: str | None, base_url: str) -> str:
+    """将服务商管理里的地址规范化为聊天接口使用的 Base URL。
+
+    Ollama 的模型探测走 /api/tags，但 OpenAI 兼容聊天接口位于 /v1 下。
+    允许管理页面继续填写官方默认地址 http://127.0.0.1:11434。
+    """
+    base = base_url.strip().rstrip("/")
+    if (provider_type or "").upper() == "OLLAMA" and not base.endswith("/v1"):
+        return f"{base}/v1"
+    return base
 
 
 class ChatError(Exception):
@@ -47,8 +60,8 @@ async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[
         ChatEndpoint(
             key=f"{tenant_id}:{row.id}",
             name=row.name,
-            base_url=row.base_url.strip(),
-            api_key=(row.api_key or "").strip(),
+            base_url=_normalize_chat_base(row.provider_type, row.base_url),
+            api_key=decrypt_secret(row.api_key),
             model=row.chat_model.strip(),
             timeout=row.timeout_seconds if row.timeout_seconds and row.timeout_seconds > 0 else 60,
         )

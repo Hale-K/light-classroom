@@ -3,12 +3,12 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { onboardingApi } from '@/api'
 import Icon from '@/components/Icon'
 
-/** 顶栏「新手引导 N/9」胶囊：展示真实进度，点击进入引导大页；跳过后全校隐藏。 */
+/** 顶栏新手引导胶囊：展示真实进度，点击进入引导大页；跳过后全校隐藏。 */
 export default function OnboardingGuide() {
   const navigate = useNavigate()
   const location = useLocation()
   const [doneCount, setDoneCount] = useState(0)
-  const [total, setTotal] = useState(9)
+  const [total, setTotal] = useState(0)
   const [dismissed, setDismissed] = useState(false)
 
   useEffect(() => {
@@ -16,13 +16,13 @@ export default function OnboardingGuide() {
     onboardingApi.status()
       .then((data) => {
         setDoneCount(data.done_count ?? 0)
-        setTotal(data.total || 9)
+        setTotal(data.total ?? 0)
         setDismissed(Boolean(data.dismissed))
       })
       .catch(() => undefined)
   }, [location.pathname, dismissed])
 
-  if (dismissed) return null
+  if (dismissed || total === 0) return null
   const allDone = total > 0 && doneCount >= total
   return (
     <button

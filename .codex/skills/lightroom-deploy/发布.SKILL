@@ -1,0 +1,16 @@
+# LightRoom 生产发布
+
+通过 SSH 连接服务器后执行：
+
+```bash
+cd /home/project/light-classroom
+git checkout prod
+git pull
+docker compose -f docker/docker-compose.deploy.yml up -d --build
+docker restart light-classroom-api-api-1 light-classroom-api-worker-1
+docker ps
+docker logs --tail=50 light-classroom-api-api-1
+curl -fsS http://127.0.0.1:8000/health
+```
+
+完成标准：prod 发布完成，API 和 worker 正在运行，API 健康检查返回 200。

@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     app_env: str = "dev"
     app_debug: bool = True
     default_school_code: str = "demo"  # 私有化部署固定单值
+    # 生产环境必须显式配置前端来源，逗号分隔；开发环境为空时仅允许本地前端。
+    cors_origins: str = ""
 
     # 数据库
     database_url: str
@@ -31,6 +33,7 @@ class Settings(BaseSettings):
     jwt_secret_key: str
     jwt_algorithm: str = "HS256"
     jwt_access_token_expire_minutes: int = 1440
+    api_key_encryption_key: str = ""
 
     # 平台超管（创建学校的运营后台）
     admin_username: str = "admin"
@@ -46,6 +49,7 @@ class Settings(BaseSettings):
     # 教务助手模型服务的进程内熔断策略。多实例部署时会由 Redis 实现接管同一接口。
     assistant_provider_failure_threshold: int = 2
     assistant_provider_cooldown_seconds: float = 60.0
+    assistant_embedding_model_path: str = ""
 
     # 对象存储 COS
     cos_secret_id: str = ""

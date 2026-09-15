@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 
 from app.ai.model.chat import ChatError, complete_chat
 from app.ai.skill.catalog import catalog_text, parse_picked_keys, retrieved_text
@@ -25,12 +26,13 @@ async def retrieve_skill(
     api_key: str,
     model: str,
     timeout: int,
+    complete: Callable[..., Awaitable[str]] = complete_chat,
 ) -> str:
     q = (query or "").strip()
     if not q:
         return ""
     try:
-        raw = await complete_chat(
+        raw = await complete(
             base_url=base_url,
             api_key=api_key,
             model=model,

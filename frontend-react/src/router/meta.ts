@@ -20,11 +20,11 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   // —— 工作台 & 教师端（所有登录用户） ——
   '/dashboard': { title: '工作台' },
   '/teacher-courses': { title: '课程' },
-  '/teacher-profiles': { title: '教师档案' },
+  '/teacher-profiles': { title: '教师档案', roles: ['academic_director', 'school_admin', 'director'] },
   '/teacher-grades': { title: '成绩' },
   '/teacher-notices': { title: '通知' },
-  '/students': { title: '学生档案' },
-  '/file-center': { title: '文件中心' },
+  '/students': { title: '学生档案', roles: ['academic_director', 'school_admin', 'director'] },
+  '/file-center': { title: '文件中心', roles: ['academic_director', 'school_admin', 'director'] },
   '/grading': { title: '打分工作台' },
   '/teacher-preparation': { title: '备课' },
   '/teacher-classes': { title: '我的班级' },
@@ -55,6 +55,8 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   '/permissions': { title: '角色与权限', roles: ['director'] },
   '/settings': { title: '系统设置', roles: ['director'] },
   '/staff-positions': { title: '岗位与权限', roles: ['director', 'school_admin'] },
+  '/ai-providers': { title: '服务商管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/knowledge': { title: '知识库', roles: ['academic_director', 'school_admin', 'director'] },
 }
 
 /**
