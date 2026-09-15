@@ -1688,8 +1688,8 @@ export default function SchedulingView() {
                   <div>
                     <div className="sk-surface-head-row">
                       <span className="sk-class-pill">{gradeScheduleLabel}</span>
-                      <Tag color="purple">{academicYear} 学年 · 第 {term} 学期</Tag>
-                      <Tag color="default" style={{ whiteSpace: 'nowrap' }}>
+                      <Tag className="sk-schedule-term-tag">{academicYear} 学年 · 第 {term} 学期</Tag>
+                      <Tag className="sk-schedule-count-tag" style={{ whiteSpace: 'nowrap' }}>
                         {resources.classes.length} 个班
                       </Tag>
                     </div>
@@ -1736,7 +1736,7 @@ export default function SchedulingView() {
                       <Button disabled={generating} loading={versionsLoading}>
                         课表版本
                         {!versionsLoading && scheduleVersions.length > 0 ? (
-                          <span style={{ marginLeft: 4, fontSize: 12, color: '#6b7280' }}>（{scheduleVersions.length}）</span>
+                          <span className="sk-version-count" style={{ marginLeft: 4, fontSize: 12 }}>（{scheduleVersions.length}）</span>
                         ) : null}
                       </Button>
                     </Dropdown>

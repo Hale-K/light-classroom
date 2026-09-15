@@ -599,7 +599,22 @@
 .sk-schedule-surface .sk-class-pill {
   border-color: #38506c;
   background: #1d314b;
-  color: #e7f3ff;
+  color: #fff !important;
+}
+.sk-schedule-surface .sk-surface-head-row > span {
+  display: inline-flex;
+  align-items: center;
+  margin-top: 0;
+}
+.sk-schedule-surface .sk-surface-head-row .sk-schedule-term-tag,
+.sk-schedule-surface .sk-surface-head-row .sk-schedule-count-tag {
+  border-color: #45617e;
+  background: #223854;
+  color: #fff !important;
+}
+.sk-schedule-surface .sk-surface-head-row .sk-schedule-term-tag {
+  border-color: #6b4e95;
+  background: #49316a;
 }
 .sk-schedule-surface .sk-calendar-actions .ant-select-selector {
   border-color: #38506c !important;
@@ -616,11 +631,26 @@
 .sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary) {
   border-color: #38506c;
   background: #1d314b;
-  color: #e7f3ff;
+  color: #fff !important;
+}
+.sk-schedule-surface .sk-calendar-actions .ant-btn-primary:not(:disabled):not(.ant-btn-disabled) {
+  background: #0369a1;
+  color: #fff !important;
+}
+.sk-schedule-surface .sk-calendar-actions .ant-btn-primary:not(:disabled):not(.ant-btn-disabled) > span,
+.sk-schedule-surface .sk-calendar-actions .ant-btn-primary:not(:disabled):not(.ant-btn-disabled) svg {
+  color: inherit !important;
+}
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary):not(:disabled):not(.ant-btn-disabled) > span,
+.sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary):not(:disabled):not(.ant-btn-disabled) svg {
+  color: inherit !important;
+}
+.sk-schedule-surface .sk-calendar-actions .sk-version-count {
+  color: #fff !important;
 }
 .sk-schedule-surface .sk-calendar-actions .ant-btn:not(.ant-btn-primary):hover {
   border-color: #66c5f3;
-  color: #fff;
+  color: #fff !important;
 }
 /* 极简模式下 Ant Design 的 disabled 默认文字过淡，深色控制舱里几乎不可读。
    保留禁用状态的弱化感，同时保证按钮名称和图标达到可读对比度。 */
@@ -670,6 +700,10 @@
 .sk-schedule-surface .sk-calendar-actions .sk-schedule-class-select .ant-select-selection-item,
 .sk-schedule-surface .sk-calendar-actions .sk-schedule-class-select .ant-select-selection-placeholder {
   color: #d7e5f2 !important;
+  text-align: center;
+}
+.sk-schedule-surface .sk-calendar-actions .sk-schedule-class-select .ant-select-selection-search-input {
+  text-align: center;
 }
 .sk-schedule-surface .sk-calendar-actions .sk-schedule-class-select .ant-select-arrow {
   color: #a9bfd4;
