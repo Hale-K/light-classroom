@@ -2,10 +2,10 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Key } from 'react'
 import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
 import type { TableProps } from 'antd'
-import { useNavigate } from 'react-router-dom'
 import { orgApi, organizationApi, schedulingApi, staffApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
+import SelectEmptyGuide from '@/components/SelectEmptyGuide'
 import type { OrganizationTreeResult, OrganizationUnit, OrganizationUnitType, StaffAccount, StaffAppointment, StaffRoleCode, SubjectInfo } from '@/types'
 import { academicYearOptions } from '@/academicYear'
 import { flattenOrganizationUnits, organizationExpandedKeys } from '@/pages/organization/tree-utils'
@@ -32,7 +32,6 @@ const POSITION_LABEL: Record<StaffAppointment['position_code'], string> = {
 
 export default function PersonnelView() {
   const { message, modal } = App.useApp()
-  const navigate = useNavigate()
   const [org, setOrg] = useState<OrganizationTreeResult>()
   const [accounts, setAccounts] = useState<StaffAccount[]>([])
   const [appointments, setAppointments] = useState<StaffAppointment[]>([])
@@ -385,14 +384,7 @@ export default function PersonnelView() {
                 optionFilterProp="label"
                 placeholder="选择该学科组负责的科目"
                 options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))}
-                notFoundContent={subjects.length === 0 ? (
-                  <div className="zh-select-empty-guide">
-                    <div className="zh-select-empty-guide-title">暂无可关联的科目</div>
-                    <Button type="link" onMouseDown={(event) => event.preventDefault()} onClick={() => navigate('/subjects')}>
-                      去科目管理创建
-                    </Button>
-                  </div>
-                ) : undefined}
+                notFoundContent={subjects.length === 0 ? <SelectEmptyGuide description="暂无可关联的科目" path="/subjects" actionLabel="去科目管理创建" compact /> : undefined}
               />
             </Form.Item>
           ) : null}

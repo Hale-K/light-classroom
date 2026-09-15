@@ -3,10 +3,10 @@ import type { CSSProperties } from 'react'
 import type { Key } from 'react'
 import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tree } from 'antd'
 import type { DataNode } from 'antd/es/tree'
-import { useNavigate } from 'react-router-dom'
 import { organizationApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import Icon from '@/components/Icon'
+import SelectEmptyGuide from '@/components/SelectEmptyGuide'
 import type { OrganizationTreeResult, OrganizationUnit, OrganizationUnitType, SubjectInfo } from '@/types'
 import { academicYearOptions } from '@/academicYear'
 import { flattenOrganizationUnits, organizationExpandedKeys } from './tree-utils'
@@ -39,7 +39,6 @@ function toTreeData(units: OrganizationUnit[]): DataNode[] {
 
 export default function OrganizationView({ embedded = false }: { embedded?: boolean }) {
   const { message, modal } = App.useApp()
-  const navigate = useNavigate()
   const [data, setData] = useState<OrganizationTreeResult>()
   const [grades, setGrades] = useState<Array<{ id: number; name: string }>>([])
   const [subjects, setSubjects] = useState<SubjectInfo[]>([])
@@ -261,14 +260,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
               optionFilterProp="label"
               placeholder="选择该学科组负责的科目"
               options={subjects.map((subject) => ({ value: subject.id, label: subject.name }))}
-              notFoundContent={subjects.length === 0 ? (
-                <div className="zh-select-empty-guide">
-                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无可关联的科目" />
-                  <Button type="link" onMouseDown={(event) => event.preventDefault()} onClick={() => navigate('/subjects')}>
-                    去科目管理创建
-                  </Button>
-                </div>
-              ) : undefined}
+              notFoundContent={subjects.length === 0 ? <SelectEmptyGuide description="暂无可关联的科目" path="/subjects" actionLabel="去科目管理创建" /> : undefined}
             />
           </Form.Item> : null}
         </Form.Item>
