@@ -4136,6 +4136,13 @@ body[data-theme='tech'] .ant-btn-primary {
 body[data-theme='tech'] .ant-btn-primary:not(:disabled):hover {
   box-shadow: 0 6px 22px rgba(124, 58, 237, 0.5);
 }
+body[data-theme='tech'] .ant-btn-primary:disabled,
+body[data-theme='tech'] .ant-btn-primary.ant-btn-disabled {
+  color: #ddd6fe !important;
+  background: rgba(124, 58, 237, 0.48) !important;
+  border-color: rgba(167, 139, 250, 0.34) !important;
+  opacity: 1;
+}
 
 /* -- 科技主题：Ant Design + 业务组件暗色适配 -- */
 body[data-theme='tech'] .ant-input,
@@ -4339,6 +4346,57 @@ body[data-theme='tech'] .empty-desc {
 body[data-theme='tech'] .empty-icon {
   background: rgba(124, 58, 237, 0.18) !important;
   color: #c4b5fd !important;
+}
+
+/* 空间资源分配：极简模式的浅色状态卡片需要在科技主题中改为深色语义色，
+   否则白色文字会与浅绿/浅红背景混在一起。 */
+body[data-theme='tech'] .facility-capacity-summary {
+  color: #d1fae5 !important;
+  background: rgba(16, 185, 129, 0.13) !important;
+  border-left-color: #34d399 !important;
+}
+body[data-theme='tech'] .facility-capacity-summary.is-shortage {
+  color: #fecdd3 !important;
+  background: rgba(244, 63, 94, 0.13) !important;
+  border-left-color: #fb7185 !important;
+}
+body[data-theme='tech'] .facility-capacity-summary strong,
+body[data-theme='tech'] .facility-capacity-result strong {
+  color: #6ee7b7 !important;
+}
+body[data-theme='tech'] .facility-capacity-summary.is-shortage strong,
+body[data-theme='tech'] .facility-capacity-summary.is-shortage .facility-capacity-result strong {
+  color: #fda4af !important;
+}
+body[data-theme='tech'] .facility-capacity-result span {
+  color: #d1d5db !important;
+}
+body[data-theme='tech'] .facility-capacity-metrics {
+  color: #a7f3d0 !important;
+}
+body[data-theme='tech'] .facility-room-option {
+  background: var(--surface-2) !important;
+  border-color: var(--border) !important;
+}
+body[data-theme='tech'] .facility-room-option.is-available {
+  background: rgba(16, 185, 129, 0.13) !important;
+  border-color: rgba(52, 211, 153, 0.42) !important;
+  border-left-color: #34d399 !important;
+}
+body[data-theme='tech'] .facility-room-option.is-occupied {
+  background: rgba(244, 63, 94, 0.13) !important;
+  border-color: rgba(251, 113, 133, 0.38) !important;
+  border-left-color: #fb7185 !important;
+}
+body[data-theme='tech'] .facility-room-option.is-current {
+  background: rgba(124, 58, 237, 0.13) !important;
+  border-left-color: #a78bfa !important;
+}
+body[data-theme='tech'] .facility-room-option-copy strong {
+  color: #ffffff !important;
+}
+body[data-theme='tech'] .facility-room-option-copy small {
+  color: #cbd5e1 !important;
 }
 
 /* 通用文字 */
