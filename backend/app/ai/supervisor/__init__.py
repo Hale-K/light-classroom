@@ -7,6 +7,7 @@ from app.ai.supervisor.contracts import (
     SupervisorResultStatus,
     SupervisorTask,
 )
+from app.ai.supervisor.readiness import READINESS_TASKS, SchedulingReadinessSupervisor
 
 __all__ = [
     "SupervisorKind",
@@ -14,4 +15,6 @@ __all__ = [
     "SupervisorResult",
     "SupervisorResultStatus",
     "SupervisorTask",
+    "READINESS_TASKS",
+    "SchedulingReadinessSupervisor",
 ]
