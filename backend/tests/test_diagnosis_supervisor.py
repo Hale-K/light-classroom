@@ -16,6 +16,7 @@ async def test_diagnosis_supervisor_collects_fixed_evidence_tasks():
 
     assert seen == ["generation_status", "schedule_setup", "rules"]
     assert report.failed_tasks == ()
+    assert "### 排课任务状态" in report.summary
     assert "generation_status evidence" in report.summary
 
 

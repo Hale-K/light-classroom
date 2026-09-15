@@ -75,7 +75,9 @@ class SchedulingReadinessSupervisor:
                     await on_event("supervisor.task_failed", {"task_id": task.id, "error": str(exc)[:500]})
             results.append(result)
 
-        successful = [result.summary for result in results if result.status is SupervisorResultStatus.SUCCEEDED and result.summary]
-        failed = [result.summary for result in results if result.status is SupervisorResultStatus.FAILED]
-        summary = "\n\n".join([*successful, *failed])
+        sections: list[str] = []
+        for task, result in zip(self.tasks, results):
+            if result.summary:
+                sections.append(f"### {task.label}\n{result.summary}")
+        summary = "\n\n".join(sections)
         return SupervisorReport(kind=self.kind, results=tuple(results), summary=summary)

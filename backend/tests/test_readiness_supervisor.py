@@ -22,6 +22,7 @@ async def test_readiness_supervisor_runs_server_owned_tasks_and_emits_events():
     assert seen == ["schedule_setup", "teacher_assignments", "rules"]
     assert len(report.results) == 3
     assert report.failed_tasks == ()
+    assert "### 学期与课位" in report.summary
     assert events.count("supervisor.task_started:schedule_setup") == 1
     assert "规则已检查" in report.summary
 

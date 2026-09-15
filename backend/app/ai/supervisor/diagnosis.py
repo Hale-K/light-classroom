@@ -75,9 +75,13 @@ class SchedulingDiagnosisSupervisor:
                     await on_event("supervisor.task_failed", {"task_id": task.id, "error": str(exc)[:500]})
             results.append(result)
 
-        summaries = [result.summary for result in results if result.summary]
+        sections = [
+            f"### {task.label}\n{result.summary}"
+            for task, result in zip(self.tasks, results)
+            if result.summary
+        ]
         return SupervisorReport(
             kind=self.kind,
             results=tuple(results),
-            summary="\n\n".join(summaries),
+            summary="\n\n".join(sections),
         )
