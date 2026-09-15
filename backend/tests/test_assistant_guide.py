@@ -1,4 +1,4 @@
-from app.ai.agent.assistant_agent import local_reply
+from app.ai.guide import local_reply
 
 
 def test_local_reply_only_handles_greeting():

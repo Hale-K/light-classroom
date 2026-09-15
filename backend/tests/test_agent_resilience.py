@@ -201,7 +201,6 @@ async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
     text_fallback = AsyncMock(return_value="不应调用")
     monkeypatch.setattr(teacher, "agent_reply", agent)
     monkeypatch.setattr(gateway_model, "complete_chat", text_fallback)
-    monkeypatch.setattr(teacher, "retrieve_skill", AsyncMock(return_value=""))
 
     result = await assistant.handle_assistant_turn(
         None,

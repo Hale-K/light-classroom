@@ -21,7 +21,8 @@ async def test_greeting_with_history_uses_local_fast_path():
         ],
     )
 
-    assert result.text == assistant.local_reply("你好")
+    from app.ai.guide import local_reply
+    assert result.text == local_reply("你好")
 
 
 @pytest.mark.asyncio
@@ -101,13 +102,14 @@ async def test_context_overflow_trims_history_and_retries(monkeypatch):
 @pytest.mark.asyncio
 async def test_fallback_calls_are_budget_capped(monkeypatch):
     from app.ai.model.chat import ChatError
+    from app.ai.agent import fallback
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "test", 200)]))
 
     async def caller(**kwargs):
         raise ChatError("模型服务暂时不可用，请稍后重试。", "unavailable")
 
     monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
-    monkeypatch.setattr(teacher, "retrieve_skill", AsyncMock(return_value=""))
+    monkeypatch.setattr(fallback, "retrieve_skill", AsyncMock(return_value=""))
     timeouts = []
 
     async def fake_complete(**kwargs):
@@ -128,9 +130,10 @@ async def test_fallback_calls_are_budget_capped(monkeypatch):
 @pytest.mark.asyncio
 async def test_fallback_context_overflow_retries_trimmed(monkeypatch):
     from app.ai.model.chat import ChatError
+    from app.ai.agent import fallback
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "test", 60)]))
     monkeypatch.setattr(gateway_model, "complete_chat_tools", AsyncMock(side_effect=ChatError("模型没有返回文本，请重试。", "empty")))
-    monkeypatch.setattr(teacher, "retrieve_skill", AsyncMock(return_value=""))
+    monkeypatch.setattr(fallback, "retrieve_skill", AsyncMock(return_value=""))
     calls = []
 
     async def fake_complete(**kwargs):
