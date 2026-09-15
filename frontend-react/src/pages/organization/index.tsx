@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { Key } from 'react'
-import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tooltip, Tree } from 'antd'
+import { App, Button, Empty, Form, Input, Modal, Select, Switch, Tree } from 'antd'
 import { QuestionCircleOutlined } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree'
 import { organizationApi, orgApi, schedulingApi } from '@/api'

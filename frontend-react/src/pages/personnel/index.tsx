@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Key } from 'react'
-import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, Tooltip, TreeSelect } from 'antd'
+import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
 import { QuestionCircleOutlined, ReadOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { TableProps } from 'antd'

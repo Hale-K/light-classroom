@@ -65,7 +65,7 @@ export default function AllocationRuleDrawer({
   useEffect(() => {
     if (!open || viewRule) return
     void Promise.all([authApi.academicYears(), organizationApi.tree()]).then(([settings, tree]) => {
-      const units = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'n' && item.status === 'active' && item.cohort_label)
+      const units = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'grade_group' && item.status === 'active' && item.cohort_label)
       setGradeUnits(units)
       setGradeUnitOptions(units
         .sort((left, right) => (right.cohort_label || '').localeCompare(left.cohort_label || '') || left.name.localeCompare(right.name, 'zh-CN'))
