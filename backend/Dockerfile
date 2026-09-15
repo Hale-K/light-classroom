@@ -15,8 +15,10 @@ ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
 
 # 安装依赖（利用缓存层）
 COPY pyproject.toml ./
-RUN pip install --no-cache-dir torch==2.14.0+cpu --index-url https://download.pytorch.org/whl/cpu \
-    && pip install --no-cache-dir -e ".[dev]"
+RUN pip install --no-cache-dir filelock "fsspec>=0.8.5" jinja2 networkx "sympy>=1.13.3" typing-extensions setuptools \
+    && pip install --no-cache-dir torch==2.14.0+cpu --no-deps --index-url https://download.pytorch.org/whl/cpu \
+    && pip install --no-cache-dir -e ".[dev]" \
+    && pip check
 
 # 拷贝源码
 COPY . .
