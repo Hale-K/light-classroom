@@ -183,6 +183,17 @@ async def handle_assistant_turn(
     harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     await runtime.emit("harness.selected", harness.trace_data())
     if decision.kind is AssistantIntent.READINESS:
+        from app.api.v1.onboarding import load_onboarding_status
+        from app.ai.supervisor.readiness import preparation_guidance
+
+        await runtime.emit("supervisor.task_started", {"task_id": "prerequisites", "label": "读取学校基础准备清单"})
+        await runtime.progress("preparing", "正在核对学年、教师人员、空间和班级准备情况")
+        preparation = await load_onboarding_status(session, tenant_id)
+        guidance, next_jumps, foundations_ready = preparation_guidance(preparation["data"]["steps"])
+        await runtime.emit("supervisor.task_succeeded", {"task_id": "prerequisites"})
+        if not foundations_ready:
+            await runtime.emit("supervisor.completed", {"kind": "readiness", "failed_tasks": []})
+            return AssistantTurn(text=guidance, jumps=next_jumps)
         tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))
         allowed_tools = frozenset().union(*(task.allowed_tools for task in SchedulingReadinessSupervisor.tasks))
         scope = tool_gateway.open_scope(
@@ -213,12 +224,12 @@ async def handle_assistant_turn(
             "failed_tasks": list(report.failed_tasks),
         })
         return AssistantTurn(
-            text=report.summary or "排课准备检查没有返回结果，请到排课页逐项核对。",
+            text=guidance + "\n\n### 排课细项检查\n\n" + (report.summary or "排课细项没有返回结果，请稍后重试。"),
             think=[
                 f"已完成 {len(report.results)} 项排课准备检查",
                 *([f"检查失败：{'、'.join(report.failed_tasks)}"] if report.failed_tasks else []),
             ],
-            jumps=rule_jumps(query, report.summary, page_path),
+            jumps=next_jumps,
         )
     if decision.kind is AssistantIntent.DIAGNOSIS:
         tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))

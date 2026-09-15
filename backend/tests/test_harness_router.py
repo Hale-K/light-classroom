@@ -93,6 +93,11 @@ def test_tool_scope_cannot_exceed_harness_allowlist():
 
 @pytest.mark.asyncio
 async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
+    from app.api.v1 import onboarding
+    foundation_keys = ("year", "personnel", "space", "allocation", "class_planning", "grid", "hours", "assignments")
+    monkeypatch.setattr(onboarding, "load_onboarding_status", AsyncMock(return_value={
+        "data": {"steps": [{"key": key, "done": True, "title": key, "detail": "已有记录", "path": "/scheduling"} for key in foundation_keys]}
+    }))
     monkeypatch.setattr(
         gateway_model,
         "resolve_chat_endpoints",
@@ -108,8 +113,16 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     async def semantic(session, query, page_path, recent_turns):
         return IntentDecision(AssistantIntent.READINESS, 0.91, "pgvector")
 
+    class FakeReadinessSupervisor:
+        tasks = ()
+
+        async def run(self, execute, *, on_event=None):
+            from app.ai.supervisor import SupervisorKind, SupervisorReport
+            return SupervisorReport(kind=SupervisorKind.READINESS, summary="已检查")
+
     services = ServiceRegistry()
     services.register("intent_gateway", IntentGateway(semantic))
+    services.register("readiness_supervisor", FakeReadinessSupervisor())
     runtime = AssistantRuntime(services=services, on_trace=trace)
 
     result = await assistant_agent.handle_assistant_turn(
@@ -120,12 +133,12 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
         runtime=runtime,
     )
 
-    assert result.text == "已检查"
+    assert "已检查" in result.text
     assert events[0][0] == "intent.classified"
     assert events[0][1]["kind"] == "readiness"
     assert events[1][0] == "harness.selected"
     assert events[1][1]["name"] == "readiness"
-    assert invoke.await_args.kwargs["harness"].name == "readiness"
+    assert not invoke.await_args
 
 
 @pytest.mark.asyncio

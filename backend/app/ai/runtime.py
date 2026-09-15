@@ -18,6 +18,7 @@ from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.inbox import InboxKind, InboxMessage, consume, receive
 from app.ai.runs.progress import Progress, report_progress
+from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor
 
 
 _intent_gateway = IntentGateway(
@@ -74,6 +75,10 @@ class AssistantRuntime:
             self.services.register("harness_router", HarnessRouter())
         if not self.services.has("knowledge_search"):
             self.services.register("knowledge_search", _knowledge_search)
+        if not self.services.has("readiness_supervisor"):
+            self.services.register("readiness_supervisor", SchedulingReadinessSupervisor())
+        if not self.services.has("diagnosis_supervisor"):
+            self.services.register("diagnosis_supervisor", SchedulingDiagnosisSupervisor())
 
     def service(self, name: str) -> Any:
         return self.services.get(name)

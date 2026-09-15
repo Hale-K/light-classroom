@@ -43,7 +43,7 @@ def execution_view(events: list[dict], *, status: str) -> dict:
         }:
             mode = "supervisor"
             task_id = data.get("task_id")
-            if task_id not in {"schedule_setup", "teacher_assignments", "rules", "generation_status"}:
+            if task_id not in {"prerequisites", "schedule_setup", "teacher_assignments", "rules", "generation_status"}:
                 continue
             task = tasks.setdefault(task_id, {
                 "id": task_id,

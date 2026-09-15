@@ -1,7 +1,7 @@
 """新手引导：教务排课准备度清单，状态全部来自本校真实数据。
 
 每步的完成判定与详情文案在这里统一计算，前端只负责展示与跳转。
-步骤顺序即推荐操作顺序（学年学期 → 空间 → 资源分配 → 班级划分 → 课位 → 课时 → 任教 → 规则 → 生成）。
+步骤顺序即推荐操作顺序（学年学期 → 教师人员 → 空间 → 资源分配 → 班级划分 → 课位 → 课时 → 任教 → 规则 → 生成）。
 跳过标记存 TenantConfig（学校级配置，沿用网格/规则目录的存储惯例），不建新表。
 """
 from __future__ import annotations
@@ -15,7 +15,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.facility import Building, Campus, ResourceAllocationRule, Room, RoomCohortAllocation
-from app.models.org import Class, CourseHourPlan, Grade, TeachingAssignment, TenantConfig
+from app.models.org import Class, CourseHourPlan, Grade, Schedule, TeachingAssignment, TenantConfig, User
+from app.models.rbac import Role, UserRole
+from app.models.enums import BaseUserRole, UserStatus
 from app.services.org.cohort import cohort_labels_match, expected_cohort_label
 
 router = APIRouter(prefix="/onboarding", tags=["新手引导"])
@@ -26,6 +28,23 @@ GUIDE_CONFIG_KEY = "onboarding_guide"
 
 def _dismissed_from(raw: object) -> bool:
     return bool(isinstance(raw, dict) and raw.get("dismissed"))
+
+
+def teaching_staff_count_query(tenant_id: int):
+    """基础角色 teacher 也用于普通人员；仅统计本校有任教角色的可用账号。"""
+    return (
+        select(func.count(distinct(User.id))).select_from(User)
+        .join(UserRole, UserRole.user_id == User.id)
+        .join(Role, Role.id == UserRole.role_id)
+        .where(
+            User.tenant_id == tenant_id,
+            User.role == BaseUserRole.teacher,
+            User.status == UserStatus.active,
+            User.frozen.is_(False),
+            Role.tenant_id == tenant_id,
+            Role.code == "subject_teacher",
+        )
+    )
 
 
 async def _set_dismissed(session: AsyncSession, tenant_id: int, user_id: int, value: bool) -> None:
@@ -85,6 +104,8 @@ def evaluate_steps(
     rule_group_count: int,
     enabled_rules: int,
     version_count: int,
+    staff_count: int = 0,
+    schedule_count: int = 0,
     history_year: str | None = None,
     history_hour_classes: int = 0,
 ) -> list[dict]:
@@ -93,9 +114,9 @@ def evaluate_steps(
     elif building_count == 0:
         space_detail = f"已有 {campus_count} 个校区，还没有楼宇；请选择校区后新增楼宇"
     elif room_count == 0:
-        space_detail = f"已有 {campus_count} 个校区、{building_count} 栋楼宇，还没有场室；请选择楼宇后新增场室"
+        space_detail = f"已有 {campus_count} 个校区、{building_count} 栋楼宇，还没有可排课场室；请新增场室或核对现有场室状态"
     else:
-        space_detail = f"已有 {campus_count} 个校区、{building_count} 栋楼宇、{room_count} 间场室"
+        space_detail = f"已有 {campus_count} 个校区、{building_count} 栋楼宇、{room_count} 间可排课场室"
 
     if not year:
         allocation_detail = "先设置当前学年学期，再按届别分配场室"
@@ -122,6 +143,16 @@ def evaluate_steps(
             "done": bool(year),
             "detail": f"{year} 学年 · 第 {term} 学期" if year else "还没有设置当前学年学期",
             "path": "/settings",
+        },
+        {
+            "key": "personnel",
+            "title": "准备教师人员",
+            "done": staff_count > 0,
+            "detail": (
+                f"已有 {staff_count} 位启用且未冻结的教师；任教覆盖将在后续单独核对"
+                if staff_count else "还没有可用于任教的教师，请到人员账号添加教师并启用账号"
+            ),
+            "path": "/staff",
         },
         {
             "key": "space",
@@ -171,7 +202,7 @@ def evaluate_steps(
         {
             "key": "assignments",
             "title": "建立任教关系",
-            "done": teacher_count > 0,
+            "done": class_total > 0 and teacher_count > 0 and asg_class_count >= class_total,
             "detail": (
                 f"{teacher_count} 位教师覆盖 {asg_class_count} 个班" if teacher_count
                 else (
@@ -194,19 +225,28 @@ def evaluate_steps(
         {
             "key": "generate",
             "title": "生成第一张课表",
-            "done": version_count > 0,
-            "detail": f"已有 {version_count} 个课表版本" if version_count else "在排课页点「生成课表」，冲突格会标红",
+            "done": bool(year) and schedule_count > 0,
+            "detail": (
+                f"当前学期已有 {schedule_count} 个排课条目"
+                + (f"、{version_count} 个可恢复历史版本" if version_count else "")
+                if schedule_count else "当前学期尚无课表；在排课页生成后检查冲突"
+            ),
             "path": "/scheduling",
         },
     ]
 
 
-@router.get("/status", summary="新手引导进度（教务排课准备九步）")
+@router.get("/status", summary="新手引导进度（教务排课准备流程）")
 async def onboarding_status(
     session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
+    return await load_onboarding_status(session, tenant_id)
+
+
+async def load_onboarding_status(session: AsyncSession, tenant_id: int) -> dict:
+    """供新手引导和助手共用的学校准备事实；无页面跳转或写入。"""
     from app.api.v1.scheduling import _load_grid_config, _load_rule_catalog
     from app.api.v1.teacher_profiles import _defaults
 
@@ -236,6 +276,15 @@ async def onboarding_status(
     ]
     current_class_ids = {row.id for row in current_classes}
     class_total = len(current_classes)
+    schedule_count = (await session.execute(
+        select(func.count()).select_from(Schedule).where(
+            Schedule.tenant_id == tenant_id,
+            Schedule.academic_year == year,
+            Schedule.term == term,
+            Schedule.class_id.in_(current_class_ids),
+        )
+    )).scalar_one() if current_class_ids else 0
+    staff_count = (await session.execute(teaching_staff_count_query(tenant_id))).scalar_one()
     campus_count = (await session.execute(
         select(func.count()).select_from(Campus).where(
             Campus.tenant_id == tenant_id, Campus.status == "active",
@@ -245,7 +294,16 @@ async def onboarding_status(
         select(func.count()).select_from(Building).where(Building.tenant_id == tenant_id)
     )).scalar_one()
     room_count = (await session.execute(
-        select(func.count()).select_from(Room).where(Room.tenant_id == tenant_id)
+        select(func.count()).select_from(Room)
+        .join(Building, Building.id == Room.building_id)
+        .join(Campus, Campus.id == Building.campus_id)
+        .where(
+            Room.tenant_id == tenant_id,
+            Room.is_schedulable.is_(True),
+            Room.status == "available",
+            Campus.tenant_id == tenant_id,
+            Campus.status == "active",
+        )
     )).scalar_one()
     allocation_rule_count = 0
     allocated_room_ids: set[int] = set()
@@ -260,11 +318,16 @@ async def onboarding_status(
             )
         )).scalar_one()
         allocated_room_ids = set((await session.execute(
-            select(distinct(RoomCohortAllocation.room_id)).where(
+            select(distinct(RoomCohortAllocation.room_id))
+            .join(Room, Room.id == RoomCohortAllocation.room_id)
+            .where(
                 RoomCohortAllocation.tenant_id == tenant_id,
                 RoomCohortAllocation.academic_year == year,
                 RoomCohortAllocation.term == term,
                 RoomCohortAllocation.status == "active",
+                Room.tenant_id == tenant_id,
+                Room.is_schedulable.is_(True),
+                Room.status == "available",
             )
         )).scalars().all())
         resource_assigned_class_count = sum(
@@ -284,10 +347,21 @@ async def onboarding_status(
             )
         )).scalar_one()
         for tid, cid in (await session.execute(
-            select(TeachingAssignment.teacher_id, TeachingAssignment.class_id).where(
+            select(TeachingAssignment.teacher_id, TeachingAssignment.class_id)
+            .join(User, User.id == TeachingAssignment.teacher_id)
+            .join(UserRole, UserRole.user_id == User.id)
+            .join(Role, Role.id == UserRole.role_id)
+            .where(
                 TeachingAssignment.tenant_id == tenant_id,
                 TeachingAssignment.academic_year == year,
                 TeachingAssignment.term == term,
+                TeachingAssignment.class_id.in_(current_class_ids),
+                User.tenant_id == tenant_id,
+                User.role == BaseUserRole.teacher,
+                User.status == UserStatus.active,
+                User.frozen.is_(False),
+                Role.tenant_id == tenant_id,
+                Role.code == "subject_teacher",
             )
         )).all():
             if tid is not None:
@@ -349,7 +423,12 @@ async def onboarding_status(
         asg_class_count=len(asg_class_ids),
         rule_group_count=len(groups),
         enabled_rules=enabled_rules,
-        version_count=len(history),
+        version_count=sum(
+            1 for version in history
+            if version.get("academic_year") == year and str(version.get("term")) == str(term)
+        ),
+        staff_count=int(staff_count or 0),
+        schedule_count=int(schedule_count or 0),
         history_year=history_year,
         history_hour_classes=history_hour_classes,
     )

@@ -4,7 +4,7 @@ import { onboardingApi, type OnboardingStep } from '@/api'
 import Icon from '@/components/Icon'
 import './onboarding.css'
 
-/** 新手引导页：教务排课准备九步，横幅进度环 + 步骤卡片，状态来自后端真实数据。 */
+/** 新手引导页：教务排课准备流程，状态来自后端真实数据。 */
 export default function OnboardingView() {
   const navigate = useNavigate()
   const [steps, setSteps] = useState<OnboardingStep[]>([])
@@ -28,7 +28,7 @@ export default function OnboardingView() {
   }, [refresh])
 
   const doneCount = steps.filter((s) => s.done).length
-  const total = steps.length || 9
+  const total = steps.length || 1
   const allDone = loaded && steps.length > 0 && doneCount === total
   const firstPending = steps.findIndex((s) => !s.done)
   const pending = steps.filter((s) => !s.done)
@@ -51,14 +51,14 @@ export default function OnboardingView() {
     <div className="ob-page">
       <section className="ob-banner">
         <div className="ob-banner-copy">
-          <h1>九步搭好排课工作台</h1>
-          <p>核对学年学期，建全空间并完成资源分配与班级划分，再配置课位、课时、任教和规则，最后生成课表。</p>
+          <h1>按步骤准备排课基础数据</h1>
+          <p>核对学年学期，准备教师人员，建全空间并完成资源分配与班级划分，再配置课位、课时、任教和规则，最后生成课表。</p>
           <div className="ob-banner-tips">
             <span>✓ 建议按顺序完成</span>
             {historyYear && !allDone && (
               <span className="ob-history">检测到 {historyYear} 学年的历史数据，新学期沿用同样结构即可</span>
             )}
-            {allDone && <span className="ob-history">本校数据已齐，可以直接日常排课与调课</span>}
+            {allDone && <span className="ob-history">基础记录已齐，请继续核对约束和生成结果</span>}
           </div>
           <div className="ob-banner-actions">
             <button type="button" onClick={refresh}>
