@@ -177,7 +177,13 @@ async def stream_assistant_run(
             for event in items[cursor:]:
                 yield f"id: {cursor + 1}\nevent: run.event\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
                 cursor += 1
-            yield f"event: run.status\ndata: {json.dumps({k: view[k] for k in ('id','status','phase','message','result')}, ensure_ascii=False)}\n\n"
+            status_view = {
+                k: view[k] for k in (
+                    "id", "status", "phase", "message", "result", "elapsed_seconds",
+                    "phase_elapsed_seconds", "heartbeat_at", "events",
+                )
+            }
+            yield f"event: run.status\ndata: {json.dumps(status_view, ensure_ascii=False)}\n\n"
             if view["status"] not in {"queued", "running"}:
                 return
             await asyncio.sleep(1.0)

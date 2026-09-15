@@ -59,7 +59,11 @@ export async function watchAssistantRun(id: string, signal: AbortSignal, onUpdat
         try {
           const payload = JSON.parse(data)
           if (frame.includes('event: run.status')) {
-            latest = { ...(latest || {} as AssistantRun), ...payload } as AssistantRun
+            latest = {
+              ...(latest || {} as AssistantRun),
+              ...payload,
+              events: Array.isArray(payload.events) ? payload.events : (latest?.events || []),
+            } as AssistantRun
             onUpdate(latest)
             onConnection('实时连接中')
             if (!isActiveRun(payload.status)) return latest

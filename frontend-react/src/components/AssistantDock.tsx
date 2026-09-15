@@ -138,7 +138,7 @@ function ThinkDial({ live, progress, connection }: { live: string; progress: Ass
         <span>已等待 {progress.elapsed_seconds} 秒 · 当前阶段 {progress.phase_elapsed_seconds} 秒</span>
         <span>{connection || (heartbeatRecent ? '后台仍在响应' : '暂未收到新的后台心跳，正在核对状态')}</span>
         {progress.phase_elapsed_seconds >= 15 && <span>当前阶段暂未返回新结果。你可以继续使用其他页面，或停止本轮处理。</span>}
-        <details><summary>查看执行记录</summary><ol>{progress.events.map((event, i) => <li key={i}>{event.message}</li>)}</ol></details>
+        <details><summary>查看执行记录</summary><ol>{(progress.events ?? []).map((event, i) => <li key={i}>{event.message}</li>)}</ol></details>
       </div>}
       {!progress && connection && <div role="status">{connection}</div>}
     </div>
