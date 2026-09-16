@@ -2164,7 +2164,10 @@ async def _execute_schedule_generation(
             # 单轮求解时限可用环境变量放宽；2 核小服务器 + 单双周课时结构下
             # 150s 常搜不到首个可行解（UNKNOWN→误报无解），实测 300s 内 170s 即出解。
             max_solve = float(os.environ.get("SCHEDULING_MAX_SOLVE_SECONDS", "300"))
-            seed_attempts = 5
+            # 递增时限重试：难实例「换种子」收效甚微（每轮都 UNKNOWN 打满），加时才有效
+            # （实测 150s UNKNOWN → 2线程 + 加时 170s 出解）。每轮时限 ×1/×2/×3。
+            solve_rounds = [max_solve, max_solve * 2, max_solve * 3]
+            seed_attempts = len(solve_rounds)
             # 不传 seed：每次任务随机起步；某一组超时/晚课对不上时换独立种子，不要整单失败。
             if body.random_seed is not None:
                 base_seed = int(body.random_seed)
@@ -2173,17 +2176,17 @@ async def _execute_schedule_generation(
             seeds = _cpsat_retry_seeds(base_seed, seed_attempts)
             need_evening = any(body.evening_daily_periods_odd) or any(body.evening_daily_periods_even)
 
-            async def _run_daytime(seed: int, attempt: int, total: int):
+            async def _run_daytime(seed: int, attempt: int, total: int, limit: float):
                 loop = asyncio.get_running_loop()
                 solve_started = time.perf_counter()
                 stop_tick = asyncio.Event()
                 latest_solver: dict = {"solutions": 0, "message": "白天课求解中…"}
-                prefix = f"第 {attempt}/{total} 次 seed={seed}"
+                prefix = f"第 {attempt}/{total} 次（时限{int(limit)}s）seed={seed}"
 
                 def _solver_progress(info: dict) -> None:
                     latest_solver.update(info)
                     elapsed = float(info.get("elapsed") or (time.perf_counter() - solve_started))
-                    percent = 12 + int((attempt - 1) / total * 60) + min(8, int(elapsed / max_solve * 8))
+                    percent = 12 + int((attempt - 1) / total * 60) + min(8, int(elapsed / limit * 8))
                     message = f"{prefix} · {info.get('message') or '白天课求解中…'}"
                     asyncio.run_coroutine_threadsafe(
                         _progress(
@@ -2200,7 +2203,7 @@ async def _execute_schedule_generation(
                 async def _heartbeat() -> None:
                     while not stop_tick.is_set():
                         elapsed = time.perf_counter() - solve_started
-                        percent = 12 + int((attempt - 1) / total * 60) + min(8, int(elapsed / max_solve * 8))
+                        percent = 12 + int((attempt - 1) / total * 60) + min(8, int(elapsed / limit * 8))
                         solutions = int(latest_solver.get("solutions") or 0)
                         base = str(latest_solver.get("message") or "白天课求解中…")
                         await _progress(
@@ -2220,7 +2223,7 @@ async def _execute_schedule_generation(
                 tick_task = asyncio.create_task(_heartbeat())
                 try:
                     return await run_daytime_cpsat(
-                        timeout=max_solve + 45,
+                        timeout=limit + 45,
                         assignments=assignments,
                         days=body.days, periods_per_day=body.periods_per_day,
                         forbidden_slots=set(body.forbidden_slots),
@@ -2250,8 +2253,10 @@ async def _execute_schedule_generation(
                         gap_fill_late_from_period=gap_fill_late_from,
                         random_seed=seed,
                         num_search_workers=solver_worker_count(),
-                        max_time_seconds=max_solve,
-                        polish_seconds=150.0,
+                        max_time_seconds=limit,
+                        # 首个可行解之后的软目标优化时长（质量换时间）；
+                        # 2 线程下首解约 20s，总时长 ≈ 首解 + 本打磨上限。
+                        polish_seconds=float(os.environ.get("SCHEDULING_POLISH_SECONDS", "150")),
                         on_progress=_solver_progress,
                     )
                 finally:
@@ -2309,24 +2314,24 @@ async def _execute_schedule_generation(
 
             await _progress(
                 "generating",
-                f"本次起始种子 {base_seed}，最多尝试 {len(seeds)} 组（不通则自动换种子）",
+                f"本次起始种子 {base_seed}，最多 {len(seeds)} 轮（时限逐轮递增至 {int(solve_rounds[-1])}s）",
                 percent=12,
                 phase="daytime_search",
             )
-            for attempt, seed in enumerate(seeds, start=1):
+            for attempt, (seed, limit) in enumerate(zip(seeds, solve_rounds), start=1):
                 await _progress(
                     "generating",
-                    f"开始第 {attempt}/{len(seeds)} 次求解（seed={seed}）",
+                    f"开始第 {attempt}/{len(seeds)} 轮求解（时限{int(limit)}s，seed={seed}）",
                     percent=12 + int((attempt - 1) / len(seeds) * 60),
                     phase="daytime_search",
                 )
                 try:
-                    cp = await _run_daytime(seed, attempt, len(seeds))
+                    cp = await _run_daytime(seed, attempt, len(seeds), limit)
                 except WorkerTimeout as exc:
                     last_error = f"白天课超时（seed={seed}，{int(exc.timeout_seconds)}s）"
                     await _progress(
                         "generating",
-                        f"{last_error}，将换种子重试",
+                        f"{last_error}，将加时重试",
                         percent=12 + int(attempt / len(seeds) * 60),
                         phase="daytime_retry",
                     )
@@ -2374,7 +2379,7 @@ async def _execute_schedule_generation(
                         )
                         await _progress(
                             "generating",
-                            f"{last_error}，将换种子重试",
+                            f"{last_error}，将加时重试",
                             percent=12 + int(attempt / len(seeds) * 60),
                             phase="hard_rule_retry",
                         )
@@ -2430,7 +2435,7 @@ async def _execute_schedule_generation(
                     last_error = f"晚课超时（seed={seed}，{int(exc.timeout_seconds)}s）"
                     await _progress(
                         "generating",
-                        f"{last_error}，将换种子重试",
+                        f"{last_error}，将加时重试",
                         percent=12 + int(attempt / len(seeds) * 60),
                         phase="evening_retry",
                     )
@@ -2447,7 +2452,7 @@ async def _execute_schedule_generation(
                         )
                         await _progress(
                             "generating",
-                            f"{last_error}，将换种子重试",
+                            f"{last_error}，将加时重试",
                             percent=12 + int(attempt / len(seeds) * 60),
                             phase="hard_rule_retry",
                         )
@@ -2463,17 +2468,17 @@ async def _execute_schedule_generation(
                 last_error = f"晚课 {evening_result.status}（seed={seed}）"
                 await _progress(
                     "generating",
-                    f"{last_error}，将换种子重试",
+                    f"{last_error}，将加时重试",
                     percent=12 + int(attempt / len(seeds) * 60),
                     phase="evening_retry",
                 )
             if result is None:
                 msg = (
-                    f"已尝试 {len(seeds)} 组随机种子，仍无法排出可通过硬规则验算的课表。"
+                    f"已尝试 {len(seeds)} 轮递增时限求解（最高 {int(solve_rounds[-1])}s），仍无法排出可通过硬规则验算的课表。"
                     f"最后失败：{last_error}"
                     if "硬规则" in str(last_error)
                     else (
-                        f"已尝试 {len(seeds)} 组随机种子，仍无法同时排出白天课和晚课。"
+                        f"已尝试 {len(seeds)} 轮递增时限求解（最高 {int(solve_rounds[-1])}s），仍无法同时排出白天课和晚课。"
                         f"最后失败：{last_error}"
                     )
                 )

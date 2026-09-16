@@ -28,6 +28,7 @@ from app.services.scheduling.core import (
     ScheduleItem,
     _assignment_placement_groups,
     _normalize_slot_patterns,
+    generate_schedule,
 )
 from app.services.scheduling.solver_watchdog import solve_with_stop_deadline
 
@@ -79,6 +80,7 @@ def solve_daytime_cpsat(
 ) -> CpSatSolveResult:
     """CP-SAT 求解白天+周六课表。返回 OPTIMAL/FEASIBLE/INFEASIBLE 与课表项。"""
     started = time.perf_counter()
+    assignments = list(assignments)
     forbidden = forbidden_slots or set()
     t_forbidden = teacher_forbidden_slots or {}
     tc_forbidden = teacher_class_forbidden_slots or {}
@@ -735,6 +737,54 @@ def solve_daytime_cpsat(
                 costs.append(slack * 80)
     if costs:
         model.Minimize(sum(costs))
+
+    # ---------- 贪心热启动 hint ----------
+    # 贪心毫秒级出一个师生无冲突解，作为 CP-SAT 初始解提示，把「从零搜首个可行解」
+    # 变成「验证+修复+优化」。半课单双周腿不 hint（交给求解器配对）。
+    # SCHEDULING_GREEDY_HINT=0 可关闭。
+    if os.environ.get("SCHEDULING_GREEDY_HINT", "1") != "0":
+        try:
+            greedy = generate_schedule(
+                assignments,
+                days=days,
+                periods_per_day=periods_per_day,
+                forbidden_slots=forbidden,
+                max_class_lessons_per_day=max_class_lessons_per_day,
+                max_teacher_lessons_per_day=max_teacher_lessons_per_day,
+                max_class_lessons_on_saturday=max_class_lessons_on_saturday,
+                max_teacher_lessons_on_saturday=max_teacher_lessons_on_saturday,
+                max_same_subject_per_day=max_same_subject_per_day,
+                max_teacher_weekly_periods=max_teacher_weekly_periods,
+                teacher_daily_limits=teacher_daily_limits,
+                slot_patterns=slot_patterns,
+                teacher_forbidden_slots=t_forbidden,
+                teacher_class_forbidden_slots=tc_forbidden,
+                subject_forbidden_slots=s_forbidden,
+                class_slot_allowed_subjects=class_allowed,
+                random_seed=int(random_seed),
+            )
+            id_to_idx: dict[int, int] = {}
+            for idx, a in enumerate(assignments):
+                aid = a.get("id")
+                if aid is not None:
+                    id_to_idx[int(aid)] = idx
+            hint_rows = 0
+            for it in greedy.items:
+                if it.week_parity != WeekParity.all:
+                    continue
+                var = y.get((id_to_idx.get(int(it.assignment_id), -1), int(it.weekday), int(it.period)))
+                if var is not None:
+                    model.AddHint(var, 1)
+                    hint_rows += 1
+            if on_progress is not None:
+                on_progress({
+                    "phase": "daytime_search",
+                    "message": f"贪心热启动：已注入 {hint_rows} 个全周课位 hint",
+                    "elapsed": round(time.perf_counter() - started, 1),
+                    "solutions": 0,
+                })
+        except Exception as exc:  # 贪心任何异常都不阻塞 CP-SAT 正常求解
+            print(f"[CPSAT] 贪心热启动跳过: {exc}")
 
     # ---------- 求解 ----------
     if on_progress is not None:
