@@ -85,6 +85,7 @@ class SchedulingReadinessSupervisor:
         execute: ReadinessExecutor,
         *,
         context: SupervisorContext | None = None,
+        max_retries: int = 1,
         on_event: ReadinessEvent | None = None,
     ) -> SupervisorReport:
         results: list[SupervisorResult] = []
@@ -92,28 +93,26 @@ class SchedulingReadinessSupervisor:
             task_context = context.task_context(task) if context else SupervisorTaskContext(
                 None, None, None, None, None, None, task.id, task.label, task.instruction, task.allowed_tools,
             )
-            if on_event:
-                await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label, **task_context.trace_data()})
-            try:
-                output = (await execute(task, task_context)).strip()
-                result = SupervisorResult(
-                    task_id=task.id,
-                    status=SupervisorResultStatus.SUCCEEDED,
-                    summary=output,
-                    metadata=task_context.trace_data(),
-                )
+            attempts = 0
+            while True:
                 if on_event:
-                    await on_event("supervisor.task_succeeded", {"task_id": task.id})
-            except Exception as exc:  # one failed check must not hide the other checks
-                result = SupervisorResult(
-                    task_id=task.id,
-                    status=SupervisorResultStatus.FAILED,
-                    summary=f"{task.label}检查失败",
-                    error=str(exc)[:500],
-                    metadata=task_context.trace_data(),
-                )
-                if on_event:
-                    await on_event("supervisor.task_failed", {"task_id": task.id, "error": str(exc)[:500]})
+                    await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label, "attempt": attempts + 1, **task_context.trace_data()})
+                try:
+                    output = (await execute(task, task_context)).strip()
+                    result = SupervisorResult(task_id=task.id, status=SupervisorResultStatus.SUCCEEDED, summary=output, metadata=task_context.trace_data())
+                    if on_event:
+                        await on_event("supervisor.task_succeeded", {"task_id": task.id, "attempt": attempts + 1})
+                    break
+                except Exception as exc:  # one failed check must not hide the other checks
+                    if attempts < max(0, max_retries):
+                        attempts += 1
+                        if on_event:
+                            await on_event("supervisor.task_retry", {"task_id": task.id, "attempt": attempts + 1, "retry_count": attempts, "error": str(exc)[:500]})
+                        continue
+                    result = SupervisorResult(task_id=task.id, status=SupervisorResultStatus.FAILED, summary=f"{task.label}检查失败", error=str(exc)[:500], metadata=task_context.trace_data())
+                    if on_event:
+                        await on_event("supervisor.task_failed", {"task_id": task.id, "attempt": attempts + 1, "error": str(exc)[:500]})
+                    break
             results.append(result)
 
         sections: list[str] = []

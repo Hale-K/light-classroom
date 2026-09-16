@@ -272,7 +272,9 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
             if task_id and task_id not in checkpoint["failed_tasks"]:
                 checkpoint["failed_tasks"].append(task_id)
             checkpoint["current_task"] = None
+        elif kind == "supervisor.task_retry":
             checkpoint["retry_count"] += 1
+            checkpoint["current_task"] = data.get("task_id")
         elif kind == "supervisor.completed":
             checkpoint["stage"] = "supervisor_completed"
             checkpoint["current_task"] = None

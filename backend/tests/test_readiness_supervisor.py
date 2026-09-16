@@ -41,3 +41,25 @@ async def test_readiness_supervisor_isolates_failed_check():
     assert report.failed_tasks == ("teacher_assignments",)
     assert report.results[0].summary == "schedule_setup ok"
     assert report.results[2].summary == "rules ok"
+
+
+@pytest.mark.asyncio
+async def test_readiness_supervisor_retries_only_failed_task():
+    attempts: dict[str, int] = {}
+    events: list[str] = []
+
+    async def execute(task, task_context):
+        attempts[task.id] = attempts.get(task.id, 0) + 1
+        if task.id == "teacher_assignments" and attempts[task.id] == 1:
+            raise RuntimeError("临时连接失败")
+        return "ok"
+
+    async def on_event(kind, data):
+        if kind == "supervisor.task_retry":
+            events.append(data["task_id"])
+
+    report = await SchedulingReadinessSupervisor().run(execute, on_event=on_event)
+
+    assert report.failed_tasks == ()
+    assert attempts == {"schedule_setup": 1, "teacher_assignments": 2, "rules": 1}
+    assert events == ["teacher_assignments"]
