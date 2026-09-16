@@ -105,7 +105,7 @@ async def agent_reply(
         if exc.error_class != "context_overflow":
             raise
         # 上下文超长：压掉早期历史和长摘要重试一次，仍超长才放行给降级路径。
-        trimmed = trim_turns(turns)
+        trimmed = project_messages(trim_turns(turns), limit=6, token_budget=1800)
         logger.warning("assistant.agent overflow retry turns=%d->%d", len(turns), len(trimmed))
         await report_progress(on_progress, "model", "对话较长，正在压缩上下文重试")
         outcome = await run_agent_loop(

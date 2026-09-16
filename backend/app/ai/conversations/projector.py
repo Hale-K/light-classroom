@@ -7,6 +7,12 @@ later model call cannot learn those messages as if they were assistant answers.
 from __future__ import annotations
 
 from collections.abc import Iterable
+import re
+
+
+def _token_count(text: str) -> int:
+    """Cheap, dependency-free token estimate for projection budgeting."""
+    return max(1, (len(text) + 3) // 4)
 
 
 _NON_DIALOGUE_PREFIXES = (
@@ -37,8 +43,14 @@ def is_model_visible(message: dict) -> bool:
     return bool(text) and not text.startswith(_NON_DIALOGUE_PREFIXES)
 
 
-def project_messages(messages: Iterable[dict], *, limit: int | None = None) -> list[dict]:
-    """Return role/content messages that are safe to place in an LLM prompt."""
+def project_messages(
+    messages: Iterable[dict], *, limit: int | None = None,
+    token_budget: int | None = None,
+) -> list[dict]:
+    """Return visible messages within count and token budgets.
+
+    Newest messages win, but the latest user instruction is always retained.
+    """
     projected: list[dict] = []
     for item in messages:
         role = item.get("role")
@@ -48,7 +60,36 @@ def project_messages(messages: Iterable[dict], *, limit: int | None = None) -> l
         candidate = {**item, "role": role, "content": content}
         if is_model_visible(candidate):
             projected.append({"role": role, "content": content})
-    return projected[-limit:] if limit is not None else projected
+    if limit is not None:
+        projected = projected[-limit:]
+    if token_budget is None:
+        return projected
+    kept: list[dict] = []
+    used = 0
+    for item in reversed(projected):
+        cost = _token_count(item["content"])
+        if kept and used + cost > token_budget:
+            continue
+        kept.append(item)
+        used += cost
+    return list(reversed(kept))
+
+
+def project_state(messages: Iterable[dict]) -> dict[str, object]:
+    """Extract small, explicit facts that should survive history compaction."""
+    items = list(messages)
+    users = [str(item.get("content") or "").strip() for item in items if item.get("role") == "user"]
+    confirmed = []
+    for item in items:
+        if item.get("role") != "assistant":
+            continue
+        match = re.search(r"(?:已确认|确认(?:为|了))[^：:，。]*?(?:为|是)\s*([^，。；;]+)", str(item.get("content") or ""))
+        if match:
+            confirmed.append(match.group(1).strip())
+    return {
+        "latest_request": users[-1] if users else "",
+        "confirmed": list(dict.fromkeys(confirmed)),
+    }
 
 
 def project_summary(summary: str) -> str:

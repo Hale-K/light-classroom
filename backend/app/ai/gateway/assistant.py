@@ -14,6 +14,7 @@ from app.ai.conversations import (
     delete_conversation,
     get_conversation,
     project_messages,
+    project_state,
     project_summary,
     sync_conversation,
 )
@@ -51,7 +52,7 @@ class AssistantGateway:
                 "content": content,
                 "model_visible": item.get("model_visible", True),
             })
-        return project_messages(candidates, limit=20)
+        return project_messages(candidates, limit=20, token_budget=6000)
 
     async def read_conversation(self, session: AsyncSession, tenant_id: int, user_id: int) -> dict:
         return conversation_view(await get_conversation(session, tenant_id, user_id))
@@ -119,6 +120,15 @@ class AssistantGateway:
         }
         conversation = await get_conversation(session, tenant_id, user_id)
         payload["memory_summary"] = project_summary(conversation.summary if conversation else "")
+        payload["context_state"] = project_state(request.messages)
+        state = payload["context_state"]
+        if state["latest_request"] or state["confirmed"]:
+            payload["memory_summary"] = "\n".join(filter(None, [
+                payload["memory_summary"],
+                "会话状态：",
+                f"最新请求：{state['latest_request']}",
+                f"已确认：{'、'.join(state['confirmed']) or '无'}",
+            ]))
         data, created = await create_run(session, request_id, tenant_id, user_id, payload)
         if created:
             spawn_run(request_id, tenant_id, user_id, payload)

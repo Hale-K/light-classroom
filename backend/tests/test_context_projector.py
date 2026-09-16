@@ -1,4 +1,4 @@
-from app.ai.conversations.projector import project_messages, project_summary
+from app.ai.conversations.projector import project_messages, project_summary, project_state
 
 
 def test_project_messages_excludes_operational_and_degraded_assistant_bubbles():
@@ -41,3 +41,26 @@ def test_project_summary_removes_truncated_legacy_failure_line():
     summary = "模型服务暂时不可用，助手已进入本地说明模式。\n老师：再试一次"
 
     assert project_summary(summary) == "老师：再试一次"
+
+
+def test_project_messages_respects_token_budget_and_keeps_latest_user_message():
+    messages = [
+        {"role": "user", "content": "早期规则组信息 " * 80},
+        {"role": "assistant", "content": "早期回答 " * 80},
+        {"role": "user", "content": "请继续处理数学规则"},
+    ]
+
+    result = project_messages(messages, token_budget=80)
+
+    assert result[-1] == {"role": "user", "content": "请继续处理数学规则"}
+    assert sum(len(item["content"]) for item in result) < 500
+
+
+def test_project_state_extracts_confirmed_slots_without_replacing_messages():
+    state = project_state([
+        {"role": "user", "content": "在高一规则组，数学周三第6节不能排课"},
+        {"role": "assistant", "content": "已确认规则组为高一规则组"},
+    ])
+
+    assert state["confirmed"] == ["高一规则组"]
+    assert "数学周三第6节不能排课" in state["latest_request"]
