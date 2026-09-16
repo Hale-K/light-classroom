@@ -64,3 +64,17 @@ def test_project_state_extracts_confirmed_slots_without_replacing_messages():
 
     assert state["confirmed"] == ["高一规则组"]
     assert "数学周三第6节不能排课" in state["latest_request"]
+
+
+def test_project_messages_drops_tool_and_operational_noise_without_summarizing_it():
+    messages = [
+        {"role": "user", "content": "查一下数学老师"},
+        {"role": "tool", "content": "搜索结果：" + "无关记录 " * 100},
+        {"role": "assistant", "content": "无关中间结果", "message_kind": "tool_result"},
+        {"role": "assistant", "content": "数学老师有 3 位。"},
+    ]
+
+    assert project_messages(messages) == [
+        {"role": "user", "content": "查一下数学老师"},
+        {"role": "assistant", "content": "数学老师有 3 位。"},
+    ]

@@ -33,6 +33,8 @@ def is_model_visible(message: dict) -> bool:
     """Return whether a durable/UI message may be replayed to the model."""
     # A client must not be able to hide its latest instruction and make the
     # assistant accidentally continue an older user request.
+    if message.get("role") == "tool" or message.get("message_kind") in {"tool_result", "operational"}:
+        return False
     if message.get("role") == "user":
         return True
     if message.get("model_visible") is False:
