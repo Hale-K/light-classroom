@@ -42,13 +42,14 @@ SCHOOL_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "lookup_teachers",
-            "description": "查本校在职教师：按科目或姓名关键词，返回任教学科与班主任班级。",
+            "description": "只读查询本校当前学年学期的在职教师。可按科目或姓名关键词筛选，返回任教学科和班主任班级；不返回排课结果，也不执行修改。",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "subject": {"type": "string", "description": "科目名，如 数学；不按科目筛就省略"},
-                    "keyword": {"type": "string", "description": "教师姓名关键词"},
+                    "subject": {"type": "string", "description": "本校科目名，如“数学”；不筛选时省略"},
+                    "keyword": {"type": "string", "description": "教师姓名关键词；不筛选时省略"},
                 },
+                "additionalProperties": False,
             },
         },
     },
@@ -56,16 +57,16 @@ SCHOOL_TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "lookup_schedule_setup",
-            "description": "查本校排课准备度：当前学年学期、课位网格、年级班级数、课时与任教覆盖情况。",
-            "parameters": {"type": "object", "properties": {}},
+            "description": "只读检查本校指定学年学期的排课准备度，返回课位网格、班级、课时方案、任教覆盖和规则组概况。准备度不等于一定可排且不保证无冲突。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },
     {
         "type": "function",
         "function": {
             "name": "lookup_rules",
-            "description": "查本校当前学年学期的规则组：每组规则数、启用与硬约束情况。",
-            "parameters": {"type": "object", "properties": {}},
+            "description": "只读查询本校指定学年学期的规则组和已启用规则。省略规则组时返回概况及当前启用组；指定 rule_group_id 时返回该组详情，不创建或修改规则。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
         },
     },
     {
@@ -79,9 +80,13 @@ SCHOOL_TOOLS: list[dict] = [
                     "keys": {
                         "type": "array",
                         "items": {"type": "string"},
-                        "description": '目录编号，如 ["05-rules"]，最多 2 个',
+                        "minItems": 1,
+                        "maxItems": 2,
+                        "description": '来自 system 说明书目录的编号，如 ["05-rules"]；目录中不存在的编号不要猜。',
                     }
                 },
+                "required": ["keys"],
+                "additionalProperties": False,
             },
         },
     },
@@ -94,9 +99,26 @@ for _tool in SCHOOL_TOOLS:
             "term": {"type": "string", "description": "查询学期"},
             **({"class_id": {"type": "integer", "description": "只查询一个班时填写页面或查询确认的班级ID；不填查全校"}} if _tool["function"]["name"] == "lookup_schedule_setup" else {}),
         }
+        _tool["function"]["parameters"]["additionalProperties"] = False
+        if _tool["function"]["name"] == "lookup_rules":
+            _tool["function"]["parameters"]["properties"]["rule_group_id"] = {
+                "type": "integer",
+                "description": "指定规则组 ID；省略时查询当前启用规则组",
+            }
 SCHOOL_TOOLS.append({"type": "function", "function": {
-    "name": "lookup_generation_status", "description": "查询本校已有排课生成长任务的真实状态；默认使用当前页面任务编号，不发起生成。",
-    "parameters": {"type": "object", "properties": {"job_id": {"type": "string", "description": "已知任务编号，不得编造；当前页有任务时可省略"}}},
+    "name": "lookup_generation_status",
+    "description": "只读查询本校已有排课生成长任务的真实状态；使用明确提供的 job_id，否则使用当前页面任务编号。不会发起、重试或取消生成。",
+    "parameters": {
+        "type": "object",
+        "properties": {
+            "job_id": {
+                "type": "string",
+                "pattern": "^[a-f0-9]{32}$",
+                "description": "已知任务编号；不得编造。当前页面已有任务时可省略。",
+            }
+        },
+        "additionalProperties": False,
+    },
 }})
 
 
@@ -106,6 +128,41 @@ def _args(arguments: str) -> dict:
     except json.JSONDecodeError:
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _tool_response(
+    name: str,
+    *,
+    message: str,
+    ok: bool = True,
+    code: str = "OK",
+    data: object = None,
+    scope: dict | None = None,
+    retryable: bool = False,
+) -> str:
+    """统一 Agent 工具响应；data 初期保留文本，便于兼容现有查询实现。"""
+    status = "success" if ok else "error"
+    if ok and code == "EMPTY_RESULT":
+        status = "empty"
+    return json.dumps({
+        "ok": ok,
+        "status": status,
+        "code": code,
+        "message": message,
+        "data": data if data is not None else {"text": message} if ok else None,
+        "scope": scope or {},
+        "retryable": retryable,
+        "meta": {"tool": name},
+    }, ensure_ascii=False)
+
+
+def _tool_scope(args: dict, page_context: dict | None) -> dict:
+    context = page_context or {}
+    return {
+        key: args.get(key) or context.get(key)
+        for key in ("academic_year", "term", "class_id", "rule_group_id", "job_id")
+        if args.get(key) or context.get(key)
+    }
 
 
 def _when(weekdays: list[int], periods: list[int]) -> str:
@@ -313,17 +370,22 @@ async def execute_school_tool(
         args = _args(arguments)
         scope = {"academic_year": args.get("academic_year") or context.get("academic_year"), "term": args.get("term") or context.get("term")}
         if name == "lookup_generation_status":
-            return await lookup_generation_status(str(args.get("job_id") or context.get("job_id") or ""), tenant_id)
+            result = await lookup_generation_status(str(args.get("job_id") or context.get("job_id") or ""), tenant_id)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "未找到" in result or "没有可核对" in result else "OK", scope=_tool_scope(args, page_context))
         if name == "lookup_teachers":
-            return await lookup_teachers(session, tenant_id, subject=str(args.get("subject") or ""), keyword=str(args.get("keyword") or ""), **scope)
+            result = await lookup_teachers(session, tenant_id, subject=str(args.get("subject") or ""), keyword=str(args.get("keyword") or ""), **scope)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有匹配" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_schedule_setup":
-            return await lookup_schedule_setup(session, tenant_id, class_id=args.get("class_id"), **scope)
+            result = await lookup_schedule_setup(session, tenant_id, class_id=args.get("class_id"), **scope)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没设置" in result or "未找到指定班级" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_rules":
-            return await lookup_rules(session, tenant_id, rule_group_id=args.get("rule_group_id") or context.get("rule_group_id"), **scope)
+            result = await lookup_rules(session, tenant_id, rule_group_id=args.get("rule_group_id") or context.get("rule_group_id"), **scope)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有规则组" in result or "未找到所选规则组" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_playbook":
-            return lookup_playbook(arguments)
+            result = lookup_playbook(arguments)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有对上" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         names = ", ".join(t["function"]["name"] for t in SCHOOL_TOOLS)
-        return f"没有名为「{name}」的工具。可用工具：{names}"
+        return _tool_response(name, ok=False, code="INVALID_ARGUMENT", message=f"没有名为「{name}」的工具。可用工具：{names}")
 
     try:
         return await dispatch()
@@ -334,10 +396,10 @@ async def execute_school_tool(
             return await dispatch()
         except Exception:
             logger.exception("assistant.tool retry_fail name=%s", name)
-            return f"工具 {name} 暂时无法连接。请稍后重试，或让老师自己到对应页面核对。"
+            return _tool_response(name, ok=False, code="TOOL_UNAVAILABLE", message=f"工具 {name} 暂时无法连接。请稍后重试，或让老师自己到对应页面核对。", retryable=True)
     except Exception:
         logger.exception("assistant.tool fail name=%s args=%s", name, (arguments or "")[:120])
-        return f"工具 {name} 查询失败。请换个问法，或让老师自己到对应页面核对。"
+        return _tool_response(name, ok=False, code="INTERNAL_ERROR", message=f"工具 {name} 查询失败。请换个问法，或让老师自己到对应页面核对。")
 
 
 async def lookup_generation_status(job_id: str, tenant_id: int) -> str:
