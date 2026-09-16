@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 import time
 from collections.abc import Awaitable, Callable
 from typing import cast
@@ -24,10 +25,18 @@ from app.ai.resilience import provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.progress import Progress, report_progress
 from app.ai.runtime import AssistantRuntime
-from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor
+from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor, SupervisorContext
 from app.ai.runs.service import RUN_TIMEOUT
 
 logger = logging.getLogger(__name__)
+
+
+async def _run_supervisor(supervisor, execute, *, context: SupervisorContext, on_event):
+    """兼容旧版测试/插件 Supervisor，同时优先使用上下文契约。"""
+    kwargs = {"on_event": on_event}
+    if "context" in inspect.signature(supervisor.run).parameters:
+        kwargs["context"] = context
+    return await supervisor.run(execute, **kwargs)
 
 # 工具循环已消耗超过该秒数才失败时，不再走降级路径（降级还要两轮模型调用，必然撞总闸）。
 _FALLBACK_MAX_SPENT = 20
@@ -215,8 +224,16 @@ async def handle_assistant_turn(
         async def trace_readiness(kind: str, data: dict) -> None:
             await runtime.emit(kind, data)
 
-        report = await cast(SchedulingReadinessSupervisor, runtime.service("readiness_supervisor")).run(
-            execute_readiness_task,
+        report = await _run_supervisor(cast(SchedulingReadinessSupervisor, runtime.service("readiness_supervisor")), execute_readiness_task,
+            context=SupervisorContext(
+                run_id=message_id,
+                request_id=message_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                intent=decision.kind.value,
+                page_path=page_path,
+                allowed_tools=allowed_tools,
+            ),
             on_event=trace_readiness,
         )
         await runtime.emit("supervisor.completed", {
@@ -253,8 +270,16 @@ async def handle_assistant_turn(
         async def trace_diagnosis(kind: str, data: dict) -> None:
             await runtime.emit(kind, data)
 
-        report = await cast(SchedulingDiagnosisSupervisor, runtime.service("diagnosis_supervisor")).run(
-            execute_diagnosis_task,
+        report = await _run_supervisor(cast(SchedulingDiagnosisSupervisor, runtime.service("diagnosis_supervisor")), execute_diagnosis_task,
+            context=SupervisorContext(
+                run_id=message_id,
+                request_id=message_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                intent=decision.kind.value,
+                page_path=page_path,
+                allowed_tools=allowed_tools,
+            ),
             on_event=trace_diagnosis,
         )
         await runtime.emit("supervisor.completed", {

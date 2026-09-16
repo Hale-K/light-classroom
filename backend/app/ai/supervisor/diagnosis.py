@@ -6,6 +6,7 @@ from typing import Any
 
 from app.ai.supervisor.contracts import (
     SupervisorKind,
+    SupervisorContext,
     SupervisorReport,
     SupervisorResult,
     SupervisorResultStatus,
@@ -49,18 +50,20 @@ class SchedulingDiagnosisSupervisor:
         self,
         execute: DiagnosisExecutor,
         *,
+        context: SupervisorContext | None = None,
         on_event: DiagnosisEvent | None = None,
     ) -> SupervisorReport:
         results: list[SupervisorResult] = []
         for task in self.tasks:
             if on_event:
-                await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label})
+                await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label, **(context.trace_data(task) if context else {})})
             try:
                 output = (await execute(task)).strip()
                 result = SupervisorResult(
                     task_id=task.id,
                     status=SupervisorResultStatus.SUCCEEDED,
                     summary=output,
+                    metadata=context.trace_data(task) if context else {},
                 )
                 if on_event:
                     await on_event("supervisor.task_succeeded", {"task_id": task.id})
@@ -70,6 +73,7 @@ class SchedulingDiagnosisSupervisor:
                     status=SupervisorResultStatus.FAILED,
                     summary=f"{task.label}检查失败",
                     error=str(exc)[:500],
+                    metadata=context.trace_data(task) if context else {},
                 )
                 if on_event:
                     await on_event("supervisor.task_failed", {"task_id": task.id, "error": str(exc)[:500]})

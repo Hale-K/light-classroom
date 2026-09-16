@@ -10,6 +10,49 @@ from enum import StrEnum
 from typing import Any
 
 
+@dataclass(frozen=True, slots=True)
+class SupervisorContext:
+    """一次 Supervisor 调用的最小可信上下文。
+
+    只携带路由和授权所需的元数据；业务大对象通过引用或子任务工具读取，
+    不把主 Agent 的完整对话历史复制给每个子任务。
+    """
+
+    run_id: str | None = None
+    request_id: str | None = None
+    tenant_id: int | None = None
+    user_id: int | None = None
+    intent: str | None = None
+    page_path: str | None = None
+    allowed_tools: frozenset[str] = frozenset()
+    metadata: dict[str, Any] = field(default_factory=dict)
+
+    def for_task(self, task: "SupervisorTask") -> "SupervisorContext":
+        """返回仅保留当前任务工具权限的上下文副本。"""
+        return SupervisorContext(
+            run_id=self.run_id,
+            request_id=self.request_id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            intent=self.intent,
+            page_path=self.page_path,
+            allowed_tools=self.allowed_tools.intersection(task.allowed_tools),
+            metadata={**self.metadata, "task_id": task.id},
+        )
+
+    def trace_data(self, task: "SupervisorTask" | None = None) -> dict[str, Any]:
+        data: dict[str, Any] = {
+            "run_id": self.run_id,
+            "request_id": self.request_id,
+            "tenant_id": self.tenant_id,
+            "user_id": self.user_id,
+            "intent": self.intent,
+        }
+        if task is not None:
+            data.update({"task_id": task.id, "allowed_tools": sorted(self.for_task(task).allowed_tools)})
+        return {key: value for key, value in data.items() if value is not None}
+
+
 class SupervisorKind(StrEnum):
     READINESS = "readiness"
     DIAGNOSIS = "diagnosis"
