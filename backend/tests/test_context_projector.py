@@ -78,3 +78,28 @@ def test_project_messages_drops_tool_and_operational_noise_without_summarizing_i
         {"role": "user", "content": "查一下数学老师"},
         {"role": "assistant", "content": "数学老师有 3 位。"},
     ]
+
+
+def test_project_messages_keeps_only_tool_conclusion_and_evidence_id():
+    messages = [{
+        "role": "tool", "message_kind": "tool_result",
+        "content": "完整搜索原文和大量无关字段",
+        "conclusion": "数学教师共 3 位",
+        "evidence_id": "teachers:2026-1:math",
+    }]
+
+    assert project_messages(messages) == [{
+        "role": "assistant",
+        "content": "工具结论：数学教师共 3 位\n证据ID：teachers:2026-1:math",
+    }]
+
+
+def test_project_messages_deduplicates_stale_and_retry_results():
+    messages = [
+        {"role": "assistant", "content": "正在重试", "message_kind": "retry"},
+        {"role": "assistant", "content": "已过期结果", "stale": True},
+        {"role": "assistant", "content": "规则组有 2 个。"},
+        {"role": "assistant", "content": "规则组有 2 个。"},
+    ]
+
+    assert project_messages(messages) == [{"role": "assistant", "content": "规则组有 2 个。"}]

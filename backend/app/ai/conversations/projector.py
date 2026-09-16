@@ -33,8 +33,10 @@ def is_model_visible(message: dict) -> bool:
     """Return whether a durable/UI message may be replayed to the model."""
     # A client must not be able to hide its latest instruction and make the
     # assistant accidentally continue an older user request.
-    if message.get("role") == "tool" or message.get("message_kind") in {"tool_result", "operational"}:
+    if message.get("stale") or message.get("message_kind") in {"retry", "operational"}:
         return False
+    if message.get("role") == "tool" or message.get("message_kind") == "tool_result":
+        return bool(message.get("conclusion") and message.get("evidence_id"))
     if message.get("role") == "user":
         return True
     if message.get("model_visible") is False:
@@ -57,11 +59,24 @@ def project_messages(
     for item in messages:
         role = item.get("role")
         content = str(item.get("content") or "").strip()
-        if role not in ("user", "assistant", "system") or not content:
+        if role not in ("user", "assistant", "system", "tool") or not content:
+            continue
+        if item.get("stale") or item.get("message_kind") in {"retry", "operational"}:
+            continue
+        if item.get("message_kind") == "tool_result":
+            if not item.get("conclusion") or not item.get("evidence_id"):
+                continue
+            role, content = "assistant", (
+                f"工具结论：{str(item['conclusion']).strip()}\n"
+                f"证据ID：{str(item['evidence_id']).strip()}"
+            )
+        elif role == "tool":
             continue
         candidate = {**item, "role": role, "content": content}
         if is_model_visible(candidate):
-            projected.append({"role": role, "content": content})
+            compact = {"role": role, "content": content}
+            if not any(existing == compact for existing in projected):
+                projected.append(compact)
     if limit is not None:
         projected = projected[-limit:]
     if token_budget is None:
