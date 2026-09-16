@@ -18,6 +18,7 @@ class AiRun(TenantMixin, SQLModel, table=True):
     message: str = Field(default="已收到，正在准备处理", max_length=300)
     events: list[dict] = Field(default_factory=list, sa_type=JSON)
     result: dict | None = Field(default=None, sa_type=JSON)
+    checkpoint: dict = Field(default_factory=dict, sa_type=JSON)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
     phase_started_at: datetime = Field(default_factory=datetime.utcnow)

@@ -75,6 +75,7 @@ def run_view(run: AiRun) -> dict:
         "id": run.id, "status": run.status, "phase": run.phase, "message": run.message,
         # 原始轨迹可能含模型上下文和查询结果，只保留给受控诊断通道；老师界面只收进度投影。
         "events": [event for event in run.events if event.get("visibility") != "internal"], "result": run.result,
+        "checkpoint": run.checkpoint or {},
         "execution": execution_view(run.events or [], status=run.status),
         "elapsed_seconds": max(0, int(((now if run.status == 'running' else run.updated_at) - run.created_at).total_seconds())),
         "phase_elapsed_seconds": max(0, int((now - run.phase_started_at).total_seconds())),
@@ -185,6 +186,10 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
     from app.models.org import User
 
     events: list[dict] = []
+    checkpoint: dict = {
+        "version": 1, "stage": "received", "current_task": None,
+        "completed_tasks": [], "failed_tasks": [], "retry_count": 0,
+    }
 
     def inbox_messages(messages):
         out = []
@@ -254,7 +259,24 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
 
     async def trace(kind: str, data: dict) -> None:
         events.append(trace_event(kind, data))
-        if not await persist(events=events[-100:]):
+        if kind == "supervisor.task_started":
+            checkpoint["stage"] = "supervisor"
+            checkpoint["current_task"] = data.get("task_id")
+        elif kind == "supervisor.task_succeeded":
+            task_id = data.get("task_id")
+            if task_id and task_id not in checkpoint["completed_tasks"]:
+                checkpoint["completed_tasks"].append(task_id)
+            checkpoint["current_task"] = None
+        elif kind == "supervisor.task_failed":
+            task_id = data.get("task_id")
+            if task_id and task_id not in checkpoint["failed_tasks"]:
+                checkpoint["failed_tasks"].append(task_id)
+            checkpoint["current_task"] = None
+            checkpoint["retry_count"] += 1
+        elif kind == "supervisor.completed":
+            checkpoint["stage"] = "supervisor_completed"
+            checkpoint["current_task"] = None
+        if not await persist(events=events[-100:], checkpoint=checkpoint):
             raise asyncio.CancelledError()
 
     try:
@@ -295,6 +317,9 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
                 await session.rollback()  # Also discard any uncommitted proposal.
                 return
             run.result = asdict(result)
+            checkpoint["stage"] = "done"
+            checkpoint["current_task"] = None
+            run.checkpoint = checkpoint
             run.status = "done"
             run.phase = "done"
             run.message = "处理完成，请查看回答" if not result.plan else "规则草稿已准备，等待你确认"
