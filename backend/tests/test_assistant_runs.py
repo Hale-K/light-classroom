@@ -36,7 +36,14 @@ def test_public_run_view_exposes_supervisor_status_without_private_trace():
         "mode": "supervisor",
         "multi_agent": False,
         "kind": "readiness",
-        "tasks": [{"id": "schedule_setup", "label": "学期与课位", "status": "succeeded"}],
+        "tasks": [{
+            "id": "schedule_setup",
+            "label": "学期与课位",
+            "status": "succeeded",
+            "attempt": 1,
+            "retry_count": 0,
+            "allowed_tools": [],
+        }],
     }
     assert "私有" not in str(view["execution"])
 

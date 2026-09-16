@@ -40,6 +40,7 @@ def execution_view(events: list[dict], *, status: str) -> dict:
             "assistant.supervisor.task_started",
             "assistant.supervisor.task_succeeded",
             "assistant.supervisor.task_failed",
+            "assistant.supervisor.task_retry",
         }:
             mode = "supervisor"
             task_id = data.get("task_id")
@@ -49,7 +50,16 @@ def execution_view(events: list[dict], *, status: str) -> dict:
                 "id": task_id,
                 "label": str(data.get("label") or task_id)[:40],
                 "status": "running",
+                "attempt": 1,
+                "retry_count": 0,
+                "allowed_tools": sorted(str(tool)[:60] for tool in (data.get("allowed_tools") or []) if tool),
             })
+            if event_type.endswith("task_retry"):
+                task["attempt"] = max(1, int(data.get("attempt") or task["attempt"] + 1))
+                task["retry_count"] = max(0, int(data.get("retry_count") or task["retry_count"] + 1))
+                task["status"] = "running"
+            elif data.get("attempt"):
+                task["attempt"] = max(1, int(data["attempt"]))
             if event_type.endswith("task_succeeded"):
                 task["status"] = "succeeded"
             elif event_type.endswith("task_failed"):

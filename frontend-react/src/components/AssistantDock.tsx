@@ -119,7 +119,14 @@ function readExecution(raw: unknown): AssistantExecution | undefined {
     if (!item || typeof item !== 'object') return []
     const task = item as Record<string, unknown>
     if (typeof task.id !== 'string' || typeof task.label !== 'string' || !['running', 'succeeded', 'failed'].includes(String(task.status))) return []
-    return [{ id: task.id.slice(0, 40), label: task.label.slice(0, 40), status: task.status as AssistantExecution['tasks'][number]['status'] }]
+    return [{
+      id: task.id.slice(0, 40),
+      label: task.label.slice(0, 40),
+      status: task.status as AssistantExecution['tasks'][number]['status'],
+      attempt: typeof task.attempt === 'number' ? task.attempt : undefined,
+      retry_count: typeof task.retry_count === 'number' ? task.retry_count : undefined,
+      allowed_tools: Array.isArray(task.allowed_tools) ? task.allowed_tools.filter((tool): tool is string => typeof tool === 'string').slice(0, 8) : undefined,
+    }]
   }) : []
   return {
     mode: value.mode as AssistantExecution['mode'],
@@ -134,16 +141,33 @@ function ExecutionBadge({ execution }: { execution?: AssistantExecution }) {
   const label = execution.mode === 'supervisor'
     ? `${execution.kind === 'diagnosis' ? '排课诊断' : '排课准备'} · Supervisor 编排`
     : execution.mode === 'agent' ? '单 Agent 执行' : '直接处理'
+  const statusText = (status: AssistantExecution['tasks'][number]['status']) => status === 'succeeded' ? '完成' : status === 'failed' ? '失败' : '进行中'
   return (
-    <div className="assist-execution" role="status">
-      <strong>{label}</strong>
-      {execution.mode === 'supervisor' && <span>多 Agent：{execution.multi_agent ? '已启用' : '未启用独立子 Agent'}</span>}
-      {execution.tasks.length > 0 && (
-        <ul aria-label="检查项状态">
-          {execution.tasks.map((task) => (
-            <li key={task.id}>{task.status === 'succeeded' ? '✓' : task.status === 'failed' ? '!' : '…'} {task.label} · {task.status === 'succeeded' ? '完成' : task.status === 'failed' ? '失败' : '进行中'}</li>
-          ))}
-        </ul>
+    <div className="assist-execution" role="status" aria-label="Agent 执行树">
+      {execution.mode === 'supervisor' ? (
+        <div className="assist-execution-tree">
+          <div className="assist-execution-node assist-execution-root">
+            <span className="assist-execution-dot" aria-hidden="true" />
+            <strong>主 Agent</strong><small>负责理解需求与汇总结果</small>
+          </div>
+          <div className="assist-execution-branch">
+            <div className="assist-execution-node assist-execution-supervisor">
+              <span className="assist-execution-dot" aria-hidden="true" />
+              <strong>{label}</strong><small>受控编排层 · {execution.multi_agent ? '多 Agent' : '工具子任务'}</small>
+            </div>
+            {execution.tasks.length > 0 && <ul className="assist-execution-children" aria-label="Supervisor 子任务">
+              {execution.tasks.map((task) => (
+                <li key={task.id} className={`assist-execution-node assist-execution-leaf is-${task.status}`}>
+                  <span className="assist-execution-dot" aria-hidden="true" />
+                  <span className="assist-execution-task-copy"><strong>{task.label}</strong><small>{statusText(task.status)}{task.retry_count ? ` · 重试 ${task.retry_count} 次` : ''}</small></span>
+                  {task.allowed_tools?.length ? <span className="assist-execution-tools" title={`允许工具：${task.allowed_tools.join('、')}`}>{task.allowed_tools.length} 个工具</span> : null}
+                </li>
+              ))}
+            </ul>}
+          </div>
+        </div>
+      ) : (
+        <><strong>{label}</strong>{execution.tasks.length > 0 && <ul aria-label="检查项状态">{execution.tasks.map((task) => <li key={task.id}>{task.status === 'succeeded' ? '✓' : task.status === 'failed' ? '!' : '…'} {task.label} · {statusText(task.status)}</li>)}</ul>}</>
       )}
     </div>
   )

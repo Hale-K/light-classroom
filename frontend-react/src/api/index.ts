@@ -1140,7 +1140,14 @@ export type AssistantExecution = {
   mode: 'pending' | 'direct' | 'agent' | 'supervisor'
   multi_agent: boolean
   kind: 'readiness' | 'diagnosis' | null
-  tasks: { id: string; label: string; status: 'running' | 'succeeded' | 'failed' }[]
+  tasks: {
+    id: string
+    label: string
+    status: 'running' | 'succeeded' | 'failed'
+    attempt?: number
+    retry_count?: number
+    allowed_tools?: string[]
+  }[]
 }
 
 export type AssistantRun = {
