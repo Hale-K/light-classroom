@@ -1,5 +1,6 @@
 """教务只读工具：schema 完整性、说明书取回、派发兜底。数据库查询部分不在单测覆盖。"""
 import asyncio
+import json
 from unittest.mock import AsyncMock
 
 from app.ai.tools.school import SCHOOL_TOOLS, _when, execute_school_tool, lookup_playbook
@@ -37,13 +38,19 @@ def test_execute_dispatches_and_never_raises():
     text = asyncio.run(
         execute_school_tool("lookup_playbook", '{"keys":["04-teachers"]}', session=None, tenant_id=1)
     )
-    assert text.startswith("已取回的说明书")
+    result = json.loads(text)
+    assert result["ok"] is True
+    assert result["data"]["text"].startswith("已取回的说明书")
 
     unknown = asyncio.run(execute_school_tool("no_such_tool", "{}", session=None, tenant_id=1))
-    assert "没有名为" in unknown and "lookup_playbook" in unknown
+    unknown_result = json.loads(unknown)
+    assert unknown_result["ok"] is False
+    assert "没有名为" in unknown_result["message"]
 
     bad = asyncio.run(execute_school_tool("lookup_playbook", "{{{", session=None, tenant_id=1))
-    assert "编号没有对上" in bad
+    bad_result = json.loads(bad)
+    assert bad_result["status"] == "empty"
+    assert "编号没有对上" in bad_result["message"]
 
 
 def test_read_only_tool_retries_transient_failure(monkeypatch):
@@ -55,5 +62,8 @@ def test_read_only_tool_retries_transient_failure(monkeypatch):
 
     text = asyncio.run(execute_school_tool("lookup_generation_status", '{"job_id":"a"}', session=None, tenant_id=1))
 
-    assert text == "查询成功"
+    result = json.loads(text)
+    assert result["ok"] is True
+    assert result["code"] == "OK"
+    assert result["data"]["text"] == "查询成功"
     assert call.await_count == 2
