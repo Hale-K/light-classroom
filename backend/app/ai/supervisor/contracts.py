@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
+import json
 
 
 @dataclass(frozen=True, slots=True)
@@ -132,6 +133,58 @@ class SupervisorResult:
     summary: str = ""
     error: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
+def normalize_supervisor_result(task: SupervisorTask, output: Any, *, metadata: dict[str, Any] | None = None) -> SupervisorResult:
+    """把子任务输出规范化为可汇总的结构化结果。"""
+    if isinstance(output, SupervisorResult):
+        return output
+    payload: dict[str, Any] = {}
+    if isinstance(output, dict):
+        payload = output
+    elif isinstance(output, str):
+        text = output.strip()
+        try:
+            parsed = json.loads(text)
+            if isinstance(parsed, dict):
+                payload = parsed
+        except json.JSONDecodeError:
+            pass
+        if not payload:
+            payload = {"summary": text}
+            for line in text.splitlines():
+                for marker, key in (("事实：", "facts"), ("缺少：", "missing"), ("下一步：", "next_steps")):
+                    if line.strip().startswith(marker):
+                        payload[key] = [item.strip() for item in line.split("：", 1)[1].replace("；", "、").split("、") if item.strip()]
+    def values(key: str) -> tuple[str, ...]:
+        value = payload.get(key, ())
+        if isinstance(value, str):
+            value = [value]
+        return tuple(str(item).strip() for item in value if str(item).strip()) if isinstance(value, (list, tuple)) else ()
+    return SupervisorResult(
+        task_id=task.id,
+        status=SupervisorResultStatus.SUCCEEDED,
+        facts=values("facts"), missing=values("missing"), next_steps=values("next_steps"),
+        summary=str(payload.get("summary") or payload.get("message") or output or "").strip(),
+        metadata=metadata or {},
+    )
+
+
+def aggregate_report(kind: SupervisorKind, results: tuple[SupervisorResult, ...], tasks: tuple[SupervisorTask, ...]) -> "SupervisorReport":
+    def unique(field: str) -> tuple[str, ...]:
+        seen: set[str] = set()
+        output: list[str] = []
+        for result in results:
+            for item in getattr(result, field):
+                if item not in seen:
+                    seen.add(item)
+                    output.append(item)
+        return tuple(output)
+    sections = [f"### {task.label}\n{result.summary}" for task, result in zip(tasks, results) if result.summary]
+    return SupervisorReport(
+        kind=kind, results=results, summary="\n\n".join(sections),
+        facts=unique("facts"), missing=unique("missing"), next_steps=unique("next_steps"),
+    )
 
 
 @dataclass(frozen=True, slots=True)

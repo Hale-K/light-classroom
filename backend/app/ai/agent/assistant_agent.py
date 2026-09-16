@@ -239,6 +239,9 @@ async def handle_assistant_turn(
         await runtime.emit("supervisor.completed", {
             "kind": report.kind.value,
             "failed_tasks": list(report.failed_tasks),
+            "facts": list(report.facts),
+            "missing": list(report.missing),
+            "next_steps": list(report.next_steps),
         })
         return AssistantTurn(
             text=guidance + "\n\n### 排课细项检查\n\n" + (report.summary or "排课细项没有返回结果，请稍后重试。"),
@@ -292,6 +295,9 @@ async def handle_assistant_turn(
         await runtime.emit("supervisor.completed", {
             "kind": report.kind.value,
             "failed_tasks": list(report.failed_tasks),
+            "facts": list(report.facts),
+            "missing": list(report.missing),
+            "next_steps": list(report.next_steps),
         })
         return AssistantTurn(
             text=report.summary or "排课诊断没有返回结果，请到排课页查看任务记录。",

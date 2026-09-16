@@ -63,3 +63,21 @@ async def test_readiness_supervisor_retries_only_failed_task():
     assert report.failed_tasks == ()
     assert attempts == {"schedule_setup": 1, "teacher_assignments": 2, "rules": 1}
     assert events == ["teacher_assignments"]
+
+
+@pytest.mark.asyncio
+async def test_readiness_supervisor_aggregates_structured_subtask_results():
+    async def execute(task, task_context):
+        return {
+            "summary": f"{task.id} 已完成",
+            "facts": ["学期已配置" if task.id == "schedule_setup" else "教师关系已配置"],
+            "missing": ["规则组"],
+            "next_steps": ["建立规则组"],
+        }
+
+    report = await SchedulingReadinessSupervisor().run(execute)
+
+    assert report.facts == ("学期已配置", "教师关系已配置")
+    assert report.missing == ("规则组",)
+    assert report.next_steps == ("建立规则组",)
+    assert report.results[0].summary == "schedule_setup 已完成"

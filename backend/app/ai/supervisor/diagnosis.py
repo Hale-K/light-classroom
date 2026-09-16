@@ -8,6 +8,8 @@ from app.ai.supervisor.contracts import (
     SupervisorKind,
     SupervisorContext,
     SupervisorTaskContext,
+    aggregate_report,
+    normalize_supervisor_result,
     SupervisorReport,
     SupervisorResult,
     SupervisorResultStatus,
@@ -65,8 +67,8 @@ class SchedulingDiagnosisSupervisor:
                 if on_event:
                     await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label, "attempt": attempts + 1, **task_context.trace_data()})
                 try:
-                    output = (await execute(task, task_context)).strip()
-                    result = SupervisorResult(task_id=task.id, status=SupervisorResultStatus.SUCCEEDED, summary=output, metadata=task_context.trace_data())
+                    output = await execute(task, task_context)
+                    result = normalize_supervisor_result(task, output, metadata=task_context.trace_data())
                     if on_event:
                         await on_event("supervisor.task_succeeded", {"task_id": task.id, "attempt": attempts + 1})
                     break
@@ -82,13 +84,4 @@ class SchedulingDiagnosisSupervisor:
                     break
             results.append(result)
 
-        sections = [
-            f"### {task.label}\n{result.summary}"
-            for task, result in zip(self.tasks, results)
-            if result.summary
-        ]
-        return SupervisorReport(
-            kind=self.kind,
-            results=tuple(results),
-            summary="\n\n".join(sections),
-        )
+        return aggregate_report(self.kind, tuple(results), self.tasks)
