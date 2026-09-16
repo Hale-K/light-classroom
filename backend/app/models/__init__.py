@@ -23,6 +23,7 @@ try:
     from app.ai.actions.models import AiAction  # noqa: F401
     from app.ai.runs.models import AiRun  # noqa: F401
     from app.ai.conversations.models import AiConversation  # noqa: F401
+    from app.ai.memory.models import AiMemory  # noqa: F401
     from app.ai.intent.models import AiIntentExample  # noqa: F401
 except ImportError:
     pass

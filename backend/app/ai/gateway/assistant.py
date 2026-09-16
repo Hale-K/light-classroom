@@ -18,6 +18,7 @@ from app.ai.conversations import (
     project_summary,
     sync_conversation,
 )
+from app.ai.memory import memory_context, remember_messages
 from app.ai.runs import create_run, get_run, spawn_run, steer_run
 from app.ai.runs.service import RUN_TIMEOUT
 
@@ -109,6 +110,7 @@ class AssistantGateway:
         request_id: str,
         request: AssistantRequest,
     ) -> dict:
+        await remember_messages(session, tenant_id, user_id, request.messages)
         payload = {
             "messages": request.messages,
             "page_title": request.page_title,
@@ -120,6 +122,12 @@ class AssistantGateway:
         }
         conversation = await get_conversation(session, tenant_id, user_id)
         payload["memory_summary"] = project_summary(conversation.summary if conversation else "")
+        latest_query = str(request.messages[-1].get("content") or "") if request.messages else ""
+        long_term = await memory_context(session, tenant_id, user_id, latest_query)
+        if long_term:
+            payload["memory_summary"] = "\n".join(filter(None, [
+                payload["memory_summary"], "长期用户记忆：", long_term,
+            ]))
         payload["context_state"] = project_state(request.messages)
         state = payload["context_state"]
         if state["latest_request"] or state["confirmed"]:
