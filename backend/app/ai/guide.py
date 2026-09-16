@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 from app.ai.prompt.messages import GREET_REPLY
+import operator
+import re
 
 _GREET = {"你好", "您好", "hi", "hello", "在吗", "在么", "嗨"}
+_ARITHMETIC = re.compile(r"^\s*(\d{1,9})\s*([+\-*/×÷])\s*(\d{1,9})\s*(?:=\s*)?[?？]?\s*$")
+_ARITHMETIC_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul, "×": operator.mul, "/": operator.truediv, "÷": operator.truediv}
 _RULE_JUMP_PATH = "/scheduling?tab=rules"
 
 
@@ -32,6 +36,19 @@ class AssistantUiGuide:
         return None
 
     @staticmethod
+    def fast_reply(text: str) -> str | None:
+        """处理无需模型、工具或向量检索的确定性小问题。"""
+        match = _ARITHMETIC.fullmatch((text or "").strip())
+        if not match:
+            return None
+        left, symbol, right = int(match.group(1)), match.group(2), int(match.group(3))
+        if symbol in {"/", "÷"} and right == 0:
+            return None
+        result = _ARITHMETIC_OPS[symbol](left, right)
+        rendered = str(int(result)) if isinstance(result, float) and result.is_integer() else str(result)
+        return f"答案是 {rendered}。"
+
+    @staticmethod
     def degraded_reply(query: str, page_path: str | None) -> str:
         """模型全不可用时，按当前业务页给出无副作用的操作建议。"""
         joined = f"{query} {page_path or ''}"
@@ -55,4 +72,5 @@ class AssistantUiGuide:
 
 rule_jumps = AssistantUiGuide.rule_jumps
 local_reply = AssistantUiGuide.local_reply
+fast_reply = AssistantUiGuide.fast_reply
 degraded_reply = AssistantUiGuide.degraded_reply

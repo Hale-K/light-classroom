@@ -16,6 +16,7 @@ from app.ai.agent.context import blocked_destructive_request, last_user_message,
 from app.ai.conversations import project_messages, project_summary
 from app.ai.gateway import ModelGatewayService, ToolGatewayService
 from app.ai.guide import degraded_reply as _local_degraded_reply
+from app.ai.guide import fast_reply as _local_fast_reply
 from app.ai.guide import rule_jumps
 from app.ai.harness import HarnessProfile, HarnessRouterService
 from app.ai.intent import AssistantIntent, IntentGatewayService
@@ -184,6 +185,11 @@ async def handle_assistant_turn(
     await runtime.emit("intent.classified", decision.trace_data())
     harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     await runtime.emit("harness.selected", harness.trace_data())
+    if harness.name == "direct":
+        fast = _local_fast_reply(query)
+        if fast is not None:
+            await runtime.progress("completed", "已快速完成本地计算")
+            return AssistantTurn(text=fast, think=["Router 判定为快速处理，未调用模型或工具"])
     if decision.kind is AssistantIntent.READINESS:
         from app.api.v1.onboarding import load_onboarding_status
         from app.ai.supervisor.readiness import preparation_guidance
