@@ -16,7 +16,7 @@ async def test_diagnosis_intent_uses_supervisor_without_model(monkeypatch):
     class FakeDiagnosisSupervisor:
         tasks = ()
 
-        async def run(self, execute, *, context, on_event=None):
+        async def run(self, execute, *, context, parallel=False, on_event=None):
             assert context.tenant_id == 1
             return SupervisorReport(kind=SupervisorKind.DIAGNOSIS, summary="已收集排课失败证据")
 

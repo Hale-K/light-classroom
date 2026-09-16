@@ -1,6 +1,7 @@
 """排课失败诊断 Supervisor 的第一版只读证据编排器。"""
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -55,10 +56,10 @@ class SchedulingDiagnosisSupervisor:
         *,
         context: SupervisorContext | None = None,
         max_retries: int = 1,
+        parallel: bool = False,
         on_event: DiagnosisEvent | None = None,
     ) -> SupervisorReport:
-        results: list[SupervisorResult] = []
-        for task in self.tasks:
+        async def run_task(task: SupervisorTask) -> SupervisorResult:
             task_context = context.task_context(task) if context else SupervisorTaskContext(
                 None, None, None, None, None, None, task.id, task.label, task.instruction, task.allowed_tools,
             )
@@ -82,6 +83,13 @@ class SchedulingDiagnosisSupervisor:
                     if on_event:
                         await on_event("supervisor.task_failed", {"task_id": task.id, "attempt": attempts + 1, "error": str(exc)[:500]})
                     break
-            results.append(result)
+            return result
+
+        if parallel:
+            results = list(await asyncio.gather(*(run_task(task) for task in self.tasks)))
+        else:
+            results = []
+            for task in self.tasks:
+                results.append(await run_task(task))
 
         return aggregate_report(self.kind, tuple(results), self.tasks)

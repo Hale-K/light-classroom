@@ -116,7 +116,7 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     class FakeReadinessSupervisor:
         tasks = ()
 
-        async def run(self, execute, *, context=None, on_event=None):
+        async def run(self, execute, *, context=None, parallel=False, on_event=None):
             from app.ai.supervisor import SupervisorKind, SupervisorReport
             return SupervisorReport(kind=SupervisorKind.READINESS, summary="已检查")
 

@@ -1,3 +1,4 @@
+import asyncio
 import pytest
 
 from app.ai.supervisor import SchedulingReadinessSupervisor
@@ -81,3 +82,22 @@ async def test_readiness_supervisor_aggregates_structured_subtask_results():
     assert report.missing == ("规则组",)
     assert report.next_steps == ("建立规则组",)
     assert report.results[0].summary == "schedule_setup 已完成"
+
+
+@pytest.mark.asyncio
+async def test_readiness_supervisor_can_run_checks_in_parallel():
+    active = 0
+    peak = 0
+
+    async def execute(task, task_context):
+        nonlocal active, peak
+        active += 1
+        peak = max(peak, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return f"{task.id} ok"
+
+    report = await SchedulingReadinessSupervisor().run(execute, parallel=True)
+
+    assert len(report.results) == 3
+    assert peak >= 2

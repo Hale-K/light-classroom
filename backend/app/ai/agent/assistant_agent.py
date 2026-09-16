@@ -27,6 +27,7 @@ from app.ai.runs.progress import Progress, report_progress
 from app.ai.runtime import AssistantRuntime
 from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor, SupervisorContext, SupervisorTaskContext
 from app.ai.runs.service import RUN_TIMEOUT
+from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -218,13 +219,14 @@ async def handle_assistant_turn(
             tool_name = next(iter(task_context.allowed_tools if task_context else task.allowed_tools), "")
             if not tool_name:
                 raise RuntimeError(f"任务 {task.id} 没有配置只读工具")
-            task_scope = scope if task_context is None else tool_gateway.open_scope(
-                session=session, tenant_id=task_context.tenant_id or tenant_id,
-                user_id=task_context.user_id, can_manage_rules=can_manage_rules,
-                page_context=page_context, allowed_tools=task_context.allowed_tools,
-                on_trace=on_trace,
-            )
-            return await task_scope.execute(tool_name, "{}")
+            async with AsyncSessionLocal() as task_session:
+                task_scope = tool_gateway.open_scope(
+                    session=task_session, tenant_id=task_context.tenant_id or tenant_id,
+                    user_id=task_context.user_id, can_manage_rules=can_manage_rules,
+                    page_context=page_context, allowed_tools=task_context.allowed_tools,
+                    on_trace=on_trace,
+                )
+                return await task_scope.execute(tool_name, "{}")
 
         async def trace_readiness(kind: str, data: dict) -> None:
             await runtime.emit(kind, data)
@@ -240,6 +242,7 @@ async def handle_assistant_turn(
                 page_path=page_path,
                 allowed_tools=allowed_tools,
             ),
+            parallel=True,
             on_event=trace_readiness,
         )
         await runtime.emit("supervisor.completed", {
@@ -274,13 +277,14 @@ async def handle_assistant_turn(
             tool_name = next(iter(task_context.allowed_tools if task_context else task.allowed_tools), "")
             if not tool_name:
                 raise RuntimeError(f"任务 {task.id} 没有配置只读工具")
-            task_scope = scope if task_context is None else tool_gateway.open_scope(
-                session=session, tenant_id=task_context.tenant_id or tenant_id,
-                user_id=task_context.user_id, can_manage_rules=can_manage_rules,
-                page_context=page_context, allowed_tools=task_context.allowed_tools,
-                on_trace=on_trace,
-            )
-            return await task_scope.execute(tool_name, "{}")
+            async with AsyncSessionLocal() as task_session:
+                task_scope = tool_gateway.open_scope(
+                    session=task_session, tenant_id=task_context.tenant_id or tenant_id,
+                    user_id=task_context.user_id, can_manage_rules=can_manage_rules,
+                    page_context=page_context, allowed_tools=task_context.allowed_tools,
+                    on_trace=on_trace,
+                )
+                return await task_scope.execute(tool_name, "{}")
 
         async def trace_diagnosis(kind: str, data: dict) -> None:
             await runtime.emit(kind, data)
@@ -296,6 +300,7 @@ async def handle_assistant_turn(
                 page_path=page_path,
                 allowed_tools=allowed_tools,
             ),
+            parallel=True,
             on_event=trace_diagnosis,
         )
         await runtime.emit("supervisor.completed", {
