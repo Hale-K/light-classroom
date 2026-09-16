@@ -9,9 +9,11 @@ async def test_readiness_supervisor_runs_server_owned_tasks_and_emits_events():
     seen: list[str] = []
     events: list[str] = []
 
-    async def execute(task):
+    async def execute(task, task_context):
         seen.append(task.id)
         assert len(task.allowed_tools) == 1
+        assert task_context.task_id == task.id
+        assert task_context.allowed_tools == task.allowed_tools
         return f"{task.label}已检查"
 
     async def on_event(kind, data):
@@ -29,7 +31,7 @@ async def test_readiness_supervisor_runs_server_owned_tasks_and_emits_events():
 
 @pytest.mark.asyncio
 async def test_readiness_supervisor_isolates_failed_check():
-    async def execute(task):
+    async def execute(task, task_context):
         if task.id == "teacher_assignments":
             raise RuntimeError("连接超时")
         return f"{task.id} ok"

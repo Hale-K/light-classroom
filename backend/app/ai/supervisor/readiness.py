@@ -7,6 +7,7 @@ from typing import Any
 from app.ai.supervisor.contracts import (
     SupervisorKind,
     SupervisorContext,
+    SupervisorTaskContext,
     SupervisorReport,
     SupervisorResult,
     SupervisorResultStatus,
@@ -14,7 +15,7 @@ from app.ai.supervisor.contracts import (
 )
 
 
-ReadinessExecutor = Callable[[SupervisorTask], Awaitable[str]]
+ReadinessExecutor = Callable[[SupervisorTask, SupervisorTaskContext], Awaitable[str]]
 ReadinessEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
@@ -88,15 +89,18 @@ class SchedulingReadinessSupervisor:
     ) -> SupervisorReport:
         results: list[SupervisorResult] = []
         for task in self.tasks:
+            task_context = context.task_context(task) if context else SupervisorTaskContext(
+                None, None, None, None, None, None, task.id, task.label, task.instruction, task.allowed_tools,
+            )
             if on_event:
-                await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label, **(context.trace_data(task) if context else {})})
+                await on_event("supervisor.task_started", {"task_id": task.id, "label": task.label, **task_context.trace_data()})
             try:
-                output = (await execute(task)).strip()
+                output = (await execute(task, task_context)).strip()
                 result = SupervisorResult(
                     task_id=task.id,
                     status=SupervisorResultStatus.SUCCEEDED,
                     summary=output,
-                    metadata=context.trace_data(task) if context else {},
+                    metadata=task_context.trace_data(),
                 )
                 if on_event:
                     await on_event("supervisor.task_succeeded", {"task_id": task.id})
@@ -106,7 +110,7 @@ class SchedulingReadinessSupervisor:
                     status=SupervisorResultStatus.FAILED,
                     summary=f"{task.label}检查失败",
                     error=str(exc)[:500],
-                    metadata=context.trace_data(task) if context else {},
+                    metadata=task_context.trace_data(),
                 )
                 if on_event:
                     await on_event("supervisor.task_failed", {"task_id": task.id, "error": str(exc)[:500]})

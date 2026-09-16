@@ -7,9 +7,10 @@ from app.ai.supervisor import SchedulingDiagnosisSupervisor
 async def test_diagnosis_supervisor_collects_fixed_evidence_tasks():
     seen: list[str] = []
 
-    async def execute(task):
+    async def execute(task, task_context):
         seen.append(task.id)
         assert task.allowed_tools
+        assert task_context.task_id == task.id
         return f"{task.id} evidence"
 
     report = await SchedulingDiagnosisSupervisor().run(execute)
@@ -22,7 +23,7 @@ async def test_diagnosis_supervisor_collects_fixed_evidence_tasks():
 
 @pytest.mark.asyncio
 async def test_diagnosis_supervisor_keeps_other_evidence_after_failure():
-    async def execute(task):
+    async def execute(task, task_context):
         if task.id == "generation_status":
             raise RuntimeError("状态服务不可用")
         return f"{task.id} evidence"

@@ -16,7 +16,8 @@ async def test_diagnosis_intent_uses_supervisor_without_model(monkeypatch):
     class FakeDiagnosisSupervisor:
         tasks = ()
 
-        async def run(self, execute, *, on_event=None):
+        async def run(self, execute, *, context, on_event=None):
+            assert context.tenant_id == 1
             return SupervisorReport(kind=SupervisorKind.DIAGNOSIS, summary="已收集排课失败证据")
 
     model_reply = AsyncMock(side_effect=AssertionError("诊断 Supervisor 不应调用模型 Agent"))

@@ -52,6 +52,50 @@ class SupervisorContext:
             data.update({"task_id": task.id, "allowed_tools": sorted(self.for_task(task).allowed_tools)})
         return {key: value for key, value in data.items() if value is not None}
 
+    def task_context(self, task: "SupervisorTask") -> "SupervisorTaskContext":
+        return SupervisorTaskContext(
+            run_id=self.run_id,
+            request_id=self.request_id,
+            tenant_id=self.tenant_id,
+            user_id=self.user_id,
+            intent=self.intent,
+            page_path=self.page_path,
+            task_id=task.id,
+            label=task.label,
+            instruction=task.instruction,
+            allowed_tools=self.allowed_tools.intersection(task.allowed_tools),
+            input_refs=tuple(self.metadata.get("input_refs", ())),
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class SupervisorTaskContext:
+    """子任务的私有窗口；刻意不包含主 Agent 对话 turns。"""
+
+    run_id: str | None
+    request_id: str | None
+    tenant_id: int | None
+    user_id: int | None
+    intent: str | None
+    page_path: str | None
+    task_id: str
+    label: str
+    instruction: str
+    allowed_tools: frozenset[str] = frozenset()
+    input_refs: tuple[str, ...] = ()
+    private_state: dict[str, Any] = field(default_factory=dict)
+
+    def trace_data(self) -> dict[str, Any]:
+        return {
+            "run_id": self.run_id,
+            "request_id": self.request_id,
+            "task_id": self.task_id,
+            "allowed_tools": sorted(self.allowed_tools),
+            "input_refs": list(self.input_refs),
+        }
+
+
+
 
 class SupervisorKind(StrEnum):
     READINESS = "readiness"

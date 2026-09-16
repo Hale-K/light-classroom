@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import logging
-import inspect
 import time
 from collections.abc import Awaitable, Callable
 from typing import cast
@@ -25,18 +24,12 @@ from app.ai.resilience import provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.progress import Progress, report_progress
 from app.ai.runtime import AssistantRuntime
-from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor, SupervisorContext
+from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor, SupervisorContext, SupervisorTaskContext
 from app.ai.runs.service import RUN_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
 
-async def _run_supervisor(supervisor, execute, *, context: SupervisorContext, on_event):
-    """兼容旧版测试/插件 Supervisor，同时优先使用上下文契约。"""
-    kwargs = {"on_event": on_event}
-    if "context" in inspect.signature(supervisor.run).parameters:
-        kwargs["context"] = context
-    return await supervisor.run(execute, **kwargs)
 
 # 工具循环已消耗超过该秒数才失败时，不再走降级路径（降级还要两轮模型调用，必然撞总闸）。
 _FALLBACK_MAX_SPENT = 20
@@ -215,16 +208,23 @@ async def handle_assistant_turn(
             on_trace=on_trace,
         )
 
-        async def execute_readiness_task(task):
-            tool_name = next(iter(task.allowed_tools), "")
+        async def execute_readiness_task(task, task_context: SupervisorTaskContext | None = None):
+            tool_name = next(iter(task_context.allowed_tools if task_context else task.allowed_tools), "")
             if not tool_name:
                 raise RuntimeError(f"任务 {task.id} 没有配置只读工具")
-            return await scope.execute(tool_name, "{}")
+            task_scope = scope if task_context is None else tool_gateway.open_scope(
+                session=session, tenant_id=task_context.tenant_id or tenant_id,
+                user_id=task_context.user_id, can_manage_rules=can_manage_rules,
+                page_context=page_context, allowed_tools=task_context.allowed_tools,
+                on_trace=on_trace,
+            )
+            return await task_scope.execute(tool_name, "{}")
 
         async def trace_readiness(kind: str, data: dict) -> None:
             await runtime.emit(kind, data)
 
-        report = await _run_supervisor(cast(SchedulingReadinessSupervisor, runtime.service("readiness_supervisor")), execute_readiness_task,
+        report = await cast(SchedulingReadinessSupervisor, runtime.service("readiness_supervisor")).run(
+            execute_readiness_task,
             context=SupervisorContext(
                 run_id=message_id,
                 request_id=message_id,
@@ -261,16 +261,23 @@ async def handle_assistant_turn(
             on_trace=on_trace,
         )
 
-        async def execute_diagnosis_task(task):
-            tool_name = next(iter(task.allowed_tools), "")
+        async def execute_diagnosis_task(task, task_context: SupervisorTaskContext | None = None):
+            tool_name = next(iter(task_context.allowed_tools if task_context else task.allowed_tools), "")
             if not tool_name:
                 raise RuntimeError(f"任务 {task.id} 没有配置只读工具")
-            return await scope.execute(tool_name, "{}")
+            task_scope = scope if task_context is None else tool_gateway.open_scope(
+                session=session, tenant_id=task_context.tenant_id or tenant_id,
+                user_id=task_context.user_id, can_manage_rules=can_manage_rules,
+                page_context=page_context, allowed_tools=task_context.allowed_tools,
+                on_trace=on_trace,
+            )
+            return await task_scope.execute(tool_name, "{}")
 
         async def trace_diagnosis(kind: str, data: dict) -> None:
             await runtime.emit(kind, data)
 
-        report = await _run_supervisor(cast(SchedulingDiagnosisSupervisor, runtime.service("diagnosis_supervisor")), execute_diagnosis_task,
+        report = await cast(SchedulingDiagnosisSupervisor, runtime.service("diagnosis_supervisor")).run(
+            execute_diagnosis_task,
             context=SupervisorContext(
                 run_id=message_id,
                 request_id=message_id,

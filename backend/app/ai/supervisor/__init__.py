@@ -3,6 +3,7 @@
 from app.ai.supervisor.contracts import (
     SupervisorKind,
     SupervisorContext,
+    SupervisorTaskContext,
     SupervisorReport,
     SupervisorResult,
     SupervisorResultStatus,
@@ -14,6 +15,7 @@ from app.ai.supervisor.diagnosis import DIAGNOSIS_TASKS, SchedulingDiagnosisSupe
 __all__ = [
     "SupervisorKind",
     "SupervisorContext",
+    "SupervisorTaskContext",
     "SupervisorReport",
     "SupervisorResult",
     "SupervisorResultStatus",
