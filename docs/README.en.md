@@ -16,4 +16,4 @@ Long-form docs below are mostly Chinese. Use the command blocks for setup.
 
 Product model: [ER](ER-diagram.md) · [diagrams](diagrams/index.html) · [scheduling spec](specs/schedule-and-seating.md)
 
-[Contributing](../CONTRIBUTING.md) · [Security](../SECURITY.md) · [MIT](../LICENSE)
+[Contributing](../CONTRIBUTING.md) · [Security](../SECURITY.md) · [Non-commercial license](../LICENSE)

@@ -31,6 +31,6 @@
 
 ## 参与项目
 
-[贡献指南](../CONTRIBUTING.md) · [安全披露](../SECURITY.md) · [MIT 许可](../LICENSE)
+[贡献指南](../CONTRIBUTING.md) · [安全披露](../SECURITY.md) · [非商业许可](../LICENSE)
 
 后端目录说明：[backend/README.md](../backend/README.md)
