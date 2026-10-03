@@ -127,6 +127,12 @@
 .generation-robot-card { position: absolute; top: -26px; left: 13px; min-width: 86px; padding: 4px 6px; }
 .generation-robot-card strong { font-size: 9px; }
 .generation-robot-card small { font-size: 7px; }
+.generation-robot-track { background: linear-gradient(90deg, rgba(228, 180, 91, .05), transparent 14%, transparent 86%, rgba(86, 169, 201, .04)); }
+.generation-robot-track::before { position: absolute; top: 9px; left: 8px; z-index: 2; padding: 3px 6px; border: 1px solid rgba(228, 180, 91, .35); border-radius: 4px; color: #a58b55; background: rgba(255, 253, 245, .9); content: 'AGV-01 · 仓库出发'; font-size: 8px; letter-spacing: .06em; }
+.generation-robot-track::after { position: absolute; right: 8px; bottom: 8px; z-index: 2; color: rgba(86, 169, 201, .65); content: 'AISLE NETWORK · ONLINE'; font-size: 8px; letter-spacing: .08em; }
+.generation-robot-icon { font-size: 0; }
+.generation-robot-icon::after { width: 7px; height: 7px; border: 2px solid #fff; border-radius: 50%; background: #e4b45b; box-shadow: 0 0 0 3px rgba(228, 180, 91, .24); content: ''; animation: generation-agv-pulse .8s ease-in-out infinite alternate; }
+@keyframes generation-agv-pulse { to { transform: scale(1.35); box-shadow: 0 0 0 5px rgba(228, 180, 91, .08); } }
 .generation-warehouse-badge { display: flex; align-items: center; gap: 8px; margin: 16px 0 12px; padding: 10px 12px; border: 1px dashed #e4b45b; border-radius: 8px; background: #fffaf0; color: #806020; }
 .generation-warehouse-badge span { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; background: #e4b45b; color: #fff; font-size: 13px; }
 .generation-warehouse-badge strong { font-size: 11px; }
