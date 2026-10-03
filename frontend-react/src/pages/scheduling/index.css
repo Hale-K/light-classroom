@@ -106,6 +106,7 @@
 @media (max-width: 760px) { .generation-workspace-header { padding: 0 14px; }.generation-workspace-actions > span:not(.generation-live-dot) { display: none; }.generation-workspace-body { display: block; overflow: auto; }.generation-subject-rail { border-right: 0; border-bottom: 1px solid var(--border); }.generation-subject-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }.generation-board { padding: 22px 14px; }.generation-board-foot .generation-clock { margin-left: 0; } }
 .generation-class-switch { display: inline-flex; align-items: center; gap: 7px; color: var(--text-3); font-size: 11px; white-space: nowrap; }
 .generation-class-switch select { min-width: 150px; padding: 8px 28px 8px 10px; border: 1px solid var(--border); border-radius: 7px; color: var(--text-2); background: var(--surface); font: inherit; }
+.generation-live-dot.is-done { background: #55a878; box-shadow: 0 0 0 4px rgba(85, 168, 120, .12); }
 .generation-slot.is-unavailable { background: #f4f6f7; }
 .generation-slot.is-unavailable span { color: #b8c1c5; }
 .sk-status-fail {
