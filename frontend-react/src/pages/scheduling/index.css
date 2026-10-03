@@ -114,6 +114,9 @@
 .generation-slot.is-unavailable { background: #f4f6f7; }
 .generation-slot.is-unavailable span { color: #b8c1c5; }
 .generation-robot { transition: top .22s ease, left .22s ease; }
+.generation-robot-track { position: absolute; z-index: 1; top: 74px; right: 0; bottom: 0; left: 92px; pointer-events: none; opacity: .42; }
+.generation-robot-track svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.generation-robot-track line { stroke: #e4b45b; stroke-width: .7; stroke-dasharray: 2 5; vector-effect: non-scaling-stroke; }
 .sk-status-fail {
   border-left-color: var(--yellow-ink);
 }
