@@ -69,9 +69,24 @@ export default function GenerationWorkspace({
   }, [assignments])
 
   const totalSlots = subjectQueue.reduce((sum, subject) => sum + subject.count, 0)
+  const days = Math.min(7, Math.max(1, gridConfig.days || 5))
+  const rows = Math.min(9, Math.max(1, gridConfig.periods_per_day || 8))
+  const previewCapacity = days * rows
   const previewQueue = useMemo(
-    () => subjectQueue.flatMap((subject) => Array.from({ length: subject.count }, () => ({ subject_name: subject.name, teacher_name: subject.teacher, preview: true }))),
-    [subjectQueue],
+    () => {
+      const queue: Array<{ subject_name: string; teacher_name?: string; preview: boolean }> = []
+      for (let round = 0; queue.length < totalSlots; round += 1) {
+        let added = false
+        for (const subject of subjectQueue) {
+          if (round >= subject.count) continue
+          queue.push({ subject_name: subject.name, teacher_name: subject.teacher, preview: true })
+          added = true
+        }
+        if (!added) break
+      }
+      return queue
+    },
+    [subjectQueue, totalSlots],
   )
   const [previewPlaced, setPreviewPlaced] = useState(0)
   useEffect(() => {
@@ -79,10 +94,10 @@ export default function GenerationWorkspace({
     setPreviewPlaced(0)
     if (!generating) return
     const timer = window.setInterval(() => {
-      setPreviewPlaced((value) => Math.min(totalSlots, value + 1))
+      setPreviewPlaced((value) => Math.min(previewCapacity, value + 1))
     }, 620)
     return () => window.clearInterval(timer)
-  }, [open, generating, totalSlots])
+  }, [open, generating, previewCapacity])
 
   const displayedSlots = useMemo(() => {
     const days = Math.min(7, Math.max(1, gridConfig.days || 5))
@@ -104,8 +119,6 @@ export default function GenerationWorkspace({
 
   const stageIndex = Math.max(0, STAGES.findIndex((item) => item.code === stage))
   const placedCount = generating ? previewPlaced : calendar.length || totalSlots
-  const days = Math.min(7, Math.max(1, gridConfig.days || 5))
-  const rows = Math.min(9, Math.max(1, gridConfig.periods_per_day || 8))
   const robotSlotIndex = Math.min(previewPlaced, Math.max(0, days * rows - 1))
   const robotSubject = generating ? previewQueue[Math.min(previewPlaced, Math.max(0, previewQueue.length - 1))] : undefined
   const robotStyle = {
@@ -133,8 +146,7 @@ export default function GenerationWorkspace({
           <p className="generation-panel-desc">算法会根据课时、教师和排课规则逐个放入课位。</p>
           <div className="generation-subject-list">
             {subjectQueue.map((subject, index) => {
-              const usedBefore = subjectQueue.slice(0, index).reduce((sum, item) => sum + item.count, 0)
-              const subjectPlaced = Math.max(0, Math.min(subject.count, previewPlaced - usedBefore))
+              const subjectPlaced = previewQueue.slice(0, previewPlaced).filter((item) => item.subject_name === subject.name).length
               const isCarrying = robotSubject?.subject_name === subject.name
               return <div className={`generation-subject-card color-${SUBJECT_COLORS[index % SUBJECT_COLORS.length]}${isCarrying ? ' is-carrying' : subjectPlaced >= subject.count ? ' is-done' : subjectPlaced > 0 ? ' is-active' : ''}`} key={subject.id}>
                 <div className="generation-subject-icon">{subject.name.slice(0, 1)}</div>
