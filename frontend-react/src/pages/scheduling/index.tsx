@@ -579,13 +579,13 @@ export default function SchedulingView() {
     }
   }
 
-  const loadTable = async () => {
+  const loadTable = async (classIdOverride?: number) => {
     const classIds = resources.classes.map((item) => item.id)
     if (!classIds.length) {
       setCalendar([])
       return
     }
-    const primaryId = selectedClassId ?? classIds[0]
+    const primaryId = classIdOverride ?? selectedClassId ?? classIds[0]
     if (!generating) setLoading(true)
     try {
       // 先拉当前班，避免 N 个并行 weekly 任一失败就整页 Network Error
@@ -1275,6 +1275,13 @@ export default function SchedulingView() {
         gridConfig={gridConfig}
         academicYear={academicYear}
         term={term}
+        classes={resources.classes.map((item) => ({ id: item.id, name: item.name }))}
+        selectedClassId={selectedClassId}
+        selectedClassName={selectedClassName}
+        onClassChange={(classId) => {
+          setSelectedClassId(classId)
+          if (!generating) void loadTable(classId)
+        }}
         onClose={() => setGenerationWorkspaceOpen(false)}
       />
       <PageHeader
