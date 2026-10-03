@@ -219,20 +219,24 @@ export default function GenerationWorkspace({
     '--robot-y': robotMotion.y,
   } as CSSProperties
   const robotPhaseLabel = robotPhase === 'pickup' ? '前往仓库取货' : robotPhase === 'moving' ? '沿通道运输' : '正在投递课位'
-  const dispatchJobs = Array.from({ length: 3 }, (_, offset) => {
-    const slotIndex = robotCursor + offset
-    const job = previewQueue[slotIndex]
-    const row = visualRows[Math.floor(slotIndex / Math.max(1, columns.length))]
-    const column = columns[slotIndex % Math.max(1, columns.length)]
-    return job && row && column
-      ? {
-          id: `JOB-${String(slotIndex + 1).padStart(3, '0')}`,
-          subject: job.subject_name,
-          target: row.type === 'day' ? `${column.label} · 第 ${row.period} 节` : `${column.label} · ${row.parity === 'odd' ? '单周' : '双周'}晚自习 ${row.period + 1}`,
-          active: offset === 0,
-        }
-      : undefined
-  }).filter(Boolean) as Array<{
+  const dispatchJobs = (
+    playbackActive
+      ? Array.from({ length: 3 }, (_, offset) => {
+          const slotIndex = robotCursor + offset
+          const job = previewQueue[slotIndex]
+          const row = visualRows[Math.floor(slotIndex / Math.max(1, columns.length))]
+          const column = columns[slotIndex % Math.max(1, columns.length)]
+          return job && row && column
+            ? {
+                id: `JOB-${String(slotIndex + 1).padStart(3, '0')}`,
+                subject: job.subject_name,
+                target: row.type === 'day' ? `${column.label} · 第 ${row.period} 节` : `${column.label} · ${row.parity === 'odd' ? '单周' : '双周'}晚自习 ${row.period + 1}`,
+                active: offset === 0,
+              }
+            : undefined
+        }).filter(Boolean)
+      : []
+  ) as Array<{
     id: string
     subject: string
     target: string
@@ -342,7 +346,7 @@ export default function GenerationWorkspace({
             <i style={{ width: `${Math.max(2, Math.min(100, percent))}%` }} />
           </div>
           <div
-            className="generation-grid"
+            className={`generation-grid${playbackActive ? ' is-simulating' : ' is-result'}`}
             style={{
               gridTemplateColumns: `92px repeat(${columns.length}, minmax(100px, 1fr))`,
             }}
@@ -354,19 +358,27 @@ export default function GenerationWorkspace({
                 <small>{column.parity === 'all' ? `DAY ${String(column.weekday).padStart(2, '0')}` : column.parity === 'odd' ? 'ODD WEEK' : 'EVEN WEEK'}</small>
               </div>
             ))}
-            <div className="generation-robot-track" aria-hidden="true">
-              <svg viewBox={`0 0 100 ${Math.max(1, visualRows.length) * 100}`} preserveAspectRatio="none">
-                {visualRows.map((_, index) => (
-                  <line key={`row-${index}`} x1="0" y1={`${(index + 0.5) * 100}`} x2="100" y2={`${(index + 0.5) * 100}`} />
-                ))}
-                {columns.map((_, index) => (
-                  <line key={`col-${index}`} x1={`${((index + 0.5) / columns.length) * 100}`} y1="0" x2={`${((index + 0.5) / columns.length) * 100}`} y2={`${Math.max(1, visualRows.length) * 100}`} />
-                ))}
-                <path className="generation-route-path" d={robotRoutePath} pathLength="1" />
-                <circle className="generation-route-source" cx="0" cy="50" r="2.5" />
-                <circle className="generation-route-target" cx={robotRouteX} cy={robotRouteY} r="2.5" />
-              </svg>
-            </div>
+            {playbackActive && (
+              <div className="generation-robot-track" aria-hidden="true">
+                <svg viewBox={`0 0 100 ${Math.max(1, visualRows.length) * 100}`} preserveAspectRatio="none">
+                  {visualRows.map((_, index) => (
+                    <line key={`row-${index}`} x1="0" y1={`${(index + 0.5) * 100}`} x2="100" y2={`${(index + 0.5) * 100}`} />
+                  ))}
+                  {columns.map((_, index) => (
+                    <line
+                      key={`col-${index}`}
+                      x1={`${((index + 0.5) / columns.length) * 100}`}
+                      y1="0"
+                      x2={`${((index + 0.5) / columns.length) * 100}`}
+                      y2={`${Math.max(1, visualRows.length) * 100}`}
+                    />
+                  ))}
+                  <path className="generation-route-path" d={robotRoutePath} pathLength="1" />
+                  <circle className="generation-route-source" cx="0" cy="50" r="2.5" />
+                  <circle className="generation-route-target" cx={robotRouteX} cy={robotRouteY} r="2.5" />
+                </svg>
+              </div>
+            )}
             {playbackActive && robotSubject && (
               <div className={`generation-robot is-${robotPhase}`} key={`${previewPlaced}-${robotSubject.subject_name}`} style={robotStyle} aria-live="polite">
                 <span className="generation-robot-icon">🤖</span>
@@ -442,26 +454,28 @@ export default function GenerationWorkspace({
           <div className="generation-dispatch-current">
             <div>
               <span className="generation-agv-id">AGV-01</span>
-              <small>{robotPhaseLabel}</small>
+              <small>{playbackActive ? robotPhaseLabel : '待命区'}</small>
             </div>
-            <strong>{robotSubject?.subject_name || '等待调度任务'}</strong>
-            <p>{dispatchJobs[0]?.target || '算法正在准备下一条运输任务'}</p>
+            <strong>{robotSubject?.subject_name || (stage === 'done' ? '本轮调度已完成' : '等待调度任务')}</strong>
+            <p>{dispatchJobs[0]?.target || (stage === 'done' ? `已完成 ${placedCount} 个课位投递` : '算法正在准备下一条运输任务')}</p>
           </div>
-          <div className="generation-job-list" aria-label="运输任务队列">
-            {dispatchJobs.map((job) => (
-              <div className={`generation-job-card${job.active ? ' is-active' : ''}`} key={job.id}>
-                <div>
-                  <strong>{job.id}</strong>
-                  <small>{job.active ? robotPhaseLabel : '等待分配'}</small>
+          {dispatchJobs.length > 0 && (
+            <div className="generation-job-list" aria-label="运输任务队列">
+              {dispatchJobs.map((job) => (
+                <div className={`generation-job-card${job.active ? ' is-active' : ''}`} key={job.id}>
+                  <div>
+                    <strong>{job.id}</strong>
+                    <small>{job.active ? robotPhaseLabel : '等待分配'}</small>
+                  </div>
+                  <p>
+                    <span>{job.subject}</span>
+                    <i>→</i>
+                    <span>{job.target}</span>
+                  </p>
                 </div>
-                <p>
-                  <span>{job.subject}</span>
-                  <i>→</i>
-                  <span>{job.target}</span>
-                </p>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
           <ol className="generation-stage-list">
             {STAGES.map((item, index) => (
               <li className={index < stageIndex || (stage === 'done' && item.code === 'done') ? 'is-done' : index === stageIndex ? 'is-current' : ''} key={item.code}>
