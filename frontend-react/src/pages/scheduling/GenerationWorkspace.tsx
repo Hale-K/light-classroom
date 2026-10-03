@@ -40,7 +40,15 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
   const previewCapacity = columns.length * visualRows.length
   const previewQueue = useMemo(() => { const queue: Array<{ subject_name: string; teacher_name?: string; preview: boolean }> = []; for (let round = 0; queue.length < totalSlots; round += 1) { let added = false; for (const subject of subjectQueue) { if (round >= subject.count) continue; queue.push({ subject_name: subject.name, teacher_name: subject.teacher, preview: true }); added = true } if (!added) break } return queue }, [subjectQueue, totalSlots])
   const [previewPlaced, setPreviewPlaced] = useState(0)
-  useEffect(() => { if (!open) return; setPreviewPlaced(0); if (!generating) return; const timer = window.setInterval(() => setPreviewPlaced((value) => Math.min(previewCapacity, value + 1)), 620); return () => window.clearInterval(timer) }, [open, generating, previewCapacity])
+  useEffect(() => {
+    if (!open) return
+    if (!generating) {
+      setPreviewPlaced(previewCapacity)
+      return
+    }
+    // percent 来自后端求解器进度事件，不再用本地定时器伪造“每格一步”。
+    setPreviewPlaced(Math.min(previewCapacity, Math.max(0, Math.floor((percent / 100) * previewCapacity))))
+  }, [open, generating, percent, previewCapacity])
   const displayedSlots = useMemo(() => {
     const findEntry = (column: Column, row: VisualRow) => {
       if (row.type === 'day') return calendar.find((item) => item.weekday === column.weekday && item.period === row.period && parityMatches(item, column))
