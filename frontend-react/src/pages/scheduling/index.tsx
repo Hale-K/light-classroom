@@ -1271,6 +1271,7 @@ export default function SchedulingView() {
         summary={genSummary}
         trace={genTrace}
         assignments={resources.assignments.filter((item) => item.academic_year === academicYear && item.term === term && (selectedClassId === undefined || item.class_id === selectedClassId))}
+        subjects={resources.subjects.map((item) => ({ id: item.id, name: item.name }))}
         calendar={calendar.filter((item) => selectedClassId === undefined || item.class_id === selectedClassId)}
         gridConfig={gridConfig}
         academicYear={academicYear}
