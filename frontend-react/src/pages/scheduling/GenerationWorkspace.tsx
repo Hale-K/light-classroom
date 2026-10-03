@@ -63,6 +63,12 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
     return () => window.clearInterval(timer)
   }, [open, generating, percent, previewCapacity])
   const playbackActive = generating || ((stage === 'refreshing' || stage === 'done') && previewPlaced < previewCapacity)
+  const [robotCursor, setRobotCursor] = useState(0)
+  useEffect(() => {
+    if (!open || (!generating && !playbackActive)) return
+    const timer = window.setInterval(() => setRobotCursor((value) => (value + 1) % Math.max(1, previewCapacity)), 260)
+    return () => window.clearInterval(timer)
+  }, [open, generating, playbackActive, previewCapacity])
   const displayedSlots = useMemo(() => {
     const findEntry = (column: Column, row: VisualRow) => {
       if (row.type === 'day') return calendar.find((item) => item.weekday === column.weekday && item.period === row.period && parityMatches(item, column))
@@ -72,7 +78,7 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
     if (!playbackActive && calendar.length) return visualRows.flatMap((row) => columns.map((column) => findEntry(column, row)))
     return Array.from({ length: previewCapacity }, (_, index) => previewQueue[index] && index < previewPlaced ? previewQueue[index] : undefined)
   }, [calendar, columns, dayRows, generating, playbackActive, gridConfig.evening_start_period, previewCapacity, previewPlaced, previewQueue, visualRows])
-  const stageIndex = Math.max(0, STAGES.findIndex((item) => item.code === stage)); const placedCount = playbackActive ? previewPlaced : calendar.length || totalSlots; const robotSlotIndex = Math.min(previewPlaced, Math.max(0, previewCapacity - 1)); const robotSubject = playbackActive ? previewQueue[Math.min(previewPlaced, Math.max(0, previewQueue.length - 1))] : undefined
+  const stageIndex = Math.max(0, STAGES.findIndex((item) => item.code === stage)); const placedCount = playbackActive ? previewPlaced : calendar.length || totalSlots; const robotSlotIndex = generating ? robotCursor : Math.min(previewPlaced, Math.max(0, previewCapacity - 1)); const robotSubject = playbackActive ? previewQueue[Math.min(previewPlaced, Math.max(0, previewQueue.length - 1))] : undefined
   const robotStyle = { '--robot-col': robotSlotIndex % Math.max(1, columns.length), '--robot-row': Math.floor(robotSlotIndex / Math.max(1, columns.length)), '--robot-days': Math.max(1, columns.length) } as CSSProperties
   if (!open) return null
   return <div className="generation-workspace" role="dialog" aria-modal="true" aria-label="自动排课工作区">
@@ -83,6 +89,8 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
     </main>
   </div>
 }
+
+
 
 
 

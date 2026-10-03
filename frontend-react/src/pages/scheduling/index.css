@@ -113,6 +113,7 @@
 @keyframes generation-robot-glow { from { box-shadow: 0 5px 12px rgba(70, 66, 39, .12); } to { box-shadow: 0 7px 18px rgba(228, 180, 91, .28); } }
 .generation-slot.is-unavailable { background: #f4f6f7; }
 .generation-slot.is-unavailable span { color: #b8c1c5; }
+.generation-robot { transition: top .22s ease, left .22s ease; }
 .sk-status-fail {
   border-left-color: var(--yellow-ink);
 }
