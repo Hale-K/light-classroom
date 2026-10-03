@@ -44,6 +44,11 @@ interface DigitalTwinMapProps {
 
 const DAY_ZONE_X = [338, 508, 678, 848, 1018]
 const SATURDAY_ZONE_X = [338, 508]
+const EVENING_ZONE_X = [678, 933]
+const STANDARD_ZONE_WIDTH = 158
+const STANDARD_ZONE_CENTER = 79
+const EVENING_ZONE_WIDTH = 243
+const LOWER_FEEDER_X = 672
 
 function depotAccess(index: number) {
   const column = index % 2
@@ -68,16 +73,16 @@ function roomPosition(column: TwinColumn, row: TwinRow, columnIndex: number, col
     const zoneY = isSaturday ? 438 : 76
     const roomColumn = (row.period - 1) % 2
     const roomRow = Math.floor((row.period - 1) / 2)
-    if (isSaturday) return { x: zoneX + 10 + roomColumn * 76, y: zoneY + 38 + roomRow * 42, width: 52, height: 31 }
-    return { x: zoneX + 10 + roomColumn * 76, y: zoneY + 54 + roomRow * 48, width: 52, height: 34 }
+    if (isSaturday) return { x: zoneX + 12 + roomColumn * 76, y: zoneY + 42 + roomRow * 42, width: 58, height: 31 }
+    return { x: zoneX + 12 + roomColumn * 76, y: zoneY + 60 + roomRow * 48, width: 58, height: 34 }
   }
 
   const isOdd = row.parity === 'odd'
-  const zoneX = isOdd ? 678 : 936
+  const zoneX = isOdd ? EVENING_ZONE_X[0] : EVENING_ZONE_X[1]
   const localIndex = row.period * columnCount + columnIndex
   const roomColumn = localIndex % 5
   const roomRow = Math.floor(localIndex / 5)
-  return { x: zoneX + 16 + roomColumn * 43, y: 500 + roomRow * 47, width: 36, height: 33 }
+  return { x: zoneX + 11 + roomColumn * 46, y: 500 + roomRow * 47, width: 38, height: 33 }
 }
 
 function zoneLabel(column: TwinColumn, row: TwinRow) {
@@ -134,11 +139,11 @@ export default function DigitalTwinMap({
   const targetY = activeRoom ? activeRoom.y + activeRoom.height / 2 : 138
   const routeHubY = activeRoom?.zone.startsWith('DAY') ? 214 : 575
   const routeSpineX = activeRoom?.zone.startsWith('DAY')
-    ? (DAY_ZONE_X[Math.max(0, Number(activeRoom.zone.slice(-2)) - 1)] ?? DAY_ZONE_X[0]) + 70
+    ? (DAY_ZONE_X[Math.max(0, Number(activeRoom.zone.slice(-2)) - 1)] ?? DAY_ZONE_X[0]) + STANDARD_ZONE_CENTER
     : activeRoom?.zone === 'S-ODD'
-      ? SATURDAY_ZONE_X[0] + 70
+      ? SATURDAY_ZONE_X[0] + STANDARD_ZONE_CENTER
       : activeRoom?.zone === 'S-EVEN'
-        ? SATURDAY_ZONE_X[1] + 70
+        ? SATURDAY_ZONE_X[1] + STANDARD_ZONE_CENTER
         : targetX
   const routePath = `${sourceAccess.path} V ${routeHubY} H ${routeSpineX} V ${targetY} H ${targetX}`
   const routeStyle = { '--route-length': Math.max(1, Math.abs(sourceY - targetY) + Math.abs(targetX - sourceX)) } as CSSProperties
@@ -181,14 +186,14 @@ export default function DigitalTwinMap({
             <text x="338" y="416">单周周六 · ODD SAT</text>
             <text x="508" y="416">双周周六 · EVEN SAT</text>
             <text x="678" y="416">单周晚自习 · ODD EVENING</text>
-            <text x="936" y="416">双周晚自习 · EVEN EVENING</text>
+            <text x={EVENING_ZONE_X[1]} y="416">双周晚自习 · EVEN EVENING</text>
           </g>
 
           <g className="twin-zone-blocks">
-            {DAY_ZONE_X.map((x, index) => <rect x={x} y="68" width="148" height="312" rx="8" key={`day-zone-${index}`} />)}
-            {SATURDAY_ZONE_X.map((x, index) => <rect x={x} y="430" width="148" height="252" rx="8" key={`sat-zone-${index}`} />)}
-            <rect x="678" y="430" width="240" height="252" rx="8" className="is-odd" />
-            <rect x="936" y="430" width="240" height="252" rx="8" className="is-even" />
+            {DAY_ZONE_X.map((x, index) => <rect x={x} y="68" width={STANDARD_ZONE_WIDTH} height="312" rx="8" key={`day-zone-${index}`} />)}
+            {SATURDAY_ZONE_X.map((x, index) => <rect x={x} y="430" width={STANDARD_ZONE_WIDTH} height="252" rx="8" key={`sat-zone-${index}`} />)}
+            <rect x={EVENING_ZONE_X[0]} y="430" width={EVENING_ZONE_WIDTH} height="252" rx="8" className="is-odd" />
+            <rect x={EVENING_ZONE_X[1]} y="430" width={EVENING_ZONE_WIDTH} height="252" rx="8" className="is-even" />
           </g>
 
           <g className="twin-depot-connectors">
@@ -220,17 +225,17 @@ export default function DigitalTwinMap({
 
           <g className="twin-static-network">
             <path d="M 304 64 V 665" />
-            <path d="M 304 214 H 1168" />
-            <path d="M 304 575 H 1168" />
-            {DAY_ZONE_X.map((x) => <path d={`M ${x + 70} 214 V 362`} key={`day-${x}`} />)}
-            {SATURDAY_ZONE_X.map((x) => <path d={`M ${x + 70} 476 V 662`} key={`sat-${x}`} />)}
-            <path d="M 650 214 V 575" />
-            <path d="M 807 575 V 665" />
-            <path d="M 1065 575 V 665" />
+            <path d="M 304 214 H 1176" />
+            <path d="M 304 575 H 1176" />
+            {DAY_ZONE_X.map((x) => <path d={`M ${x + STANDARD_ZONE_CENTER} 128 V 354`} key={`day-${x}`} />)}
+            {SATURDAY_ZONE_X.map((x) => <path d={`M ${x + STANDARD_ZONE_CENTER} 472 V 671`} key={`sat-${x}`} />)}
+            <path d={`M ${LOWER_FEEDER_X} 214 V 575`} />
           </g>
           <g className="twin-junctions">
             {[214, 575].map((y) => <circle cx="304" cy={y} r="6" key={y} />)}
-            {DAY_ZONE_X.map((x) => <circle cx={x + 70} cy="214" r="4" key={x} />)}
+            {DAY_ZONE_X.map((x) => <circle cx={x + STANDARD_ZONE_CENTER} cy="214" r="4" key={x} />)}
+            <circle cx={LOWER_FEEDER_X} cy="214" r="4" />
+            <circle cx={LOWER_FEEDER_X} cy="575" r="4" />
             {Array.from({ length: Math.ceil(subjectNames.length / 2) }, (_, row) => (
               <circle cx="304" cy={132 + row * 82} r="3.5" key={`depot-junction-${row}`} />
             ))}
@@ -245,10 +250,10 @@ export default function DigitalTwinMap({
                 return <path d={`M ${roomCenterX} ${roomEdgeY} V 575`} key={`connector-${room.slotIndex}`} />
               }
               const spineX = room.zone.startsWith('DAY')
-                ? (DAY_ZONE_X[Math.max(0, Number(room.zone.slice(-2)) - 1)] ?? DAY_ZONE_X[0]) + 70
+                ? (DAY_ZONE_X[Math.max(0, Number(room.zone.slice(-2)) - 1)] ?? DAY_ZONE_X[0]) + STANDARD_ZONE_CENTER
                 : room.zone === 'S-ODD'
-                  ? SATURDAY_ZONE_X[0] + 70
-                  : SATURDAY_ZONE_X[1] + 70
+                  ? SATURDAY_ZONE_X[0] + STANDARD_ZONE_CENTER
+                  : SATURDAY_ZONE_X[1] + STANDARD_ZONE_CENTER
               const roomEdgeX = roomCenterX < spineX ? room.x + room.width : room.x
               return <path d={`M ${spineX} ${roomCenterY} H ${roomEdgeX}`} key={`connector-${room.slotIndex}`} />
             })}
