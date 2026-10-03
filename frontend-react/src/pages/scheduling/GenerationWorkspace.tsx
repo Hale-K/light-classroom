@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { ScheduleEntry, SchedulingGridConfig, TeachingAssignment } from '@/types'
 import type { GenStage, GenTraceEvent } from './scheduling-model'
 
@@ -106,6 +106,13 @@ export default function GenerationWorkspace({
   const placedCount = generating ? previewPlaced : calendar.length || totalSlots
   const days = Math.min(7, Math.max(1, gridConfig.days || 5))
   const rows = Math.min(9, Math.max(1, gridConfig.periods_per_day || 8))
+  const robotSlotIndex = Math.min(previewPlaced, Math.max(0, days * rows - 1))
+  const robotSubject = generating ? previewQueue[Math.min(previewPlaced, Math.max(0, previewQueue.length - 1))] : undefined
+  const robotStyle = {
+    '--robot-col': robotSlotIndex % days,
+    '--robot-row': Math.floor(robotSlotIndex / days),
+    '--robot-days': days,
+  } as CSSProperties
 
   if (!open) return null
 
@@ -128,7 +135,8 @@ export default function GenerationWorkspace({
             {subjectQueue.map((subject, index) => {
               const usedBefore = subjectQueue.slice(0, index).reduce((sum, item) => sum + item.count, 0)
               const subjectPlaced = Math.max(0, Math.min(subject.count, previewPlaced - usedBefore))
-              return <div className={`generation-subject-card color-${SUBJECT_COLORS[index % SUBJECT_COLORS.length]}${subjectPlaced >= subject.count ? ' is-done' : subjectPlaced > 0 ? ' is-active' : ''}`} key={subject.id}>
+              const isCarrying = robotSubject?.subject_name === subject.name
+              return <div className={`generation-subject-card color-${SUBJECT_COLORS[index % SUBJECT_COLORS.length]}${isCarrying ? ' is-carrying' : subjectPlaced >= subject.count ? ' is-done' : subjectPlaced > 0 ? ' is-active' : ''}`} key={subject.id}>
                 <div className="generation-subject-icon">{subject.name.slice(0, 1)}</div>
                 <div className="generation-subject-copy"><strong>{subject.name}</strong><small>{subject.teacher || '教师待匹配'}</small><div className="generation-subject-progress"><i style={{ width: `${Math.round(subjectPlaced / subject.count * 100)}%` }} /></div></div>
                 <em>{subjectPlaced}/{subject.count}</em>
@@ -145,6 +153,7 @@ export default function GenerationWorkspace({
           <div className="generation-grid" style={{ gridTemplateColumns: `92px repeat(${days}, minmax(100px, 1fr))` }}>
             <div className="generation-grid-corner">课位 / 星期</div>
             {Array.from({ length: days }, (_, index) => <div className="generation-day" key={index}><strong>{['周一', '周二', '周三', '周四', '周五', '周六', '周日'][index]}</strong><small>DAY {String(index + 1).padStart(2, '0')}</small></div>)}
+            {generating && robotSubject && <div className="generation-robot" key={`${previewPlaced}-${robotSubject.subject_name}`} style={robotStyle} aria-live="polite"><span className="generation-robot-icon">◈</span><span className="generation-robot-card"><strong>{robotSubject.subject_name}</strong><small>搬运至第 {Math.floor(robotSlotIndex / days) + 1} 节 · {['周一', '周二', '周三', '周四', '周五', '周六', '周日'][robotSlotIndex % days]}</small></span></div>}
             {Array.from({ length: rows }, (_, period) => <div className="generation-grid-row" key={period}><div className="generation-period">第 {period + 1} 节<small>{period < 4 ? '上午' : '下午'}</small></div>{Array.from({ length: days }, (_, day) => { const item = displayedSlots[period * days + day]; const color = item?.subject_name ? SUBJECT_COLORS[(subjectQueue.findIndex((subject) => subject.name === item.subject_name) + 6) % 6] : ''; return <div className={`generation-slot ${item ? 'has-subject' : ''} ${item && 'preview' in item && item.preview ? 'is-preview' : ''} color-${color}`} key={day}>{item ? <><strong>{item.subject_name}</strong><small>{item.teacher_name || '自动匹配教师'}</small></> : <span>等待课位</span>}</div> })}</div>)}
           </div>
           <div className="generation-board-foot"><span><i className="legend live" />正在放置</span><span><i className="legend final" />已确认课位</span><span><i className="legend empty" />待计算</span><span className="generation-clock">已用时 {formatElapsed(elapsed)}</span></div>
