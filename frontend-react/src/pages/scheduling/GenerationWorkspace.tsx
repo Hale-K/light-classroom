@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type CSSProperties } from 'react'
 import type { ScheduleEntry, SchedulingGridConfig, TeachingAssignment } from '@/types'
 import type { GenStage, GenTraceEvent } from './scheduling-model'
+import DigitalTwinMap from './DigitalTwinMap'
 
 interface WorkspaceClass {
   id: number
@@ -172,23 +173,27 @@ export default function GenerationWorkspace({
   useEffect(() => {
     if (!open || (!generating && !playbackActive)) return
     const target = generating ? Math.min(dispatchCapacity, Math.max(0, Math.floor((percent / 100) * previewCapacity))) : dispatchCapacity
-    const timer = window.setInterval(
-      () =>
-        setRobotPhase((phase) => {
-          if (phase === 'pickup') return 'moving'
-          if (phase === 'moving') return 'drop'
-          setPreviewPlaced((value) => {
-            if (value >= target) return value
-            const next = value + 1
-            setRobotCursor(next % Math.max(1, previewQueue.length))
-            return next
-          })
-          return 'pickup'
-        }),
-      1400,
-    )
-    return () => window.clearInterval(timer)
-  }, [open, generating, playbackActive, percent, dispatchCapacity, previewCapacity, previewQueue.length])
+    if (robotPhase === 'pickup' && previewPlaced >= target) return
+    const phaseDuration = robotPhase === 'pickup' ? 1800 : robotPhase === 'moving' ? 5400 : 1300
+    const timer = window.setTimeout(() => {
+      if (robotPhase === 'pickup') {
+        setRobotPhase('moving')
+        return
+      }
+      if (robotPhase === 'moving') {
+        setRobotPhase('drop')
+        return
+      }
+      setPreviewPlaced((value) => {
+        if (value >= target) return value
+        const next = value + 1
+        setRobotCursor(next % Math.max(1, previewQueue.length))
+        return next
+      })
+      setRobotPhase('pickup')
+    }, phaseDuration)
+    return () => window.clearTimeout(timer)
+  }, [open, generating, playbackActive, percent, dispatchCapacity, previewCapacity, previewPlaced, previewQueue.length, robotPhase])
   const displayedSlots = useMemo(() => {
     const findEntry = (column: Column, row: VisualRow) => {
       if (row.type === 'day') return calendar.find((item) => item.weekday === column.weekday && item.period === row.period && parityMatches(item, column))
@@ -345,6 +350,23 @@ export default function GenerationWorkspace({
           <div className="generation-progress-track">
             <i style={{ width: `${Math.max(2, Math.min(100, percent))}%` }} />
           </div>
+          <DigitalTwinMap
+            columns={columns}
+            rows={visualRows}
+            items={displayedSlots}
+            activeSlotIndex={robotSlotIndex}
+            activeSubject={robotSubject?.subject_name}
+            activeTeacher={robotSubject?.teacher_name}
+            robotPhase={robotPhase}
+            subjectNames={subjectQueue.map((subject) => subject.name)}
+            playbackActive={playbackActive}
+            isUnavailable={(column, row) =>
+              row.type === 'day'
+                ? row.period > (gridConfig.daily_periods?.[column.weekday - 1] ?? dayRows)
+                : (column.parity !== 'all' && column.parity !== row.parity) ||
+                  row.period >= (row.parity === 'odd' ? gridConfig.evening_daily_periods_odd?.[column.weekday - 1] || 0 : gridConfig.evening_daily_periods_even?.[column.weekday - 1] || 0)
+            }
+          />
           <div
             className={`generation-grid${playbackActive ? ' is-simulating' : ' is-result'}`}
             style={{

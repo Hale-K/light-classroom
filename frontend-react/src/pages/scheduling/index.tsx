@@ -1320,6 +1320,11 @@ export default function SchedulingView() {
                 </div>
               )}
             </div>
+            {(generating || genStage === 'done' || genPercent > 0) && (
+              <Button type="primary" size="small" onClick={() => setGenerationWorkspaceOpen(true)}>
+                打开数字孪生
+              </Button>
+            )}
             {!generating && (
               <Button
                 type="link"
