@@ -117,6 +117,9 @@
 .generation-robot-track { position: absolute; z-index: 1; top: 74px; right: 0; bottom: 0; left: 92px; pointer-events: none; opacity: .42; }
 .generation-robot-track svg { display: block; width: 100%; height: 100%; overflow: visible; }
 .generation-robot-track line { stroke: #e4b45b; stroke-width: .7; stroke-dasharray: 2 5; vector-effect: non-scaling-stroke; }
+.generation-route-source { fill: #e4b45b; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; }
+.generation-route-target { fill: #55a878; stroke: #fff; stroke-width: 1; vector-effect: non-scaling-stroke; animation: generation-target-pulse 1.4s ease-in-out infinite alternate; }
+@keyframes generation-target-pulse { to { r: 4; opacity: .55; } }
 .generation-route-path { fill: none; stroke: #e4b45b; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: .04 .025; vector-effect: non-scaling-stroke; animation: generation-route-flow 2.8s linear infinite; filter: drop-shadow(0 0 3px rgba(228, 180, 91, .35)); }
 @keyframes generation-route-flow { to { stroke-dashoffset: -.13; } }
 .generation-slot::before { position: absolute; inset: 7px; border: 1px solid rgba(211, 222, 226, .45); border-radius: 5px; pointer-events: none; content: ''; }
@@ -146,6 +149,22 @@
 .generation-subject-card.evening-odd.evening-even .generation-subject-icon { background: linear-gradient(135deg, #e4b45b 0 50%, #8777c8 50%); }
 .generation-robot.is-pickup .generation-robot-icon { box-shadow: 0 0 0 5px rgba(228, 180, 91, .18); }
 .generation-robot.is-drop .generation-robot-icon { border-color: #55a878; color: #31825c; background: #effaf3; }
+.generation-dispatch-current { margin: 14px 0 10px; padding: 12px; border: 1px solid #cde6ef; border-left: 3px solid #56a9c9; border-radius: 8px; background: #f4fbfd; }
+.generation-dispatch-current > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.generation-dispatch-current small { color: var(--text-3); font-size: 9px; }
+.generation-dispatch-current strong,.generation-dispatch-current p { display: block; margin: 8px 0 0; }
+.generation-dispatch-current strong { font-size: 13px; }
+.generation-dispatch-current p { color: var(--text-2); font-size: 10px; }
+.generation-agv-id { padding: 3px 6px; border-radius: 4px; color: #fff; background: #087ead; font-size: 9px; font-weight: 800; letter-spacing: .06em; }
+.generation-job-list { display: grid; gap: 7px; margin-bottom: 16px; }
+.generation-job-card { padding: 9px 10px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface); }
+.generation-job-card.is-active { border-color: #8cc7da; background: #f7fcfe; box-shadow: inset 3px 0 #56a9c9; }
+.generation-job-card > div,.generation-job-card p { display: flex; align-items: center; justify-content: space-between; gap: 7px; margin: 0; }
+.generation-job-card strong { font-size: 9px; letter-spacing: .06em; }
+.generation-job-card small { color: var(--text-3); font-size: 8px; }
+.generation-job-card p { margin-top: 6px; color: var(--text-2); font-size: 9px; }
+.generation-job-card p span:last-child { overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.generation-job-card p i { color: #56a9c9; font-style: normal; }
 .sk-status-fail {
   border-left-color: var(--yellow-ink);
 }
