@@ -1,7 +1,7 @@
 ﻿# =============================================================================
 #  ZhiHeng LightClassroom 开发环境 一键重启脚本
 #  作用：杀掉 5176（前端Vite）/ 8001（后端Uvicorn）端口上的旧进程后，
-#        分别在两个独立 PowerShell 窗口中干净启动，保证每个服务只留 1 份。
+#        分别在独立 PowerShell 窗口中干净启动，保证 API、前端和 Worker 各只留 1 份。
 #  用法：在 PowerShell 中直接运行  .\restart-dev.ps1
 #        加 -ShowWindows 参数可显示服务窗口；默认隐藏，日志在各服务 logs/ 下
 # =============================================================================
@@ -96,11 +96,51 @@ function Stop-PortOwner {
     return $false
 }
 
+function Stop-CeleryWorker {
+    Write-Host "扫描旧 Celery Worker..." -ForegroundColor DarkCyan
+    $workerProcesses = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.CommandLine -and
+        $_.CommandLine -match '(?i)app\.workers\.celery_app' -and
+        $_.CommandLine -match '(?i)\bworker\b' -and
+        $_.CommandLine -match [regex]::Escape($BACK_CWD)
+    })
+
+    foreach ($processInfo in $workerProcesses) {
+        try {
+            Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction Stop
+            Write-Host "已终止旧 Worker PID=$($processInfo.ProcessId)" -ForegroundColor Magenta
+        } catch {
+            Write-Host "Worker PID=$($processInfo.ProcessId) 终止失败：$($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
+function Stop-ProjectLaunchShells {
+    Write-Host "扫描旧服务启动外壳..." -ForegroundColor DarkCyan
+    $launchShells = @(Get-CimInstance Win32_Process | Where-Object {
+        $_.Name -in @("powershell.exe", "pwsh.exe", "cmd.exe") -and
+        $_.CommandLine -and
+        $_.CommandLine -match '(?i)light-classroom' -and
+        $_.CommandLine -match '(?i)(uvicorn|vite)'
+    })
+
+    foreach ($processInfo in $launchShells) {
+        try {
+            Stop-Process -Id $processInfo.ProcessId -Force -ErrorAction Stop
+            Write-Host "已终止旧启动外壳 PID=$($processInfo.ProcessId)" -ForegroundColor Magenta
+        } catch {
+            Write-Host "启动外壳 PID=$($processInfo.ProcessId) 终止失败：$($_.Exception.Message)" -ForegroundColor Yellow
+        }
+    }
+}
+
 # ----------- 清理 -----------
 Write-Banner "清理旧进程（只保留新启动 1 份）"
 
 Stop-PortOwner -Port $FRONT_PORT -AllowedProcessNames @("node")
 Stop-PortOwner -Port $BACK_PORT  -AllowedProcessNames @("python","pythonw")
+Stop-CeleryWorker
+Stop-ProjectLaunchShells
 
 # ----------- 启动后端 -----------
 Write-Banner "启动后端 FastAPI @ $BACK_PORT" Magenta
@@ -129,6 +169,24 @@ Write-Host "后端进程已启动 PID=$($bp.Id)" -ForegroundColor Green
 Write-Host "等待后端启动..." -ForegroundColor DarkCyan
 Start-Sleep -Seconds 4
 
+# ----------- 启动排课 Worker -----------
+Write-Banner "启动 Celery Worker（scheduling, academic）" Yellow
+
+# Windows 开发环境使用 solo pool，避免 prefork 与 Windows 进程模型不兼容。
+$workerCmd = @(
+    "-Command",
+    "`$env:PYTHONPATH='$BACK_CWD'; " +
+    "Set-Location '$BACK_CWD'; " +
+    "& '$BACK_VENV_PY' -m celery -A app.workers.celery_app worker -Q scheduling,academic --loglevel=info --pool=solo"
+)
+
+$wp = Start-Process -FilePath "powershell.exe" `
+    -ArgumentList $workerCmd -PassThru -WindowStyle $winStyle `
+    -RedirectStandardOutput "$BACK_CWD\logs\dev-worker.out.log" `
+    -RedirectStandardError  "$BACK_CWD\logs\dev-worker.err.log"
+
+Write-Host "Celery Worker 已启动 PID=$($wp.Id)" -ForegroundColor Green
+
 # ----------- 启动前端 -----------
 Write-Banner "启动前端 Vite @ $FRONT_PORT" Blue
 
@@ -150,6 +208,7 @@ Write-Host "前端进程已启动 PID=$($fp.Id)" -ForegroundColor Green
 Write-Banner "启动完成" Green
 Write-Host "前端:  http://127.0.0.1:$FRONT_PORT"
 Write-Host "后端:  http://127.0.0.1:$BACK_PORT"
+Write-Host "Worker: scheduling, academic"
 Write-Host ""
-Write-Host "服务窗口默认隐藏。日志: backend\logs\dev-backend.*.log / frontend-react\logs\dev-frontend.*.log" -ForegroundColor DarkGray
+Write-Host "服务窗口默认隐藏。日志: backend\logs\dev-backend.*.log / backend\logs\dev-worker.*.log / frontend-react\logs\dev-frontend.*.log" -ForegroundColor DarkGray
 Write-Host "后续若需重启，再次运行本脚本即可，它会自动杀掉旧进程。" -ForegroundColor DarkGray

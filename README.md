@@ -66,7 +66,7 @@ Windows 开发环境可以直接执行：
 .\scripts\restart-dev.ps1
 ```
 
-它会启动后端 `8001` 端口和前端 `5176` 端口。
+它会启动后端 `8001`、Celery Worker（`scheduling` / `academic` 队列）和前端 `5176`。
 
 手动启动后端：
 
