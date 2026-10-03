@@ -93,4 +93,4 @@ Full timetable tests are heavy; start with auth, RBAC, and the rule-engine subse
 
 ## License
 
-[MIT](LICENSE).
+Original code in this repository is released under the [Light Classroom Non-Commercial License](LICENSE). Personal, educational, research, and other non-commercial use is permitted. Commercial deployment, hosting, sale, or integration into a commercial product requires prior written permission from the copyright holder. Third-party dependencies and assets remain under their own licenses.
