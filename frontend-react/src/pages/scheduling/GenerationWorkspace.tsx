@@ -91,12 +91,13 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
     return Array.from({ length: previewCapacity }, (_, index) => previewQueue[index] && index < previewPlaced ? previewQueue[index] : undefined)
   }, [calendar, columns, dayRows, generating, playbackActive, gridConfig.evening_start_period, previewCapacity, previewPlaced, previewQueue, visualRows])
   const stageIndex = Math.max(0, STAGES.findIndex((item) => item.code === stage)); const placedCount = playbackActive ? previewPlaced : calendar.length || totalSlots; const robotSlotIndex = generating ? robotCursor : Math.min(previewPlaced, Math.max(0, previewCapacity - 1)); const robotSubject = playbackActive ? previewQueue[Math.min(robotCursor, Math.max(0, previewQueue.length - 1))] : undefined
-  const robotStyle = { '--robot-col': robotSlotIndex % Math.max(1, columns.length), '--robot-row': Math.floor(robotSlotIndex / Math.max(1, columns.length)), '--robot-days': Math.max(1, columns.length) } as CSSProperties
   const robotRouteColumn = robotSlotIndex % Math.max(1, columns.length)
   const robotRouteRow = Math.floor(robotSlotIndex / Math.max(1, columns.length))
   const robotRouteX = ((robotRouteColumn + 0.5) / Math.max(1, columns.length)) * 100
   const robotRouteY = ((robotRouteRow + 0.5) / Math.max(1, visualRows.length)) * 100
   const robotRoutePath = `M 0 50 L 5 50 L 5 ${robotRouteY} L ${robotRouteX} ${robotRouteY}`
+  const robotMotion = robotPhase === 'pickup' ? { x: 0, y: 50 } : robotPhase === 'moving' ? { x: 5, y: robotRouteY } : { x: robotRouteX, y: robotRouteY }
+  const robotStyle = { '--robot-col': robotSlotIndex % Math.max(1, columns.length), '--robot-row': Math.floor(robotSlotIndex / Math.max(1, columns.length)), '--robot-days': Math.max(1, columns.length), '--robot-x': robotMotion.x, '--robot-y': robotMotion.y } as CSSProperties
   if (!open) return null
   return <div className="generation-workspace" role="dialog" aria-modal="true" aria-label="自动排课工作区">
     <header className="generation-workspace-header"><div className="generation-workspace-brand"><span className="generation-workspace-mark">排</span><div><strong>自动排课工作区</strong><small>{academicYear} · 第 {term} 学期</small></div></div><div className="generation-workspace-actions"><label className="generation-class-switch">当前班级<select value={selectedClassId ?? ''} onChange={(event) => onClassChange(Number(event.target.value))} disabled={generating || !classes.length}><option value="" disabled>选择班级</option>{classes.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></label><span className={`generation-live-dot${generating ? ' is-live' : stage === 'done' ? ' is-done' : ''}`} /><span>{generating ? '算法运行中' : stage === 'done' ? '排课完成' : '需要调整'}</span><button type="button" onClick={onClose}>{generating ? '后台运行' : '返回排课管理'}</button></div></header>
