@@ -65,7 +65,7 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
       : previewCapacity
     const timer = window.setInterval(() => {
       setPreviewPlaced((value) => value === target ? value : value < target ? value + 1 : target)
-    }, 180)
+    }, 650)
     return () => window.clearInterval(timer)
   }, [open, generating, percent, previewCapacity])
   const playbackActive = generating || ((stage === 'refreshing' || stage === 'done') && previewPlaced < previewCapacity)
@@ -73,12 +73,12 @@ export default function GenerationWorkspace({ open, generating, stage, percent, 
   const [robotPhase, setRobotPhase] = useState<'pickup' | 'moving' | 'drop'>('pickup')
   useEffect(() => {
     if (!open || (!generating && !playbackActive)) return
-    const timer = window.setInterval(() => setRobotPhase((phase) => phase === 'pickup' ? 'moving' : phase === 'moving' ? 'drop' : 'pickup'), 820)
+    const timer = window.setInterval(() => setRobotPhase((phase) => phase === 'pickup' ? 'moving' : phase === 'moving' ? 'drop' : 'pickup'), 1400)
     return () => window.clearInterval(timer)
   }, [open, generating, playbackActive])
   useEffect(() => {
     if (!open || (!generating && !playbackActive)) return
-    const timer = window.setInterval(() => setRobotCursor((value) => (value + 1) % Math.max(1, previewCapacity)), 260)
+    const timer = window.setInterval(() => setRobotCursor((value) => (value + 1) % Math.max(1, previewCapacity)), 4200)
     return () => window.clearInterval(timer)
   }, [open, generating, playbackActive, previewCapacity])
   const displayedSlots = useMemo(() => {
