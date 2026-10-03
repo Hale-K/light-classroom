@@ -121,6 +121,12 @@
 .generation-warehouse-badge span { display: grid; width: 24px; height: 24px; place-items: center; border-radius: 6px; background: #e4b45b; color: #fff; font-size: 13px; }
 .generation-warehouse-badge strong { font-size: 11px; }
 .generation-warehouse-badge small { margin-left: auto; color: #a58b55; font-size: 10px; }
+.generation-subject-card.evening-odd { border-left: 3px solid #e4b45b; background: linear-gradient(90deg, #fffaf0, var(--surface)); }
+.generation-subject-card.evening-even { border-left: 3px solid #8777c8; background: linear-gradient(90deg, #f7f5ff, var(--surface)); }
+.generation-subject-card.evening-odd.evening-even { border-left: 3px solid #e4b45b; background: linear-gradient(90deg, #fffaf0 0 50%, #f7f5ff 50%); }
+.generation-subject-card.evening-odd .generation-subject-icon { background: #e4b45b; }
+.generation-subject-card.evening-even .generation-subject-icon { background: #8777c8; }
+.generation-subject-card.evening-odd.evening-even .generation-subject-icon { background: linear-gradient(135deg, #e4b45b 0 50%, #8777c8 50%); }
 .generation-robot.is-pickup .generation-robot-icon { box-shadow: 0 0 0 5px rgba(228, 180, 91, .18); }
 .generation-robot.is-drop .generation-robot-icon { border-color: #55a878; color: #31825c; background: #effaf3; }
 .sk-status-fail {
