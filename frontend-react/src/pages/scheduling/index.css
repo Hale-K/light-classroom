@@ -326,7 +326,7 @@
 .twin-floor-grid { fill: none; stroke: #18303c; stroke-width: .55; opacity: .48; }
 .twin-section-title,
 .twin-zone-labels text { fill: #63808f; font-size: 10px; font-weight: 700; letter-spacing: 1.6px; }
-.twin-zone-labels text { fill: #6f8996; font-size: 9px; }
+.twin-zone-labels text { fill: #8ba4af; font-size: 10px; letter-spacing: .7px; }
 .twin-zone-blocks rect { fill: rgba(13,31,42,.55); stroke: #203a48; stroke-width: 1; }
 .twin-zone-blocks rect.is-odd { fill: rgba(245,184,75,.035); stroke: rgba(245,184,75,.28); }
 .twin-zone-blocks rect.is-even { fill: rgba(167,139,250,.035); stroke: rgba(167,139,250,.28); }
@@ -341,10 +341,19 @@
 .twin-static-network path { fill: none; stroke: #274452; stroke-width: 9; stroke-linecap: square; stroke-linejoin: round; }
 .twin-static-network path::after { stroke: red; }
 .twin-junctions circle { fill: #0d1d27; stroke: #456372; stroke-width: 2; }
+.twin-depot-connectors path {
+  fill: none;
+  stroke: #365666;
+  stroke-width: 6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
 .twin-room-connectors path { fill: none; stroke: #365666; stroke-width: 5; stroke-linecap: round; }
-.twin-room rect { fill: #11232e; stroke: #304d5c; stroke-width: 1; }
-.twin-room-code { fill: #7e99a6; font-size: 7px; font-weight: 700; }
-.twin-room-course { fill: #bcd0d8; font-size: 7px; }
+.twin-room { cursor: default; }
+.twin-room rect { fill: #11232e; stroke: #385866; stroke-width: 1; transition: fill .18s,stroke .18s; }
+.twin-room:hover rect { fill: #17303c; stroke: #65a6b9; }
+.twin-room-code { fill: #8fa8b3; font-size: 8px; font-weight: 700; }
+.twin-room-course { fill: #d1e0e5; font-size: 8px; font-weight: 600; }
 .twin-room.is-filled rect { fill: #12303a; stroke: #3a8191; }
 .twin-room.is-filled .twin-room-course { fill: #77e0d0; font-weight: 700; }
 .twin-room.is-disabled rect { fill: #101922; stroke: #23323b; opacity: .62; }

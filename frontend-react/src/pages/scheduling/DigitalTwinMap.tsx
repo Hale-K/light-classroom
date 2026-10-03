@@ -45,15 +45,31 @@ interface DigitalTwinMapProps {
 const DAY_ZONE_X = [338, 508, 678, 848, 1018]
 const SATURDAY_ZONE_X = [338, 508]
 
+function depotAccess(index: number) {
+  const column = index % 2
+  const row = Math.floor(index / 2)
+  const dockX = 154 + column * 132
+  const dockY = 94 + row * 82
+  const aisleX = column === 0 ? 159 : 294
+  const corridorY = dockY + 38
+  return {
+    dockX,
+    dockY,
+    corridorY,
+    path: `M ${dockX} ${dockY} H ${aisleX} V ${corridorY} H 304`,
+  }
+}
+
 function roomPosition(column: TwinColumn, row: TwinRow, columnIndex: number, columnCount: number) {
   if (row.type === 'day') {
     const isSaturday = column.weekday === 6
     const zoneIndex = isSaturday ? Math.max(0, columnIndex - 5) : Math.min(4, columnIndex)
     const zoneX = isSaturday ? SATURDAY_ZONE_X[zoneIndex] ?? SATURDAY_ZONE_X[0] : DAY_ZONE_X[zoneIndex] ?? DAY_ZONE_X[0]
     const zoneY = isSaturday ? 438 : 76
-    const roomColumn = (row.period - 1) % 3
-    const roomRow = Math.floor((row.period - 1) / 3)
-    return { x: zoneX + 15 + roomColumn * 43, y: zoneY + 62 + roomRow * 49, width: 36, height: 35 }
+    const roomColumn = (row.period - 1) % 2
+    const roomRow = Math.floor((row.period - 1) / 2)
+    if (isSaturday) return { x: zoneX + 10 + roomColumn * 76, y: zoneY + 38 + roomRow * 42, width: 52, height: 31 }
+    return { x: zoneX + 10 + roomColumn * 76, y: zoneY + 54 + roomRow * 48, width: 52, height: 34 }
   }
 
   const isOdd = row.parity === 'odd'
@@ -111,10 +127,9 @@ export default function DigitalTwinMap({
 
   const activeRoom = rooms.find((room) => room.slotIndex === activeSlotIndex && !room.unavailable) ?? rooms.find((room) => !room.unavailable)
   const warehouseIndex = Math.max(0, subjectNames.findIndex((name) => name === activeSubject))
-  const sourceColumn = warehouseIndex % 2
-  const sourceRow = Math.floor(warehouseIndex / 2)
-  const sourceX = 154 + sourceColumn * 132
-  const sourceY = 94 + sourceRow * 82
+  const sourceAccess = depotAccess(warehouseIndex)
+  const sourceX = sourceAccess.dockX
+  const sourceY = sourceAccess.dockY
   const targetX = activeRoom ? activeRoom.x + activeRoom.width / 2 : 338
   const targetY = activeRoom ? activeRoom.y + activeRoom.height / 2 : 138
   const routeHubY = activeRoom?.zone.startsWith('DAY') ? 214 : 575
@@ -125,7 +140,7 @@ export default function DigitalTwinMap({
       : activeRoom?.zone === 'S-EVEN'
         ? SATURDAY_ZONE_X[1] + 70
         : targetX
-  const routePath = `M ${sourceX} ${sourceY} H 304 V ${routeHubY} H ${routeSpineX} V ${targetY} H ${targetX}`
+  const routePath = `${sourceAccess.path} V ${routeHubY} H ${routeSpineX} V ${targetY} H ${targetX}`
   const routeStyle = { '--route-length': Math.max(1, Math.abs(sourceY - targetY) + Math.abs(targetX - sourceX)) } as CSSProperties
 
   return (
@@ -162,11 +177,11 @@ export default function DigitalTwinMap({
           <rect width="1200" height="720" rx="18" fill="url(#twin-grid)" />
 
           <g className="twin-zone-labels">
-            {DAY_ZONE_X.map((x, index) => <text x={x} y="54" key={x}>{`0${index + 1} / 周${['一', '二', '三', '四', '五'][index]}`}</text>)}
-            <text x="338" y="416">S-ODD / 单周周六</text>
-            <text x="508" y="416">S-EVEN / 双周周六</text>
-            <text x="678" y="416">E-ODD / 单周晚自习</text>
-            <text x="936" y="416">E-EVEN / 双周晚自习</text>
+            {DAY_ZONE_X.map((x, index) => <text x={x} y="54" key={x}>{`周${['一', '二', '三', '四', '五'][index]}教学区 · DAY 0${index + 1}`}</text>)}
+            <text x="338" y="416">单周周六 · ODD SAT</text>
+            <text x="508" y="416">双周周六 · EVEN SAT</text>
+            <text x="678" y="416">单周晚自习 · ODD EVENING</text>
+            <text x="936" y="416">双周晚自习 · EVEN EVENING</text>
           </g>
 
           <g className="twin-zone-blocks">
@@ -174,6 +189,13 @@ export default function DigitalTwinMap({
             {SATURDAY_ZONE_X.map((x, index) => <rect x={x} y="430" width="148" height="252" rx="8" key={`sat-zone-${index}`} />)}
             <rect x="678" y="430" width="240" height="252" rx="8" className="is-odd" />
             <rect x="936" y="430" width="240" height="252" rx="8" className="is-even" />
+          </g>
+
+          <g className="twin-depot-connectors">
+            {subjectNames.map((name, index) => {
+              const access = depotAccess(index)
+              return <path d={access.path} key={`depot-track-${name}-${index}`} />
+            })}
           </g>
 
           <g className="twin-depot-zone">
@@ -209,6 +231,9 @@ export default function DigitalTwinMap({
           <g className="twin-junctions">
             {[214, 575].map((y) => <circle cx="304" cy={y} r="6" key={y} />)}
             {DAY_ZONE_X.map((x) => <circle cx={x + 70} cy="214" r="4" key={x} />)}
+            {Array.from({ length: Math.ceil(subjectNames.length / 2) }, (_, row) => (
+              <circle cx="304" cy={132 + row * 82} r="3.5" key={`depot-junction-${row}`} />
+            ))}
           </g>
 
           <g className="twin-room-connectors">
@@ -235,10 +260,11 @@ export default function DigitalTwinMap({
               const active = playbackActive && room.slotIndex === activeSlotIndex
               return (
                 <g className={`twin-room${room.item ? ' is-filled' : ''}${room.unavailable ? ' is-disabled' : ''}${active ? ' is-target' : ''}`} key={`${room.id}-${room.slotIndex}`}>
+                  <title>{`${room.detail}${room.item?.subject_name ? ` · ${room.item.subject_name}${room.item.teacher_name ? ` / ${room.item.teacher_name}` : ''}` : ' · 等待配送'}`}</title>
                   <rect x={room.x} y={room.y} width={room.width} height={room.height} rx="5" />
-                  <text x={room.x + room.width / 2} y={room.y + 14} textAnchor="middle" className="twin-room-code">{room.id}</text>
-                  <text x={room.x + room.width / 2} y={room.y + 27} textAnchor="middle" className="twin-room-course">
-                    {room.unavailable ? '×' : room.item?.subject_name?.slice(0, 3) || room.label}
+                  <text x={room.x + 5} y={room.y + 12} className="twin-room-code">{room.label}</text>
+                  <text x={room.x + 5} y={room.y + 26} className="twin-room-course">
+                    {room.item?.subject_name?.slice(0, 5) || '等待配送'}
                   </text>
                 </g>
               )
@@ -277,9 +303,9 @@ export default function DigitalTwinMap({
         </svg>
 
         <div className="twin-map-hud twin-map-hud-left">
-          <span>AGV NETWORK</span>
+          <span>AGV PIPELINE NETWORK</span>
           <strong>{playbackActive ? 'SIMULATING' : 'STANDBY'}</strong>
-          <small>轨道节点 {rooms.filter((room) => !room.unavailable).length + 12} · 房间 {rooms.filter((room) => !room.unavailable).length}</small>
+          <small>仓库接驳 {subjectNames.length} · 课位支路 {rooms.filter((room) => !room.unavailable).length} · 全线连通</small>
         </div>
         {activeRoom && activeSubject && playbackActive && (
           <div className="twin-map-hud twin-map-hud-job">

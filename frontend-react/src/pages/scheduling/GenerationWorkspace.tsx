@@ -172,7 +172,8 @@ export default function GenerationWorkspace({
   const playbackActive = generating || ((stage === 'refreshing' || stage === 'done') && previewPlaced < dispatchCapacity)
   useEffect(() => {
     if (!open || (!generating && !playbackActive)) return
-    const target = generating ? Math.min(dispatchCapacity, Math.max(0, Math.floor((percent / 100) * previewCapacity))) : dispatchCapacity
+    const solverHasPlan = solutions > 0 || stage === 'refreshing' || stage === 'done'
+    const target = solverHasPlan ? dispatchCapacity : Math.min(dispatchCapacity, Math.max(0, Math.floor((percent / 100) * previewCapacity)))
     if (robotPhase === 'pickup' && previewPlaced >= target) return
     const phaseDuration = robotPhase === 'pickup' ? 1800 : robotPhase === 'moving' ? 5400 : 1300
     const timer = window.setTimeout(() => {
@@ -193,7 +194,7 @@ export default function GenerationWorkspace({
       setRobotPhase('pickup')
     }, phaseDuration)
     return () => window.clearTimeout(timer)
-  }, [open, generating, playbackActive, percent, dispatchCapacity, previewCapacity, previewPlaced, previewQueue.length, robotPhase])
+  }, [open, generating, playbackActive, percent, solutions, stage, dispatchCapacity, previewCapacity, previewPlaced, previewQueue.length, robotPhase])
   const displayedSlots = useMemo(() => {
     const findEntry = (column: Column, row: VisualRow) => {
       if (row.type === 'day') return calendar.find((item) => item.weekday === column.weekday && item.period === row.period && parityMatches(item, column))
