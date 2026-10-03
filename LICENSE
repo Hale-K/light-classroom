@@ -1,16 +1,34 @@
-MIT License
+Light Classroom Non-Commercial License
+Version 1.0 — 2026
 
 Copyright (c) 2026 Light Classroom contributors
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+1. Grant of permission
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Permission is granted, free of charge, to any person obtaining a copy of this
+software and its associated documentation (the "Software") to use, copy,
+modify, and run the Software for personal, educational, research, or other
+non-commercial purposes, subject to the conditions below.
+
+2. Commercial use
+
+Commercial use requires prior written permission from the copyright holder.
+Commercial use includes, but is not limited to:
+
+  - selling or sublicensing the Software;
+  - incorporating the Software into a commercial product or service;
+  - offering the Software as a paid hosted or managed service; and
+  - using the Software to provide services for commercial advantage or
+    monetary compensation.
+
+3. Distribution
+
+Distribution of the Software or modified versions of the Software is allowed
+only for non-commercial purposes and must include this license and the
+copyright notice. Commercial distribution requires separate written
+permission.
+
+4. No warranty
 
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -19,3 +37,9 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+5. Third-party components
+
+This license applies only to original code in this repository. Third-party
+software, assets, models, and dependencies remain subject to their own
+licenses.
