@@ -53,15 +53,14 @@ const LOWER_FEEDER_X = 672
 function depotAccess(index: number) {
   const column = index % 2
   const row = Math.floor(index / 2)
-  const dockX = 154 + column * 132
-  const dockY = 94 + row * 82
-  const aisleX = column === 0 ? 159 : 294
-  const corridorY = dockY + 38
+  const dockX = 93 + column * 132
+  const dockY = 122 + row * 82
+  const corridorY = dockY + 10
   return {
     dockX,
     dockY,
     corridorY,
-    path: `M ${dockX} ${dockY} H ${aisleX} V ${corridorY} H 304`,
+    path: `M ${dockX} ${dockY} V ${corridorY} H 304`,
   }
 }
 
@@ -197,9 +196,12 @@ export default function DigitalTwinMap({
           </g>
 
           <g className="twin-depot-connectors">
+            {Array.from({ length: Math.ceil(subjectNames.length / 2) }, (_, row) => (
+              <path d={`M 93 ${132 + row * 82} H 304`} key={`depot-corridor-${row}`} />
+            ))}
             {subjectNames.map((name, index) => {
               const access = depotAccess(index)
-              return <path d={access.path} key={`depot-track-${name}-${index}`} />
+              return <path d={`M ${access.dockX} ${access.dockY} V ${access.corridorY}`} key={`depot-track-${name}-${index}`} />
             })}
           </g>
 
@@ -217,7 +219,7 @@ export default function DigitalTwinMap({
                   <rect x={x + 8} y={y + 9} width="7" height="38" rx="3" className="twin-depot-signal" />
                   <text x={x + 25} y={y + 23} className="twin-depot-name">{name}仓</text>
                   <text x={x + 25} y={y + 41} className="twin-depot-code">{`D-${String(index + 1).padStart(2, '0')}`}</text>
-                  <circle cx={x + 122} cy={y + 28} r="4" className="twin-dock" />
+                  <circle cx={x + 61} cy={y + 56} r="4" className="twin-dock" />
                 </g>
               )
             })}
