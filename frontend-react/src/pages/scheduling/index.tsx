@@ -30,6 +30,7 @@ import RuleGroupWorkbench, {
   type RuleGroup,
 } from './RuleGroupWorkbench'
 import GenerationDiagnosisDrawer from './GenerationDiagnosisDrawer'
+import GenerationWorkspace from './GenerationWorkspace'
 import CourseHoursPanel from './course-hours'
 import ScheduleVerifyWorkbench from './ScheduleVerifyWorkbench'
 import SlotStructurePanel from './SlotStructurePanel'
@@ -86,6 +87,7 @@ export default function SchedulingView() {
     token: number
   } | null>(null)
   const [diagOpen, setDiagOpen] = useState(false)
+  const [generationWorkspaceOpen, setGenerationWorkspaceOpen] = useState(false)
   const [ruleCatalogEpoch, setRuleCatalogEpoch] = useState(0)
   useEffect(() => {
     const refreshRules = () => setRuleCatalogEpoch((n) => n + 1)
@@ -972,6 +974,7 @@ export default function SchedulingView() {
     setGenElapsed(0)
     setGenSolutions(0)
     setGenSummary('已提交生成任务，等待进度…')
+    setGenerationWorkspaceOpen(true)
     setDiagOpen(true)
     try {
       const payload = {
@@ -1258,6 +1261,22 @@ export default function SchedulingView() {
 
   return (
     <div className="sk-page">
+      <GenerationWorkspace
+        open={generationWorkspaceOpen}
+        generating={generating}
+        stage={genStage}
+        percent={genPercent}
+        elapsed={genElapsed}
+        solutions={genSolutions}
+        summary={genSummary}
+        trace={genTrace}
+        assignments={resources.assignments.filter((item) => item.academic_year === academicYear && item.term === term)}
+        calendar={calendar}
+        gridConfig={gridConfig}
+        academicYear={academicYear}
+        term={term}
+        onClose={() => setGenerationWorkspaceOpen(false)}
+      />
       <PageHeader
         title="排课管理"
         extra={
