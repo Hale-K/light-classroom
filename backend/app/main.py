@@ -123,7 +123,7 @@ async def health():
 
 
 # ---------- 路由挂载（按模块陆续加） ----------
-from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge
+from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, student_auth, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(org.router, prefix="/api/v1")
@@ -135,6 +135,7 @@ app.include_router(scheduling.router, prefix="/api/v1")
 app.include_router(seating.router, prefix="/api/v1")
 app.include_router(exam_scheduling.router, prefix="/api/v1")
 app.include_router(gaokao.router, prefix="/api/v1")
+app.include_router(student_auth.router, prefix="/api/v1")
 app.include_router(staff.router, prefix="/api/v1")
 app.include_router(organization.router, prefix="/api/v1")
 app.include_router(facilities.router, prefix="/api/v1")

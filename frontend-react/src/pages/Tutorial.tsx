@@ -84,23 +84,30 @@ export default function TutorialPage() {
             />
             <Title level={4}>2.1 创建组织架构</Title>
             <Paragraph>
-              在「人员账号」中点击「新建组织」，选择组织类型并填写名称。年级部需挂到「年级管理中心」下，学科组需关联对应科目。
+              在「人员账号」中点击「新建组织」，先建立「年级管理中心」，再创建年级部和学科教研组。年级部需要绑定系统中的对应年级，学科组需要关联对应科目。
             </Paragraph>
             <Image
-              src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=A%20clean%20modern%20education%20management%20system%20screenshot%20showing%20organization%20tree%20with%20departments%20and%20grade%20levels%2C%20light%20theme%2C%20Chinese%20UI&image_size=landscape_16_9"
+              src="/tutorial/personnel-organization.png"
               alt="创建组织架构"
               style={{ borderRadius: 8, marginBottom: 24, width: '100%' }}
-              preview={false}
+              preview
+            />
+            <Alert
+              type="info"
+              showIcon
+              message="人员分配关系说明"
+              description="左侧组织树用于切换查看范围；右侧人员可以同时加入学科教研组和对应年级部。岗位职责在人员编辑中配置，账号状态可在列表中直接启用或停用。"
+              style={{ marginBottom: 24 }}
             />
             <Title level={4}>2.2 新增人员账号</Title>
             <Paragraph>
-              点击「新增人员」，填写教师基本信息并分配岗位职责，如班主任、任课教师等。
+              点击「新增人员」，填写姓名、登录手机号和初始密码，选择人员类型、岗位角色及所属组织。教师账号还需要选择教师职级；同一人员可以同时加入学科教研组和一个年级部。
             </Paragraph>
             <Image
-              src="https://trae-api-cn.mchost.guru/api/ide/v1/text_to_image?prompt=A%20clean%20modern%20education%20management%20system%20screenshot%20showing%20add%20staff%20account%20form%20modal%20with%20name%20phone%20role%20fields%2C%20light%20theme%2C%20Chinese%20UI&image_size=landscape_16_9"
+              src="/tutorial/personnel-account-create.png"
               alt="新增人员"
               style={{ borderRadius: 8, width: '100%' }}
-              preview={false}
+              preview
             />
           </div>
           <Divider />

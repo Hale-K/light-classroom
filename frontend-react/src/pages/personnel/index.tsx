@@ -105,8 +105,11 @@ export default function PersonnelView() {
   )
   const appointedIds = useMemo(() => new Set(appointments.map((item) => item.staff_id)), [appointments])
   const visibleAccounts = useMemo(() => accounts.filter((account) => {
+    // 校长是学校级账号，归属由 tenant_id 表示，不需要再挂到某个组织单元。
+    // 因此不能把没有 StaffAppointment 的校长账号算进“未分配组织”。
+    const isUnassigned = !account.is_school_admin && !appointedIds.has(account.id)
     const inOrganization = selectedKey === 'school' || (selectedKey === 'unassigned'
-      ? !appointedIds.has(account.id)
+      ? isUnassigned
       : appointments.some((item) => item.organization_unit_id === selectedKey && item.staff_id === account.id))
     const query = appliedKeyword.trim().toLowerCase()
     return inOrganization && (!query || account.name.toLowerCase().includes(query) || account.phone.includes(query)) && (!appliedStatus || account.status === appliedStatus)
@@ -277,6 +280,9 @@ export default function PersonnelView() {
   const columns: TableProps<StaffAccount>['columns'] = [
     { title: '人员', dataIndex: 'name', render: (name, row) => <div className="zh-person-cell"><strong>{name}</strong><span>{row.is_school_admin ? '校长账号' : row.phone}</span></div> },
     { title: '所属组织', key: 'organization', render: (_, row) => {
+      if (row.is_school_admin) {
+        return <Tag color="blue">{org?.school.name || '本校'} · 校长管理员</Tag>
+      }
       const items = appointments.filter((item) => item.staff_id === row.id)
       return items.length
         ? <Space size={[4, 4]} wrap>{items.map((item) => (
@@ -306,7 +312,7 @@ export default function PersonnelView() {
         data={org}
         appointments={appointments}
         totalCount={accounts.length}
-        unassignedCount={accounts.filter((item) => !appointedIds.has(item.id)).length}
+        unassignedCount={accounts.filter((item) => !item.is_school_admin && !appointedIds.has(item.id)).length}
         selectedKey={selectedKey}
         expandedKeys={expandedKeys}
         onExpand={setExpandedKeys}

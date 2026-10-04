@@ -12,6 +12,7 @@ An intelligent academic administration platform for senior high schools.
 - 多租户学校管理：平台超管开通学校，学校端独立登录，请求通过 `X-School-Code` 隔离数据
 - 教师档案、学生、班级、科目、课时和任教关系管理
 - 基于 OR-Tools CP-SAT 的规则化自动排课
+- 新高考 3+1+2 走班：学生端选科、教学班生成、师资/教室资源校验和走班课表
 - 排课规则工作台、课表预览、调课和异步生成任务
 - 文件中心，支持 MinIO 或腾讯云 COS
 - AI 教务助手：页面上下文、只读教务工具、可恢复运行、流式进度和确认式变更方案
@@ -94,11 +95,14 @@ pnpm dev -- --port 5176
 | --- | --- |
 | 学校教务后台 | http://127.0.0.1:5176/login |
 | 平台超管后台 | http://127.0.0.1:5176/admin/login |
+| 学生选科登录 | http://127.0.0.1:5176/student/login |
 | API | http://127.0.0.1:8001 |
 | OpenAPI 文档 | http://127.0.0.1:8001/docs |
 | 健康检查 | http://127.0.0.1:8001/health |
 
 打开 `http://127.0.0.1:5176` 会进入前端应用；学校教务人员使用 `/login` 登录，平台超管使用 `/admin/login` 登录。开发超管账号由 `backend/.env` 中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 配置，部署前必须修改示例口令。
+
+学生使用学校代码、学号和学生端初始密码登录 `/student/login`。教务人员进入“学生档案”，点击“开通学生登录”，按年级批量生成学生账号；账号开通后，学生在“我的高考选科”页面保存草稿或提交选科。学生端与教职工账号体系隔离。
 
 开发环境 `APP_ENV=dev` 时可以自动建表并写入内置角色。生产环境请按 [`docs/deploy.md`](docs/deploy.md) 执行迁移和部署。
 
@@ -130,6 +134,7 @@ pytest
 - [前端页面](docs/frontend.md)
 - [数据库 ER 图](docs/ER-diagram.md)
 - [排课规格](docs/specs/schedule-and-seating.md)
+- [新高考走班规格与操作流程](docs/specs/new-gaokao-walk-class.md)
 - [贡献指南](CONTRIBUTING.md)
 
 ## 许可证

@@ -9,9 +9,13 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("ai_run", sa.Column("checkpoint", sa.JSON(), nullable=False, server_default=sa.text("'{}'")))
-    op.alter_column("ai_run", "checkpoint", server_default=None)
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("ai_run")}
+    if "checkpoint" not in columns:
+        op.add_column("ai_run", sa.Column("checkpoint", sa.JSON(), nullable=False, server_default=sa.text("'{}'")))
+        op.alter_column("ai_run", "checkpoint", server_default=None)
 
 
 def downgrade() -> None:
-    op.drop_column("ai_run", "checkpoint")
+    columns = {column["name"] for column in sa.inspect(op.get_bind()).get_columns("ai_run")}
+    if "checkpoint" in columns:
+        op.drop_column("ai_run", "checkpoint")

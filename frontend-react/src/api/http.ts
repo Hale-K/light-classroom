@@ -72,6 +72,10 @@ function isAdminUrl(url?: string): boolean {
   return !!url && url.startsWith('/admin')
 }
 
+function isStudentUrl(url?: string): boolean {
+  return !!url && url.startsWith('/student-auth')
+}
+
 function newTraceId(): string {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID().replace(/-/g, '').slice(0, 16)
@@ -97,7 +101,11 @@ function createHttp(baseURL: string): AxiosInstance {
   })
 
   http.interceptors.request.use((config) => {
-    const token = isAdminUrl(config.url) ? resolver.getAdminToken() : resolver.getToken()
+    const token = isAdminUrl(config.url)
+      ? resolver.getAdminToken()
+      : isStudentUrl(config.url)
+        ? localStorage.getItem('zh_student_token')
+        : resolver.getToken()
     if (token) config.headers.Authorization = `Bearer ${token}`
     config.headers['X-School-Code'] = resolver.getSchoolCode()
     config.headers['X-Trace-Id'] = newTraceId()
@@ -118,7 +126,13 @@ function createHttp(baseURL: string): AxiosInstance {
         || error?.config?.headers?.['X-Trace-Id']
       if (status === 401) {
         const detail = normalizeErrorDetail(error?.response?.data?.detail)
-        resolver.onUnauthorized()
+        if (isStudentUrl(error?.config?.url)) {
+          localStorage.removeItem('zh_student_token')
+          localStorage.removeItem('zh_student_user')
+          window.location.href = '/student/login'
+        } else {
+          resolver.onUnauthorized()
+        }
         throw new ApiError(detail || '登录已失效，请重新登录', 401, 401, traceId)
       }
       if (status === 403 && !isAdminUrl(error?.config?.url)) {

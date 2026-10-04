@@ -54,6 +54,17 @@ class RoomIn(BaseModel):
     is_meeting_enabled: bool = False
 
 
+class BatchRoomIn(BaseModel):
+    building_id: int
+    floor: int = Field(default=1, ge=-5, le=100)
+    count: int = Field(default=10, ge=1, le=500)
+    start_number: int = Field(default=1, ge=1, le=9999)
+    name_prefix: str = Field(default="教室", min_length=1, max_length=30)
+    capacity: int = Field(default=45, ge=1, le=5000)
+    multimedia: bool = False
+    is_schedulable: bool = True
+
+
 class ResourceAllocationRuleIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     cohort_label: str = Field(pattern=r"^\d{4}$")
@@ -221,6 +232,38 @@ async def create_room(body: RoomIn, tenant_id: int = Depends(get_current_tenant)
     item = Room(tenant_id=tenant_id, **body.model_dump()); session.add(item)
     await session.commit(); await session.refresh(item)
     return {"code": 0, "message": "ok", "data": item.model_dump()}
+
+
+@router.post("/facilities/rooms/batch", status_code=status.HTTP_201_CREATED)
+async def create_rooms_batch(body: BatchRoomIn, tenant_id: int = Depends(get_current_tenant),
+    session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
+    await require_manager(session, user)
+    await tenant_item(session, Building, body.building_id, tenant_id, "楼宇")
+    existing_names = set((await session.execute(select(Room.name).where(
+        Room.tenant_id == tenant_id, Room.building_id == body.building_id,
+    ))).scalars().all())
+    created: list[Room] = []
+    skipped: list[str] = []
+    for offset in range(body.count):
+        number = body.start_number + offset
+        name = f"{body.name_prefix}{number:02d}"
+        if name in existing_names:
+            skipped.append(name)
+            continue
+        item = Room(
+            tenant_id=tenant_id, building_id=body.building_id, name=name,
+            code=f"{body.floor:02d}-{number:03d}", floor=body.floor,
+            capacity=body.capacity, room_type="classroom",
+            features=["multimedia"] if body.multimedia else [],
+            is_schedulable=body.is_schedulable,
+        )
+        session.add(item)
+        created.append(item)
+        existing_names.add(name)
+    await session.commit()
+    return {"code": 0, "message": "ok", "data": {
+        "created_count": len(created), "skipped_count": len(skipped), "skipped_names": skipped,
+    }}
 
 
 async def scoped_rooms(

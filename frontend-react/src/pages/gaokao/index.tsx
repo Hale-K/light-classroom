@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Card, Select, Table, Tag } from 'antd'
+import { Alert, App, Button, Card, Popconfirm, Select, Space, Table, Tag } from 'antd'
 import { authApi, gaokaoApi } from '@/api'
 import type { GaokaoOverview } from '@/api'
 import PageHeader from '@/components/PageHeader'
@@ -30,6 +30,9 @@ export default function GaokaoView() {
   const [overview, setOverview] = useState<GaokaoOverview>()
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState('')
+  const [reviewChoices, setReviewChoices] = useState<import('@/api').GaokaoChoiceReview[]>([])
+  const [reviewingId, setReviewingId] = useState<number>()
+  const [selectedReviewIds, setSelectedReviewIds] = useState<number[]>([])
 
   const isWalkClass = mode !== 'traditional'
   const workflow = overview?.workflow
@@ -44,6 +47,14 @@ export default function GaokaoView() {
       })
       setOverview(data)
       setGradeId((prev) => prev ?? data.grades[0]?.id)
+      const reviews = await gaokaoApi.choicesForReview({
+        academic_year: academicYear,
+        term,
+        grade_id: gradeId,
+        status_filter: 'confirmed',
+      }).catch(() => [])
+      setReviewChoices(reviews)
+      setSelectedReviewIds([])
     } catch (e) {
       message.error(e instanceof Error ? e.message : '选科数据加载失败')
     } finally {
@@ -111,6 +122,34 @@ export default function GaokaoView() {
       await load()
     } catch (e) {
       message.error(e instanceof Error ? e.message : '走班课表生成失败')
+    } finally {
+      setGenerating('')
+    }
+  }
+
+  const reviewChoice = async (choiceId: number, action: 'approve' | 'reject') => {
+    setReviewingId(choiceId)
+    try {
+      await gaokaoApi.reviewChoice(choiceId, action)
+      setReviewChoices((items) => items.filter((item) => item.id !== choiceId))
+      message.success(action === 'approve' ? '选科已审核通过并锁定' : '选科已驳回，学生可重新提交')
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '选科审核失败')
+    } finally {
+      setReviewingId(undefined)
+    }
+  }
+
+  const batchApproveChoices = async () => {
+    if (!selectedReviewIds.length) return
+    setGenerating('review-batch')
+    try {
+      const result = await gaokaoApi.batchApproveChoices(selectedReviewIds)
+      setReviewChoices((items) => items.filter((item) => !selectedReviewIds.includes(item.id)))
+      setSelectedReviewIds([])
+      message.success(`已批量通过 ${result.updated} 人${result.skipped ? `，跳过 ${result.skipped} 人` : ''}`)
+    } catch (e) {
+      message.error(e instanceof Error ? e.message : '批量审核失败')
     } finally {
       setGenerating('')
     }
@@ -221,6 +260,52 @@ export default function GaokaoView() {
           <strong>{isWalkClass ? stats.teaching : stats.combos}</strong>
         </div>
       </div>
+
+      <Card
+        className="gk-card"
+        title={`班级选科审核（待审 ${reviewChoices.length} 人）`}
+        style={{ marginBottom: 18 }}
+        extra={
+          <Space>
+            <span style={{ color: '#718096', fontSize: 12 }}>登录班主任账号后，仅显示本人所带班级</span>
+            <Popconfirm title={`确认通过选中的 ${selectedReviewIds.length} 人？`} onConfirm={() => void batchApproveChoices()} okText="通过并锁定" cancelText="取消">
+              <Button type="primary" size="small" disabled={!selectedReviewIds.length} loading={generating === 'review-batch'}>
+                批量通过并锁定
+              </Button>
+            </Popconfirm>
+          </Space>
+        }
+      >
+        <Table
+          rowKey="id"
+          size="small"
+          loading={loading}
+          dataSource={reviewChoices}
+          rowSelection={{ selectedRowKeys: selectedReviewIds, onChange: (keys) => setSelectedReviewIds(keys as number[]) }}
+          pagination={{ pageSize: 8, showSizeChanger: false }}
+          locale={{ emptyText: '暂无待审核的学生选科' }}
+          columns={[
+            { title: '学生', key: 'student', render: (_: unknown, row: import('@/api').GaokaoChoiceReview) => `${row.student_name}（${row.student_no}）` },
+            { title: '首选', dataIndex: 'primary_subject_name', width: 100 },
+            { title: '再选', dataIndex: 'secondary_subject_names', width: 180, render: (names: string[]) => names.join('、') },
+            { title: '轮次', dataIndex: 'round_no', width: 70 },
+            {
+              title: '操作',
+              width: 180,
+              render: (_: unknown, row: import('@/api').GaokaoChoiceReview) => (
+                <span>
+                  <Popconfirm title="确认通过并锁定该学生选科？" onConfirm={() => void reviewChoice(row.id, 'approve')} okText="通过" cancelText="取消">
+                    <Button type="link" size="small" loading={reviewingId === row.id}>通过并锁定</Button>
+                  </Popconfirm>
+                  <Popconfirm title="确认驳回该学生选科？" onConfirm={() => void reviewChoice(row.id, 'reject')} okText="驳回" cancelText="取消">
+                    <Button type="link" danger size="small" disabled={reviewingId === row.id}>驳回</Button>
+                  </Popconfirm>
+                </span>
+              ),
+            },
+          ]}
+        />
+      </Card>
 
       <div className="gk-grid">
         <Card

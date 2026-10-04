@@ -46,6 +46,8 @@ import TeacherClasses from '@/pages/teacher/TeacherClasses'
 import TeacherStudents from '@/pages/teacher/TeacherStudents'
 import ForbiddenPage from '@/pages/Forbidden'
 import TutorialPage from '@/pages/Tutorial'
+import StudentLogin from '@/pages/student/Login'
+import StudentChoice from '@/pages/student/Choice'
 
 /** 根路由：挂载 API 鉴权 resolver（token / 学校代码 / 401 跳转） */
 function Root() {
@@ -84,6 +86,8 @@ export const router = createBrowserRouter([
     element: <Root />,
     children: [
       { path: '/login', element: <Login /> },
+      { path: '/student/login', element: <StudentLogin /> },
+      { path: '/student/choice', element: <StudentChoice /> },
       // 平台超管后台（创建学校）
       { path: '/admin/login', element: <AdminLogin /> },
       { path: '/403', element: <ForbiddenPage /> },

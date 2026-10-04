@@ -7,8 +7,20 @@ from app.services.academic.gaokao import (
     generate_walk_schedule,
     get_subject_choice_strategy,
     resolve_selection_phase,
+    validate_scheme_configuration,
     validate_subject_choice,
 )
+
+
+def test_312_scheme_requires_three_required_two_primary_and_four_secondary_subjects():
+    validate_scheme_configuration("3+1+2", [1, 2, 3], [4, 8], [5, 6, 7, 9])
+    with pytest.raises(ValueError, match="4 门再选"):
+        validate_scheme_configuration("3+1+2", [1, 2, 3], [4, 8], [5, 6, 7])
+
+
+def test_scheme_subject_pools_cannot_overlap():
+    with pytest.raises(ValueError, match="不能重复"):
+        validate_scheme_configuration("3+1+2", [1, 2, 3], [4, 8], [5, 6, 7, 3])
 
 
 def test_validate_312_choice_accepts_one_primary_and_two_distinct_secondary_subjects():
@@ -149,3 +161,16 @@ def test_generate_walk_schedule_prevents_shared_student_and_teacher_conflicts():
                 continue
             assert left.teacher_id != right.teacher_id
             assert set(left.student_ids).isdisjoint(right.student_ids)
+
+
+def test_generate_walk_schedule_prevents_shared_room_conflicts():
+    tasks = [
+        {"id": 1, "teacher_id": 10, "room_key": "A101", "student_ids": [1], "weekly_periods": 2},
+        {"id": 2, "teacher_id": 11, "room_key": "A101", "student_ids": [2], "weekly_periods": 2},
+    ]
+
+    result = generate_walk_schedule(tasks, days=1, periods_per_day=4)
+
+    assert result.unplaced == []
+    slots = {(item.weekday, item.period) for item in result.items}
+    assert len(slots) == len(result.items)

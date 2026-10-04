@@ -11,7 +11,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.security import decode_access_token
 from app.db.session import get_session, tenant_id_ctx
-from app.models.org import User
+from app.models.org import User, Student
+from app.models.gaokao import StudentCredential
 from app.models.admin import PlatformAdmin
 from app.models.rbac import Role, UserRole, Permission, RolePermission
 
@@ -51,6 +52,33 @@ async def get_current_user(
             detail=f"账号已被冻结：{user.freeze_reason or '请联系管理员'}",
         )
     return user
+
+
+async def get_current_student(
+    creds: HTTPAuthorizationCredentials | None = Depends(bearer),
+    session: AsyncSession = Depends(get_session),
+) -> Student:
+    """学生端认证依赖：只接受 scope=student 的隔离令牌。"""
+    token = creds.credentials if creds else None
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="缺少学生令牌")
+    try:
+        payload = decode_access_token(token)
+    except JWTError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="学生令牌无效或已过期")
+    if payload.get("scope") != "student" or payload.get("sid") is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="非学生端令牌")
+    student = await session.get(Student, int(payload["sid"]))
+    if student is None or student.status.value != "studying":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="学生不存在或已停学")
+    credential = (await session.execute(select(StudentCredential).where(
+        StudentCredential.student_id == student.id,
+        StudentCredential.tenant_id == student.tenant_id,
+        StudentCredential.status == "active",
+    ))).scalar_one_or_none()
+    if credential is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="学生账号不存在或已停用")
+    return student
 
 
 async def get_current_tenant() -> int:

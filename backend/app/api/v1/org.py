@@ -6,7 +6,7 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select, func, update, or_
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -56,6 +56,20 @@ class StudentIn(BaseModel):
     height_cm: float | None = Field(default=None, ge=80, le=250)
     student_no: str | None = None
     roster_order: int = 0
+
+
+class StudentSimulationIn(BaseModel):
+    """批量生成用于排课/分班演示的学生档案。"""
+    cohort_label: str = Field(min_length=1, max_length=30)
+    grade_id: int
+    male_count: int = Field(default=0, ge=0, le=5000)
+    female_count: int = Field(default=0, ge=0, le=5000)
+
+    @model_validator(mode="after")
+    def require_students(self):
+        if self.male_count + self.female_count <= 0:
+            raise ValueError("男生和女生人数至少填写一项")
+        return self
 
 
 class ClassAssignmentIn(BaseModel):
@@ -571,6 +585,91 @@ async def create_student(body: StudentIn, session: AsyncSession = Depends(get_se
     await session.commit()
     await session.refresh(student)
     return {"code": 0, "message": "ok", "data": student.model_dump()}
+
+
+@router.post("/students/simulate", summary="批量生成模拟学生", status_code=201)
+async def simulate_students(
+    body: StudentSimulationIn,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """按届别和年级生成待分班学生，并同步学生年级关联。"""
+    total = body.male_count + body.female_count
+    if total <= 0:
+        raise HTTPException(status_code=422, detail="男生和女生人数至少填写一项")
+
+    cohort_label = normalize_cohort_label(body.cohort_label)
+    if not cohort_label:
+        raise HTTPException(status_code=422, detail="届别不能为空")
+    grade = (await session.execute(select(Grade).where(
+        Grade.id == body.grade_id,
+        Grade.tenant_id == tenant_id,
+    ))).scalar_one_or_none()
+    if grade is None:
+        raise HTTPException(status_code=404, detail="目标年级不存在或不属于当前学校")
+
+    academic_year = await current_academic_year(session, tenant_id)
+    grade_unit = (await session.execute(select(OrganizationUnit).where(
+        OrganizationUnit.tenant_id == tenant_id,
+        OrganizationUnit.unit_type == "grade_group",
+        OrganizationUnit.grade_id == body.grade_id,
+        OrganizationUnit.academic_year == academic_year,
+        OrganizationUnit.cohort_label == cohort_label,
+        OrganizationUnit.status == "active",
+    ).order_by(OrganizationUnit.id))).scalars().first()
+    if grade_unit is None:
+        raise HTTPException(status_code=422, detail=f"当前学年尚未配置{cohort_label}届{grade.name}对应的年级部")
+
+    prefix = f"SIM-{cohort_label}-G{body.grade_id}-"
+    existing_numbers = set((await session.execute(select(Student.student_no).where(
+        Student.tenant_id == tenant_id,
+        Student.student_no.like(f"{prefix}%"),
+    ))).scalars().all())
+    sequence = 1
+    generated: list[Student] = []
+    for gender, count, gender_label in (
+        (Gender.male, body.male_count, "男"),
+        (Gender.female, body.female_count, "女"),
+    ):
+        for _ in range(count):
+            while f"{prefix}{sequence:04d}" in existing_numbers:
+                sequence += 1
+            student_no = f"{prefix}{sequence:04d}"
+            existing_numbers.add(student_no)
+            generated.append(Student(
+                tenant_id=tenant_id,
+                campus_id=grade.campus_id,
+                grade_id=grade.id,
+                class_id=None,
+                name=f"模拟{gender_label}生{cohort_label}-{sequence:04d}",
+                gender=gender,
+                student_no=student_no,
+                roster_order=sequence,
+            ))
+            sequence += 1
+
+    session.add_all(generated)
+    await session.flush()
+    for student in generated:
+        await sync_student_grade_membership(
+            session,
+            tenant_id=tenant_id,
+            student=student,
+            grade_id=grade.id,
+            academic_year=academic_year,
+        )
+    await session.commit()
+    return {"code": 0, "message": "ok", "data": {
+        "created": len(generated),
+        "male_count": body.male_count,
+        "female_count": body.female_count,
+        "cohort_label": cohort_label,
+        "grade_id": grade.id,
+        "grade_name": grade.name,
+        "academic_year": academic_year,
+        "status": "待分班",
+    }}
 
 
 @router.patch("/students/assign-class", summary="批量行政分班或移回待分班")

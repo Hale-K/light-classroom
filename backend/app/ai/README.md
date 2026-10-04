@@ -21,9 +21,6 @@
 
 入口：`POST /assistant/runs` → `AssistantGateway` → `agent.assistant_agent.handle_assistant_turn`。
 模型不支持工具调用时自动降级为「目录路由 + 直接补全」路径。
-同一问题短时间重复提问走回答缓存（`app/utils/answer_cache.py`）：只取说明书的问题缓存 6 小时，
-查过本校实时数据的问题缓存 2 分钟；草稿与降级回答不缓存。
-
 确认：`POST /assistant/actions/{id}`，body 为 `{"decision":"confirm"}` 或 `{"decision":"cancel"}`。
 模型没有执行工具。草稿绑定学校、发起人，20 分钟有效；确认需 `scheduling:assign`，规则组/课位/学期改变后重新预览。追加规则与审计回执在同一事务提交，重复确认返回原回执。
 

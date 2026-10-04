@@ -6,7 +6,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_tenant, get_current_user
@@ -18,6 +18,7 @@ from app.models.gaokao import (
     TeachingClassSchedule,
     TeachingClassStudent,
 )
+from app.models.facility import Room
 from app.models.org import Class, Grade, Student, Subject, TeachingAssignment, Tenant, User
 from app.services.academic.gaokao import (
     SubjectChoice,
@@ -26,6 +27,7 @@ from app.services.academic.gaokao import (
     generate_walk_schedule,
     get_subject_choice_strategy,
     resolve_selection_phase,
+    validate_scheme_configuration,
 )
 
 router = APIRouter(prefix="/gaokao", tags=["新高考走班"])
@@ -74,6 +76,14 @@ class GenerateWalkScheduleIn(BaseModel):
     days: int = Field(default=5, ge=1, le=7)
     periods_per_day: int = Field(default=8, ge=1, le=12)
     forbidden_slots: list[tuple[int, int]] = Field(default_factory=list, max_length=84)
+
+
+class ChoiceReviewIn(BaseModel):
+    action: str = Field(pattern=r"^(approve|reject)$")
+
+
+class ChoiceBatchReviewIn(BaseModel):
+    choice_ids: list[int] = Field(min_length=1, max_length=500)
 
 
 def _choice_policy(
@@ -159,7 +169,7 @@ async def _overview(
             StudentSubjectChoice.student_id.in_(student_ids),
             StudentSubjectChoice.academic_year == academic_year,
             StudentSubjectChoice.effective_term == term,
-            StudentSubjectChoice.status == "confirmed",
+            StudentSubjectChoice.status.in_(["confirmed", "locked"]),
         ))).scalars().all())
 
     choice_scheme_ids = {item.scheme_id for item in choices}
@@ -288,6 +298,124 @@ async def overview(
     )}
 
 
+@router.get("/choices", summary="查询学生选科审核列表")
+async def choices_for_review(
+    academic_year: str,
+    term: str = "1",
+    grade_id: int | None = None,
+    status_filter: str | None = "confirmed",
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    stmt = select(StudentSubjectChoice, Student).join(
+        Student, Student.id == StudentSubjectChoice.student_id,
+    ).where(
+        StudentSubjectChoice.tenant_id == tenant_id,
+        StudentSubjectChoice.academic_year == academic_year,
+        StudentSubjectChoice.effective_term == term,
+        Student.tenant_id == tenant_id,
+    )
+    if grade_id is not None:
+        stmt = stmt.where(Student.grade_id == grade_id)
+    if user.role == "teacher":
+        class_ids = list((await session.execute(select(Class.id).where(
+            Class.tenant_id == tenant_id,
+            or_(Class.head_teacher_id == user.id, Class.deputy_head_teacher_id == user.id),
+        ))).scalars().all())
+        if not class_ids:
+            return {"code": 0, "message": "ok", "data": []}
+        stmt = stmt.where(Student.class_id.in_(class_ids))
+    if status_filter:
+        stmt = stmt.where(StudentSubjectChoice.status == status_filter)
+    rows = (await session.execute(stmt.order_by(Student.grade_id, Student.student_no, Student.id))).all()
+    subject_ids = {subject_id for choice, _student in rows for subject_id in (
+        [choice.primary_subject_id] if choice.primary_subject_id else []
+    ) + list(choice.secondary_subject_ids or [])}
+    subjects = list((await session.execute(select(Subject).where(Subject.id.in_(subject_ids)))).scalars().all()) if subject_ids else []
+    names = {item.id: item.name for item in subjects}
+    return {"code": 0, "message": "ok", "data": [{
+        "id": choice.id,
+        "student_id": student.id,
+        "student_no": student.student_no,
+        "student_name": student.name,
+        "grade_id": student.grade_id,
+        "primary_subject_id": choice.primary_subject_id,
+        "primary_subject_name": names.get(choice.primary_subject_id, "") if choice.primary_subject_id else "",
+        "secondary_subject_ids": choice.secondary_subject_ids,
+        "secondary_subject_names": [names.get(item, f"科目#{item}") for item in choice.secondary_subject_ids],
+        "status": choice.status,
+        "round_no": choice.round_no,
+        "updated_at": choice.updated_at,
+    } for choice, student in rows]}
+
+
+@router.patch("/choices/{choice_id}/review", summary="审核学生选科")
+async def review_choice(
+    choice_id: int,
+    body: ChoiceReviewIn,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    choice = await session.get(StudentSubjectChoice, choice_id)
+    if choice is None or choice.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="选科记录不存在")
+    if user.role == "teacher":
+        student = await session.get(Student, choice.student_id)
+        class_item = await session.get(Class, student.class_id) if student and student.class_id else None
+        if class_item is None or user.id not in {class_item.head_teacher_id, class_item.deputy_head_teacher_id}:
+            raise HTTPException(status_code=403, detail="只有该学生的班主任或副班主任可以审核")
+    if choice.status == "locked":
+        raise HTTPException(status_code=409, detail="选科已锁定，不能重复审核")
+    if body.action == "approve":
+        choice.status = "locked"
+        message = "选科审核通过并已锁定"
+    else:
+        choice.status = "rejected"
+        message = "选科已驳回，学生可以重新提交"
+    await session.commit()
+    await session.refresh(choice)
+    return {"code": 0, "message": message, "data": choice.model_dump()}
+
+
+@router.post("/choices/batch-approve", summary="批量审核通过学生选科")
+async def batch_approve_choices(
+    body: ChoiceBatchReviewIn,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    choices = list((await session.execute(select(StudentSubjectChoice).where(
+        StudentSubjectChoice.tenant_id == tenant_id,
+        StudentSubjectChoice.id.in_(body.choice_ids),
+    ))).scalars().all())
+    if len(choices) != len(set(body.choice_ids)):
+        raise HTTPException(status_code=404, detail="部分选科记录不存在")
+    student_by_id = {item.id: item for item in (await session.execute(select(Student).where(
+        Student.tenant_id == tenant_id,
+        Student.id.in_([item.student_id for item in choices]),
+    ))).scalars().all()}
+    if user.role == "teacher":
+        class_ids = {item.class_id for item in student_by_id.values() if item.class_id}
+        classes = list((await session.execute(select(Class).where(
+            Class.tenant_id == tenant_id, Class.id.in_(class_ids) if class_ids else False,
+        ))).scalars().all())
+        allowed_class_ids = {item.id for item in classes if user.id in {item.head_teacher_id, item.deputy_head_teacher_id}}
+        if any(student_by_id[item.student_id].class_id not in allowed_class_ids for item in choices):
+            raise HTTPException(status_code=403, detail="批量审核只能处理本人班级的学生")
+    updated = 0
+    skipped = 0
+    for choice in choices:
+        if choice.status == "confirmed":
+            choice.status = "locked"
+            updated += 1
+        else:
+            skipped += 1
+    await session.commit()
+    return {"code": 0, "message": "批量审核完成", "data": {"updated": updated, "skipped": skipped}}
+
+
 @router.post("/schemes", summary="创建或更新新高考方案")
 async def upsert_scheme(
     body: SchemeIn,
@@ -295,7 +423,9 @@ async def upsert_scheme(
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
-    subject_ids = set((await session.execute(select(Subject.id))).scalars().all())
+    subject_ids = set((await session.execute(select(Subject.id).where(
+        (Subject.tenant_id.is_(None)) | (Subject.tenant_id == tenant_id),
+    ))).scalars().all())
     configured = set(body.required_subject_ids + body.primary_subject_ids + body.secondary_subject_ids)
     configured.update(int(item) for item in body.strategy_config.get("elective_subject_ids", []))
     configured.update(
@@ -313,6 +443,16 @@ async def upsert_scheme(
         raise HTTPException(status_code=404, detail="学校不存在")
     values = body.model_dump(exclude_none=True)
     values["mode"] = _resolve_scheme_mode(body.mode, item.mode if item else None, school.gaokao_mode)
+    try:
+        validate_scheme_configuration(
+            values["mode"],
+            body.required_subject_ids,
+            body.primary_subject_ids,
+            body.secondary_subject_ids,
+            body.strategy_config,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if item is None:
         item = GaokaoScheme(tenant_id=tenant_id, **values)
         session.add(item)
@@ -379,7 +519,7 @@ async def generate_teaching_classes(
         StudentSubjectChoice.student_id.in_(student_ids),
         StudentSubjectChoice.academic_year == body.academic_year,
         StudentSubjectChoice.effective_term == body.term,
-        StudentSubjectChoice.status == "confirmed",
+        StudentSubjectChoice.status.in_(["confirmed", "locked"]),
     ).order_by(StudentSubjectChoice.student_id))).scalars().all()) if student_ids else []
     if len(choices) != len(student_ids):
         raise HTTPException(
@@ -407,18 +547,6 @@ async def generate_teaching_classes(
         ),
     } for item in choices], capacity=body.capacity)
 
-    old_classes = list((await session.execute(select(TeachingClass).where(
-        TeachingClass.tenant_id == tenant_id,
-        TeachingClass.grade_id == body.grade_id,
-        TeachingClass.academic_year == body.academic_year,
-        TeachingClass.term == body.term,
-    ))).scalars().all())
-    old_ids = [item.id for item in old_classes]
-    if old_ids:
-        await session.execute(delete(TeachingClassSchedule).where(TeachingClassSchedule.teaching_class_id.in_(old_ids)))
-        await session.execute(delete(TeachingClassStudent).where(TeachingClassStudent.teaching_class_id.in_(old_ids)))
-        await session.execute(delete(TeachingClass).where(TeachingClass.id.in_(old_ids)))
-
     admin_class_ids = list((await session.execute(select(Class.id).where(
         Class.tenant_id == tenant_id, Class.grade_id == body.grade_id,
     ))).scalars().all())
@@ -430,17 +558,55 @@ async def generate_teaching_classes(
     ))).scalars().all()) if admin_class_ids else []
     teachers_by_subject: dict[int, list[int]] = defaultdict(list)
     for assignment in assignments:
-        if assignment.teacher_id not in teachers_by_subject[assignment.subject_id]:
+        if assignment.teacher_id is not None and assignment.teacher_id not in teachers_by_subject[assignment.subject_id]:
             teachers_by_subject[assignment.subject_id].append(assignment.teacher_id)
+    required_subject_ids = {draft.subject_id for draft in drafts}
+    missing_teacher_subject_ids = sorted(
+        subject_id for subject_id in required_subject_ids
+        if not teachers_by_subject.get(subject_id)
+    )
+    if missing_teacher_subject_ids:
+        names = {
+            item.id: item.name for item in (await session.execute(select(Subject).where(
+                Subject.id.in_(missing_teacher_subject_ids),
+            ))).scalars().all()
+        }
+        missing_names = [names.get(item, f"学科#{item}") for item in missing_teacher_subject_ids]
+        raise HTTPException(status_code=422, detail=f"以下走班学科尚未配置任课教师：{'、'.join(missing_names)}")
+
+    rooms = list((await session.execute(select(Room).where(
+        Room.tenant_id == tenant_id,
+        Room.room_type == "classroom",
+        Room.is_schedulable.is_(True),
+        Room.status == "available",
+        Room.capacity >= body.capacity,
+    ).order_by(Room.id))).scalars().all())
+    if not rooms:
+        raise HTTPException(status_code=422, detail=f"没有找到容量不小于{body.capacity}且可排课的普通教室")
+    if len(rooms) < len(drafts):
+        raise HTTPException(status_code=422, detail=f"可排课教室只有{len(rooms)}间，无法为{len(drafts)}个教学班建立资源方案")
+    # 所有资源校验通过后才替换旧教学班，避免失败重生成把已有结果删除。
+    old_classes = list((await session.execute(select(TeachingClass).where(
+        TeachingClass.tenant_id == tenant_id,
+        TeachingClass.grade_id == body.grade_id,
+        TeachingClass.academic_year == body.academic_year,
+        TeachingClass.term == body.term,
+    ))).scalars().all())
+    old_ids = [item.id for item in old_classes]
+    if old_ids:
+        await session.execute(delete(TeachingClassSchedule).where(TeachingClassSchedule.teaching_class_id.in_(old_ids)))
+        await session.execute(delete(TeachingClassStudent).where(TeachingClassStudent.teaching_class_id.in_(old_ids)))
+        await session.execute(delete(TeachingClass).where(TeachingClass.id.in_(old_ids)))
     subject_names = {
         item.id: item.name for item in (await session.execute(select(Subject))).scalars().all()
     }
 
     created_classes: list[TeachingClass] = []
     member_count = 0
-    for draft in drafts:
+    for draft_index, draft in enumerate(drafts):
         teachers = teachers_by_subject[draft.subject_id]
         teacher_id = teachers[(draft.sequence - 1) % len(teachers)] if teachers else None
+        room = rooms[draft_index]
         teaching_class = TeachingClass(
             tenant_id=tenant_id,
             grade_id=body.grade_id,
@@ -452,7 +618,7 @@ async def generate_teaching_classes(
             capacity=body.capacity,
             weekly_periods=body.weekly_periods,
             teacher_id=teacher_id,
-            room=f"{subject_names.get(draft.subject_id, '学科')}教室·{draft.sequence:02d}",
+            room=room.name,
             status="generated",
         )
         session.add(teaching_class)
@@ -506,6 +672,7 @@ async def generate_schedules(
     result = generate_walk_schedule([{
         "id": item.id,
         "teacher_id": item.teacher_id,
+        "room_key": item.room,
         "student_ids": students_by_class[item.id],
         "weekly_periods": item.weekly_periods,
     } for item in teaching_classes], days=body.days, periods_per_day=body.periods_per_day,

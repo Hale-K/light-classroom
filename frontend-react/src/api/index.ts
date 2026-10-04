@@ -211,6 +211,17 @@ export const orgApi = {
     ),
   createStudent: (data: Record<string, unknown>) =>
     unwrap<Student>(http.post('/org/students', data)),
+  simulateStudents: (data: { cohort_label: string; grade_id: number; male_count: number; female_count: number }) =>
+    unwrap<{
+      created: number
+      male_count: number
+      female_count: number
+      cohort_label: string
+      grade_id: number
+      grade_name: string
+      academic_year: string
+      status: string
+    }>(http.post('/org/students/simulate', data)),
   assignStudents: (student_ids: number[], class_id: number | null) =>
     unwrap<{ updated: number; class_id: number | null }>(
       http.patch('/org/students/assign-class', { student_ids, class_id }),
@@ -218,6 +229,10 @@ export const orgApi = {
   updateStudentStatus: (student_id: number, status: string) =>
     unwrap<Student>(http.patch(`/org/students/${student_id}`, { status })),
   studentCount: () => unwrap<{ total: number }>(http.get('/org/students/count')),
+  provisionStudentAccounts: (data: { grade_id: number; initial_password: string }) =>
+    unwrap<{ created: number; reset: number; skipped: number; total: number; login_prefix: string }>(
+      http.post('/student-auth/accounts/provision', data),
+    ),
   studentGradeMemberships: (params?: { academic_year?: string; grade_unit_id?: number; grade_id?: number }) =>
     unwrap<import('@/types').StudentGradeMembership[]>(http.get('/org/student-grade-memberships', { params })),
 }
@@ -294,6 +309,16 @@ export const facilityApi = {
     is_exam_enabled: boolean
     is_meeting_enabled: boolean
   }) => unwrap<RoomResource>(http.post('/facilities/rooms', data)),
+  createRoomsBatch: (data: {
+    building_id: number
+    floor: number
+    count: number
+    start_number: number
+    name_prefix: string
+    capacity: number
+    multimedia: boolean
+    is_schedulable: boolean
+  }) => unwrap<{ created_count: number; skipped_count: number; skipped_names: string[] }>(http.post('/facilities/rooms/batch', data)),
   allocationRules: () => unwrap<ResourceAllocationRule[]>(http.get('/facilities/allocation-rules')),
   previewAllocationRule: (data: Record<string, unknown>) =>
     unwrap<AllocationPreviewResult>(http.post('/facilities/allocation-rules/preview', data)),
@@ -768,9 +793,27 @@ export interface GaokaoOverview {
   }>
 }
 
+export interface GaokaoChoiceReview {
+  id: number
+  student_id: number
+  student_no: string
+  student_name: string
+  grade_id: number | null
+  primary_subject_name: string
+  secondary_subject_names: string[]
+  status: 'draft' | 'confirmed' | 'rejected' | 'locked'
+  round_no: number
+}
+
 export const gaokaoApi = {
   overview: (params: { academic_year: string; term: string; grade_id?: number }) =>
     unwrap<GaokaoOverview>(http.get('/gaokao/overview', { params })),
+  choicesForReview: (params: { academic_year: string; term: string; grade_id?: number; status_filter?: string }) =>
+    unwrap<GaokaoChoiceReview[]>(http.get('/gaokao/choices', { params })),
+  reviewChoice: (choiceId: number, action: 'approve' | 'reject') =>
+    unwrap<GaokaoChoiceReview>(http.patch(`/gaokao/choices/${choiceId}/review`, { action })),
+  batchApproveChoices: (choiceIds: number[]) =>
+    unwrap<{ updated: number; skipped: number }>(http.post('/gaokao/choices/batch-approve', { choice_ids: choiceIds })),
   generateTeachingClasses: (data: {
     grade_id: number
     academic_year: string
@@ -792,6 +835,50 @@ export const gaokaoApi = {
     unwrap<{ created: number; unplaced: Array<{ teaching_class_id: number; count: number }> }>(
       http.post('/gaokao/schedules/generate', data),
     ),
+}
+
+export interface StudentLoginResult {
+  access_token: string
+  token_type: string
+  student: { id: number; name: string; student_no?: string | null; grade_id?: number | null; class_id?: number | null }
+  school: { code: string; name: string; province: string }
+}
+
+export interface StudentChoiceOptions {
+  scheme: {
+    id: number
+    name: string
+    mode: '3+1+2' | '3+3' | 'traditional'
+    required_subject_ids: number[]
+    primary_subject_ids: number[]
+    secondary_subject_ids: number[]
+  } | null
+  subjects: Array<{ id: number; name: string }>
+  choice: {
+    scheme_id: number
+    primary_subject_id?: number | null
+    secondary_subject_ids: number[]
+    status: 'draft' | 'confirmed' | 'rejected' | 'locked'
+  } | null
+}
+
+export const studentAuthApi = {
+  login: (data: { login_name: string; password: string }) =>
+    unwrap<StudentLoginResult>(http.post('/student-auth/login', data)),
+  me: () => unwrap<StudentLoginResult['student']>(http.get('/student-auth/me')),
+  context: () => unwrap<{ academic_year: string; term: string; student: StudentLoginResult['student'] }>(http.get('/student-auth/context')),
+  options: (params: { academic_year: string; term: string }) =>
+    unwrap<StudentChoiceOptions>(http.get('/student-auth/choice/options', { params })),
+  choice: (params: { academic_year: string; term: string }) =>
+    unwrap<unknown>(http.get('/student-auth/choice', { params })),
+  saveChoice: (data: {
+    scheme_id: number
+    academic_year: string
+    effective_term: string
+    primary_subject_id?: number
+    secondary_subject_ids: number[]
+    status: 'draft' | 'confirmed'
+  }) => unwrap<StudentChoiceOptions['choice']>(http.put('/student-auth/choice', data)),
 }
 
 export const seatingApi = {

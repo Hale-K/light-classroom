@@ -46,6 +46,21 @@ class StudentSubjectChoice(TimestampMixin, TenantMixin, SQLModel, table=True):
     confirmed_at: datetime | None = Field(default_factory=datetime.utcnow)
 
 
+class StudentCredential(TimestampMixin, TenantMixin, SQLModel, table=True):
+    """学生端登录凭证，与教职工 User 账号隔离。"""
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "student_id", name="uq_studentcredential_student"),
+        UniqueConstraint("tenant_id", "login_name", name="uq_studentcredential_login"),
+        {"comment": "学生端登录凭证"},
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    student_id: int = Field(index=True, foreign_key="student.id", ondelete="CASCADE")
+    login_name: str = Field(max_length=50, index=True)
+    password_hash: str = Field(max_length=255)
+    status: str = Field(default="active", max_length=20, index=True)
+    last_login_at: datetime | None = Field(default=None)
+
+
 class TeachingClass(TimestampMixin, TenantMixin, SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint(

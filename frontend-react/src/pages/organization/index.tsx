@@ -295,13 +295,21 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
           <Form.Item name="cohort_label" label="对应届"><Input placeholder="如 2029届；非年级组织留空" /></Form.Item>
         <Form.Item noStyle shouldUpdate={(prev, next) => prev.is_grade !== next.is_grade || prev.unit_type !== next.unit_type}>
           {({ getFieldValue }) => getFieldValue('is_grade') ? <Form.Item name="grade_id" label="对应年级" rules={[{ required: true, message: '请选择对应年级' }]}>
-              <Select placeholder="选择高一年级 / 高二年级 / 高三年级" options={[
+               <Select
+                 placeholder="选择高一年级 / 高二年级 / 高三年级"
+                 notFoundContent={grades.length === 0 ? <SelectEmptyGuide description="暂无年级数据，请先到系统设置配置" path="/settings" actionLabel="去设置" /> : undefined}
+                 options={[
                 ...grades.map((grade) => ({ label: grade.name, value: grade.id })),
-              ]} />
+                 ]}
+               />
             </Form.Item> : editing?.unit_type === 'grade_group' ? <Form.Item name="grade_id" label="对应年级" rules={[{ required: true, message: '请选择对应年级' }]}>
-              <Select placeholder="选择高一年级 / 高二年级 / 高三年级" options={[
+               <Select
+                 placeholder="选择高一年级 / 高二年级 / 高三年级"
+                 notFoundContent={grades.length === 0 ? <SelectEmptyGuide description="暂无年级数据，请先到系统设置配置" path="/settings" actionLabel="去设置" /> : undefined}
+                 options={[
                 ...grades.map((grade) => ({ label: grade.name, value: grade.id })),
-              ]} />
+                 ]}
+               />
             </Form.Item> : null}
           </Form.Item>
         </div>

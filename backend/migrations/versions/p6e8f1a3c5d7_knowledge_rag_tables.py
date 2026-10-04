@@ -15,7 +15,9 @@ depends_on = None
 
 def upgrade() -> None:
     op.execute("CREATE EXTENSION IF NOT EXISTS vector")
-    op.create_table(
+    inspector = sa.inspect(op.get_bind())
+    if not inspector.has_table("knowledge_base"):
+        op.create_table(
         "knowledge_base",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tenant_id", sa.Integer(), nullable=False, index=True),
@@ -28,7 +30,8 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("tenant_id", "name", name="uq_knowledge_base_tenant_name"),
     )
-    op.create_table(
+    if not inspector.has_table("knowledge_document"):
+        op.create_table(
         "knowledge_document",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tenant_id", sa.Integer(), nullable=False, index=True),
@@ -45,7 +48,8 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False),
         sa.UniqueConstraint("knowledge_base_id", "content_hash", name="uq_knowledge_document_hash"),
     )
-    op.create_table(
+    if not inspector.has_table("knowledge_chunk"):
+        op.create_table(
         "knowledge_chunk",
         sa.Column("id", sa.Integer(), primary_key=True),
         sa.Column("tenant_id", sa.Integer(), nullable=False, index=True),
@@ -59,11 +63,15 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=False),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
     )
-    op.execute("CREATE INDEX ix_knowledge_chunk_embedding_hnsw ON knowledge_chunk USING hnsw (embedding vector_cosine_ops)")
-    op.create_index("ix_knowledge_chunk_base", "knowledge_chunk", ["tenant_id", "knowledge_base_id"])
+    op.execute("CREATE INDEX IF NOT EXISTS ix_knowledge_chunk_embedding_hnsw ON knowledge_chunk USING hnsw (embedding vector_cosine_ops)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_knowledge_chunk_base ON knowledge_chunk (tenant_id, knowledge_base_id)")
 
 
 def downgrade() -> None:
-    op.drop_table("knowledge_chunk")
-    op.drop_table("knowledge_document")
-    op.drop_table("knowledge_base")
+    inspector = sa.inspect(op.get_bind())
+    if inspector.has_table("knowledge_chunk"):
+        op.drop_table("knowledge_chunk")
+    if inspector.has_table("knowledge_document"):
+        op.drop_table("knowledge_document")
+    if inspector.has_table("knowledge_base"):
+        op.drop_table("knowledge_base")

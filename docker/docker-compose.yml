@@ -18,6 +18,15 @@ services:
       timeout: 5s
       retries: 5
 
+  migrate:
+    build:
+      context: ../backend
+    depends_on:
+      postgres: {condition: service_healthy}
+    env_file: ../backend/.env
+    command: alembic upgrade head
+    restart: "no"
+
   redis:
     image: redis:7-alpine
     ports: ["6379:6379"]
@@ -91,6 +100,7 @@ services:
       context: ../backend
     depends_on:
       postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       kafka: {condition: service_started}
@@ -111,6 +121,7 @@ services:
       context: ../backend
     depends_on:
       postgres: {condition: service_healthy}
+      migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       minio: {condition: service_healthy}

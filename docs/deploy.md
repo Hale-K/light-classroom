@@ -100,7 +100,9 @@ pnpm build
 - **Nginx**：静态资源 + `/api/v1` 反代；SSE / 长请求关闭缓冲，例如 `proxy_buffering off;`、`X-Accel-Buffering: no`（开发代理已按此处理）。
 - **监控（可选）**：`monitoring/docker-compose.yml`。把 `prometheus.yml` 里的 `host.docker.internal:8001` 改成生产 API 地址；改 Grafana 密码。
 
-数据库：当前 Docker 部署用 `docker/docker-compose.deploy.yml`。`migrate` 服务执行 `alembic upgrade head` 与角色/菜单种子（当前单一 head：`a8c1d2e3f4b5`）；随后 `schema-init` 再灌 `db/schema/*.sql`。API 使用 `APP_ENV=prod`，启动不再 `create_all`。
+数据库：当前 Docker 部署用 `docker/docker-compose.deploy.yml`。`migrate` 服务在 API 和 Worker 之前执行 `alembic upgrade head`；已执行的迁移会自动跳过，迁移失败则阻止应用启动。随后 `schema-init` 再灌 `db/schema/*.sql`。API 使用 `APP_ENV=prod`，启动不再 `create_all`。
+
+学生端选科功能依赖 `studentcredential` 表。发布包含学生端功能的版本时，不要手工建表，只需让发布流程完成 `alembic upgrade head`；当前迁移会自动创建学生登录凭证表及租户范围内的唯一约束。迁移成功后，再启动 API 和 Worker。
 
 本机不经过 Compose 时：
 
@@ -183,7 +185,7 @@ pnpm dev
 ## 9. 建议的发布顺序
 
 1. 基础设施（库、Redis、MQ、对象存储）+ 备份  
-2. 迁移 + RBAC 种子  
+2. `migrate` 自动执行迁移 + RBAC 种子
 3. Worker（先起来，避免 API 入队无人消费）  
 4. API + 探活  
 5. 前端静态资源  

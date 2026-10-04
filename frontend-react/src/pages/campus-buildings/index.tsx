@@ -30,6 +30,7 @@ import { hasRoomFeature } from './room-features'
 type CampusForm = { name: string; address?: string; student_capacity?: number }
 type BuildingForm = { campus_id: number; name: string; code?: string; floor_count: number }
 type RoomForm = Omit<RoomResource, 'id' | 'building_name' | 'status' | 'features'> & { multimedia?: boolean }
+type BatchRoomForm = { building_id: number; floor: number; count: number; start_number: number; name_prefix: string; capacity: number; multimedia: boolean; is_schedulable: boolean }
 type ClassPlanForm = { class_id?: number; class_type: string }
 type CreateClassForm = { grade_id: number; name: string; class_type: string }
 // (BatchClassForm 不再使用)
@@ -150,6 +151,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [campusOpen, setCampusOpen] = useState(false)
   const [buildingOpen, setBuildingOpen] = useState(false)
   const [roomOpen, setRoomOpen] = useState(false)
+  const [batchRoomOpen, setBatchRoomOpen] = useState(false)
   const [ruleOpen, setRuleOpen] = useState(false)
   const [viewAllocationRule, setViewAllocationRule] = useState<ResourceAllocationRule>()
   const [saving, setSaving] = useState(false)
@@ -169,6 +171,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [campusForm] = Form.useForm<CampusForm>()
   const [buildingForm] = Form.useForm<BuildingForm>()
   const [roomForm] = Form.useForm<RoomForm>()
+  const [batchRoomForm] = Form.useForm<BatchRoomForm>()
   const [classPlanForm] = Form.useForm<ClassPlanForm>()
   const [createClassForm] = Form.useForm<CreateClassForm>()
   // (batchClassForm 不再使用)
@@ -232,6 +235,19 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       await facilityApi.createRoom({ ...values, name: values.name.trim(), code: values.code?.trim() || undefined, features: values.multimedia ? ['multimedia'] : [] })
       setRoomOpen(false); roomForm.resetFields(); message.success('场室已创建'); await load()
     } catch (error) { message.error(error instanceof Error ? error.message : '场室创建失败') }
+    finally { setSaving(false) }
+  }
+
+  const createRoomsBatch = async (values: BatchRoomForm) => {
+    setSaving(true)
+    try {
+      const result = await facilityApi.createRoomsBatch(values)
+      setBatchRoomOpen(false)
+      batchRoomForm.resetFields()
+      const skippedText = result.skipped_count ? `，跳过已存在 ${result.skipped_count} 间` : ''
+      message.success(`已生成 ${result.created_count} 间普通教室${skippedText}`)
+      await load()
+    } catch (error) { message.error(error instanceof Error ? error.message : '批量生成教室失败') }
     finally { setSaving(false) }
   }
 
@@ -516,7 +532,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const openBuilding = () => { if (selectedNode?.node_type === 'campus') buildingForm.setFieldValue('campus_id', Number(selectedNode.key.replace('campus-', ''))); setBuildingOpen(true) }
   const openRoom = () => { if (selectedNode?.building) roomForm.setFieldValue('building_id', selectedNode.building.id); setRoomOpen(true) }
   const actions = focus === 'resources'
-    ? <div className="facility-actions"><Button onClick={() => setCampusOpen(true)}>新增校区</Button><Button disabled={!data?.campuses.length} onClick={openBuilding}>新增楼宇</Button><Button type="primary" disabled={!data?.buildings.length} onClick={openRoom}>新增场室</Button></div>
+    ? <div className="facility-actions"><Button onClick={() => setCampusOpen(true)}>新增校区</Button><Button disabled={!data?.campuses.length} onClick={openBuilding}>新增楼宇</Button><Button disabled={!data?.buildings.length} onClick={() => { batchRoomForm.setFieldsValue({ building_id: selectedNode?.building?.id || data?.buildings[0]?.id }); setBatchRoomOpen(true) }}>批量生成教室</Button><Button type="primary" disabled={!data?.buildings.length} onClick={openRoom}>新增场室</Button></div>
     : null
   return <div className={embedded ? 'facility-pane' : 'zh-page facility-page'}>
     {embedded ? <div className="facility-subhead facility-subhead-actions">{actions}</div> : <PageHeader title="空间资源" extra={actions} />}
@@ -593,6 +609,16 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
         <Form.Item name="campus_id" label="所属校区" rules={[{ required: true, message: '请选择校区' }]}><Select options={data?.campuses.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item>
         <Form.Item name="name" label="楼宇名称" rules={[{ required: true, message: '请输入楼宇名称' }]}><Input placeholder="例如：第一教学楼" /></Form.Item>
         <div className="facility-form-grid"><Form.Item name="code" label="楼宇编号"><Input placeholder="例如：A" /></Form.Item><Form.Item name="floor_count" label="楼层数" rules={[{ required: true }]}><InputNumber min={1} max={100} style={{ width: '100%' }} /></Form.Item></div>
+      </Form>
+    </Modal>
+    <Modal title="批量生成普通教室" open={batchRoomOpen} onCancel={() => setBatchRoomOpen(false)} onOk={() => batchRoomForm.submit()} confirmLoading={saving} okText="开始生成" width={600}>
+      <div style={{ marginBottom: 16, color: 'var(--text-3)' }}>用于快速准备走班和排课资源。已存在同名教室会自动跳过，不会重复创建。</div>
+      <Form form={batchRoomForm} layout="vertical" requiredMark={false} onFinish={createRoomsBatch} initialValues={{ floor: 1, count: 20, start_number: 1, name_prefix: '教室', capacity: 45, multimedia: false, is_schedulable: true }}>
+        <Form.Item name="building_id" label="所属楼宇" rules={[{ required: true, message: '请选择楼宇' }]}><Select options={data?.buildings.map((item) => ({ label: `${item.name}${item.code ? `（${item.code}）` : ''}`, value: item.id }))} /></Form.Item>
+        <div className="facility-form-grid"><Form.Item name="floor" label="所在楼层" rules={[{ required: true }]}><InputNumber min={-5} max={100} style={{ width: '100%' }} /></Form.Item><Form.Item name="count" label="生成数量" rules={[{ required: true }]}><InputNumber min={1} max={500} style={{ width: '100%' }} /></Form.Item></div>
+        <div className="facility-form-grid"><Form.Item name="name_prefix" label="名称前缀" rules={[{ required: true, message: '请输入名称前缀' }]}><Input placeholder="例如：教室" /></Form.Item><Form.Item name="start_number" label="起始编号" rules={[{ required: true }]}><InputNumber min={1} max={9999} style={{ width: '100%' }} /></Form.Item></div>
+        <Form.Item name="capacity" label="每间容纳人数" rules={[{ required: true }]}><InputNumber min={1} max={5000} addonAfter="人" style={{ width: '100%' }} /></Form.Item>
+        <div className="facility-checks"><Form.Item name="multimedia" valuePropName="checked"><Checkbox>配备多媒体</Checkbox></Form.Item><Form.Item name="is_schedulable" valuePropName="checked"><Checkbox>可用于排课</Checkbox></Form.Item></div>
       </Form>
     </Modal>
     <Modal title="新增场室" open={roomOpen} onCancel={() => setRoomOpen(false)} onOk={() => roomForm.submit()} confirmLoading={saving} okText="创建" width={600}>

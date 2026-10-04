@@ -28,6 +28,52 @@ class SubjectChoicePolicy:
     primary_delivery_mode: str = "administrative"
 
 
+def validate_scheme_configuration(
+    mode: str,
+    required_subject_ids: Iterable[int],
+    primary_subject_ids: Iterable[int],
+    secondary_subject_ids: Iterable[int],
+    strategy_config: Mapping[str, Any] | None = None,
+) -> None:
+    """Validate the subject pools before a school can publish a scheme.
+
+    The choice strategies validate individual students, but a malformed scheme
+    can otherwise make every later choice invalid or silently move a subject
+    into the wrong teaching track.
+    """
+    required = tuple(int(item) for item in required_subject_ids)
+    primary = tuple(int(item) for item in primary_subject_ids)
+    secondary = tuple(int(item) for item in secondary_subject_ids)
+    pools = {"必考": required, "首选": primary, "再选": secondary}
+    for label, values in pools.items():
+        if len(values) != len(set(values)):
+            raise ValueError(f"{label}科目不能重复")
+
+    if mode == "3+1+2":
+        if len(required) != 3:
+            raise ValueError("3+1+2 方案必须配置 3 门必考科目")
+        if len(primary) != 2:
+            raise ValueError("3+1+2 方案必须配置 2 门首选科目")
+        if len(secondary) != 4:
+            raise ValueError("3+1+2 方案必须配置 4 门再选科目")
+        if set(required) & (set(primary) | set(secondary)):
+            raise ValueError("必考、首选、再选科目不能重复")
+        if set(primary) & set(secondary):
+            raise ValueError("首选科目不能出现在再选科目中")
+    elif mode == "3+3":
+        elective = tuple(int(item) for item in (strategy_config or {}).get(
+            "elective_subject_ids", secondary,
+        ))
+        if len(required) != 3:
+            raise ValueError("3+3 方案必须配置 3 门必考科目")
+        if len(elective) < 3 or len(elective) != len(set(elective)):
+            raise ValueError("3+3 方案至少需要 3 门不同的选考科目")
+        if set(required) & set(elective):
+            raise ValueError("必考科目不能出现在选考科目中")
+    elif mode != "traditional":
+        raise ValueError(f"不支持的高考模式: {mode}")
+
+
 class SubjectChoiceStrategy(ABC):
     mode: str
     capabilities: frozenset[str] = frozenset()
@@ -289,11 +335,13 @@ def generate_walk_schedule(
     occupied_teachers: set[tuple[int, int, int]] = set()
     occupied_students: set[tuple[int, int, int]] = set()
     occupied_classes: set[tuple[int, int, int]] = set()
+    occupied_rooms: set[tuple[str, int, int]] = set()
     unplaced: list[dict[str, int]] = []
 
     for task in normalized:
         teaching_class_id = int(task["id"])
         teacher_id = int(task["teacher_id"]) if task.get("teacher_id") is not None else None
+        room_key = str(task["room_key"]) if task.get("room_key") is not None else None
         student_ids = tuple(sorted({int(item) for item in task.get("student_ids", [])}))
         required = max(0, int(task.get("weekly_periods", 0)))
         placed = 0
@@ -306,6 +354,8 @@ def generate_walk_schedule(
                     if (teaching_class_id, weekday, period) in occupied_classes:
                         continue
                     if teacher_id is not None and (teacher_id, weekday, period) in occupied_teachers:
+                        continue
+                    if room_key is not None and (room_key, weekday, period) in occupied_rooms:
                         continue
                     if any((student_id, weekday, period) in occupied_students for student_id in student_ids):
                         continue
@@ -324,6 +374,8 @@ def generate_walk_schedule(
             occupied_classes.add((teaching_class_id, weekday, period))
             if teacher_id is not None:
                 occupied_teachers.add((teacher_id, weekday, period))
+            if room_key is not None:
+                occupied_rooms.add((room_key, weekday, period))
             occupied_students.update((student_id, weekday, period) for student_id in student_ids)
             placed += 1
         if placed < required:

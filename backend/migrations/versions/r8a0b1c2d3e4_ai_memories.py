@@ -9,6 +9,8 @@ depends_on = None
 
 
 def upgrade():
+    if sa.inspect(op.get_bind()).has_table("ai_memory"):
+        return
     op.create_table(
         "ai_memory",
         sa.Column("id", sa.Integer(), primary_key=True),
@@ -32,4 +34,5 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_table("ai_memory")
+    if sa.inspect(op.get_bind()).has_table("ai_memory"):
+        op.drop_table("ai_memory")

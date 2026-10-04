@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { App, Button, Dropdown, Form, Input, Modal, Progress, Select, Space, Table, Tabs, Tag } from 'antd'
-import { DownloadOutlined, ExportOutlined, ImportOutlined } from '@ant-design/icons'
+import { Alert, App, Button, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tabs, Tag } from 'antd'
+import { DownloadOutlined, ExportOutlined, ImportOutlined, KeyOutlined, RobotOutlined } from '@ant-design/icons'
 import type { TableProps } from 'antd'
 import { fileCenterApi, orgApi, organizationApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
@@ -10,7 +10,7 @@ import TableCard from '@/components/TableCard'
 import DictTag from '@/components/DictTag'
 import EmptyState from '@/components/EmptyState'
 import { GENDER_DICT, STUDENT_STATUS_DICT } from '@/types/dict'
-import type { ClassInfo, Grade, Student, StudentGradeMembership } from '@/types'
+import type { ClassInfo, Grade, OrganizationTreeResult, OrganizationUnit, Student, StudentGradeMembership } from '@/types'
 
 type GenderValue = 'male' | 'female'
 type GenderFilter = GenderValue | ''
@@ -37,6 +37,18 @@ interface StudentFormValues {
   parent_phone?: string
 }
 
+interface StudentSimulationFormValues {
+  cohort_label: string
+  grade_id: number
+  male_count: number
+  female_count: number
+}
+
+interface StudentAccountFormValues {
+  grade_id: number
+  initial_password: string
+}
+
 type StudentExportKey = 'all' | 'unassigned' | `grade:${number}` | `class:${number}`
 
 export default function StudentsView() {
@@ -44,6 +56,7 @@ export default function StudentsView() {
   const navigate = useNavigate()
   const [classes, setClasses] = useState<ClassInfo[]>([])
   const [grades, setGrades] = useState<Grade[]>([])
+  const [organizationTree, setOrganizationTree] = useState<OrganizationTreeResult | null>(null)
   const [students, setStudents] = useState<Student[]>([])
   const [keyword, setKeyword] = useState('')
   const [campusFilter, setCampusFilter] = useState<CampusFilter>('')
@@ -60,10 +73,17 @@ export default function StudentsView() {
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [dialogVisible, setDialogVisible] = useState(false)
+  const [simulationOpen, setSimulationOpen] = useState(false)
+  const [simulationSaving, setSimulationSaving] = useState(false)
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [accountSaving, setAccountSaving] = useState(false)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [form] = Form.useForm<StudentFormValues>()
+  const [simulationForm] = Form.useForm<StudentSimulationFormValues>()
+  const [accountForm] = Form.useForm<StudentAccountFormValues>()
   const formGradeId = Form.useWatch('grade_id', form)
+  const simulationCohortLabel = Form.useWatch('cohort_label', simulationForm)
   const [exportModalOpen, setExportModalOpen] = useState(false)
   const [exportScopeKey, setExportScopeKey] = useState<StudentExportKey>('all')
   const [exportSubmitting, setExportSubmitting] = useState(false)
@@ -182,6 +202,7 @@ export default function StudentsView() {
         orgApi.students(),
         organizationApi.tree().catch(() => null),
       ])
+      setOrganizationTree(orgTree)
       // 年级筛选只保留「年级管理中心下已建年级部」的年级(与教师档案口径一致)
       const gradeUnitNames = (orgTree?.units ?? [])
         .filter((unit) => unit.unit_type === 'grade_group' && unit.status === 'active')
@@ -364,6 +385,72 @@ export default function StudentsView() {
     }
   }
 
+  const organizationUnits = useMemo(() => {
+    const flatten = (items: OrganizationUnit[]): OrganizationUnit[] => items.flatMap((item) => [item, ...flatten(item.children || [])])
+    return flatten(organizationTree?.units || [])
+  }, [organizationTree])
+
+  const simulationCohortOptions = useMemo(() => Array.from(new Set(
+    organizationUnits
+      .filter((item) => item.unit_type === 'grade_group' && item.status === 'active' && item.cohort_label)
+      .map((item) => item.cohort_label as string),
+  )).sort((a, b) => Number(b) - Number(a)).map((value) => ({ label: `${value}届`, value })), [organizationUnits])
+
+  const simulationGradeOptions = useMemo(() => {
+    const gradeIds = new Set(organizationUnits
+      .filter((item) => item.unit_type === 'grade_group' && item.status === 'active' && item.cohort_label === simulationCohortLabel)
+      .map((item) => item.grade_id)
+      .filter((value): value is number => value != null))
+    return grades.filter((grade) => gradeIds.has(grade.id)).map((grade) => ({ label: grade.name, value: grade.id }))
+  }, [grades, organizationUnits, simulationCohortLabel])
+
+  const openSimulation = () => {
+    simulationForm.resetFields()
+    simulationForm.setFieldsValue({
+      cohort_label: simulationCohortOptions[0]?.value,
+      male_count: 0,
+      female_count: 0,
+    })
+    setSimulationOpen(true)
+  }
+
+  const simulateStudents = async () => {
+    const values = await simulationForm.validateFields().catch(() => null)
+    if (!values) return
+    setSimulationSaving(true)
+    try {
+      const result = await orgApi.simulateStudents(values)
+      setSimulationOpen(false)
+      message.success(`已生成 ${result.created} 名模拟学生，当前均为待分班状态`)
+      await loadData()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '模拟学生生成失败')
+    } finally {
+      setSimulationSaving(false)
+    }
+  }
+
+  const openAccountProvision = () => {
+    accountForm.resetFields()
+    accountForm.setFieldsValue({ grade_id: undefined, initial_password: '123456' })
+    setAccountOpen(true)
+  }
+
+  const provisionStudentAccounts = async () => {
+    const values = await accountForm.validateFields().catch(() => null)
+    if (!values) return
+    setAccountSaving(true)
+    try {
+      const result = await orgApi.provisionStudentAccounts(values)
+      setAccountOpen(false)
+      message.success(`已为 ${result.created + result.reset} 名学生开通账号，登录名使用学生学号`)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '学生账号开通失败')
+    } finally {
+      setAccountSaving(false)
+    }
+  }
+
   const columns: TableProps<Student>['columns'] = [
     { title: '学号', dataIndex: 'student_no', width: 160, render: (value: string) => value || '—' },
     { title: '姓名', dataIndex: 'name', width: 120 },
@@ -437,6 +524,8 @@ export default function StudentsView() {
             </Dropdown>
             <Button icon={<ExportOutlined />} onClick={openExport}>导出 Excel</Button>
             <Button icon={<ImportOutlined />} onClick={() => openImport('full')}>导入学生</Button>
+            <Button icon={<RobotOutlined />} onClick={openSimulation}>批量生成学生</Button>
+            <Button icon={<KeyOutlined />} onClick={openAccountProvision}>开通学生登录</Button>
             <Button type="primary" onClick={openCreate}>新增学生</Button>
           </Space>
         }
@@ -634,6 +723,86 @@ export default function StudentsView() {
               <Input placeholder="选填" maxLength={20} />
             </Form.Item>
           </div>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="批量生成模拟学生"
+        open={simulationOpen}
+        onCancel={() => !simulationSaving && setSimulationOpen(false)}
+        onOk={() => void simulateStudents()}
+        okText="开始生成"
+        cancelText="取消"
+        confirmLoading={simulationSaving}
+        width={520}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="用于快速准备排课和分班测试数据"
+          description="生成的学生会自动关联到所选届别和年级，行政班暂不指定，后续可在行政班管理中统一分班。"
+          style={{ marginBottom: 16 }}
+        />
+        {!simulationCohortOptions.length && (
+          <Alert type="warning" showIcon message="暂无可用届别" description="请先在组织机构中配置当前学年的年级部和届别。" style={{ marginBottom: 16 }} />
+        )}
+        <Form form={simulationForm} layout="vertical">
+          <Form.Item name="cohort_label" label="届别" rules={[{ required: true, message: '请选择届别' }]}>
+            <Select
+              placeholder="请选择届别"
+              options={simulationCohortOptions}
+              disabled={!simulationCohortOptions.length}
+              onChange={() => simulationForm.setFieldValue('grade_id', undefined)}
+            />
+          </Form.Item>
+          <Form.Item name="grade_id" label="年级" rules={[{ required: true, message: '请选择年级' }]}>
+            <Select
+              placeholder={simulationCohortLabel ? '请选择年级' : '请先选择届别'}
+              options={simulationGradeOptions}
+              disabled={!simulationCohortLabel || !simulationGradeOptions.length}
+              notFoundContent="该届别暂无对应年级部"
+            />
+          </Form.Item>
+          <div className="zh-form-grid">
+            <Form.Item name="male_count" label="男生人数" rules={[{ required: true, message: '请输入男生人数' }]}>
+              <InputNumber min={0} max={5000} precision={0} style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="female_count" label="女生人数" rules={[{ required: true, message: '请输入女生人数' }]}>
+              <InputNumber min={0} max={5000} precision={0} style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="开通学生登录账号"
+        open={accountOpen}
+        onCancel={() => !accountSaving && setAccountOpen(false)}
+        onOk={() => void provisionStudentAccounts()}
+        okText="开通账号"
+        cancelText="取消"
+        confirmLoading={accountSaving}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          message="按年级批量开通学生端账号"
+          description="学生使用学号登录选科页面；已存在账号会重置为本次初始密码。请开通后及时通知学生修改密码。"
+          style={{ marginBottom: 16 }}
+        />
+        <Form form={accountForm} layout="vertical">
+          <Form.Item name="grade_id" label="年级" rules={[{ required: true, message: '请选择年级' }]}>
+            <Select placeholder="请选择年级" options={grades.map((grade) => ({ label: grade.name, value: grade.id }))} />
+          </Form.Item>
+          <Form.Item
+            name="initial_password"
+            label="统一初始密码"
+            rules={[{ required: true, min: 6, message: '密码至少 6 位' }]}
+          >
+            <Input.Password placeholder="至少 6 位" />
+          </Form.Item>
         </Form>
       </Modal>
 

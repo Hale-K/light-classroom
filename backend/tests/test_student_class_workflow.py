@@ -5,6 +5,7 @@ from app.api.v1.org import (
     ClassAssignmentIn,
     GradeIn,
     StudentIn,
+    StudentSimulationIn,
     add_existing_class_counts,
     count_students,
     create_grade,
@@ -53,6 +54,16 @@ def test_students_can_be_assigned_or_returned_to_unassigned_pool():
     unassigned = ClassAssignmentIn(class_id=None, student_ids=[1, 2])
     assert assigned.class_id == 3
     assert unassigned.class_id is None
+
+
+def test_student_simulation_requires_at_least_one_student():
+    with pytest.raises(ValidationError):
+        StudentSimulationIn(cohort_label="2026", grade_id=1, male_count=0, female_count=0)
+
+
+def test_student_simulation_accepts_gender_counts():
+    body = StudentSimulationIn(cohort_label="2026届", grade_id=1, male_count=12, female_count=18)
+    assert body.male_count + body.female_count == 30
 
 
 @pytest.mark.asyncio

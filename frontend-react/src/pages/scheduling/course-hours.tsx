@@ -205,7 +205,7 @@ export default function CourseHoursPanel({
       if (row.evening_periods_odd && row.evening_periods_even) return '1 节（每周）'
       return '0 节'
     } },
-    { title: '周次', dataIndex: 'week_parity', key: 'week_parity', width: 120, align: 'center', render: (value: WeekParity, row) => {
+    { title: '白天周次', dataIndex: 'week_parity', key: 'week_parity', width: 140, align: 'center', render: (value: WeekParity, row) => {
       const half = hasHalfDaytime(row.weekday_periods, row.saturday_periods)
       const label = value === 'all' && half ? '无规定' : parityLabels[value]
       return <Tag color={value === 'all' ? 'blue' : 'gold'}>{label}</Tag>
@@ -229,7 +229,7 @@ export default function CourseHoursPanel({
         <div>
           <div className="sk-hours-kicker">COURSE LOAD / 课时方案</div>
           <h2>课时管理</h2>
-          <p>一条方案对应老师表的一行：工作日、周六、晚课分别维护；晚课填 0、0.5 或 1，生成时沿用任教关系自动带出坐班老师。</p>
+          <p>一条方案对应老师表的一行：工作日和周六属于白天课时，晚课单独维护。白天隔周类型同时作用于工作日与周六，不影响晚课单双周。</p>
         </div>
         <Space wrap>
           <Select
@@ -251,7 +251,7 @@ export default function CourseHoursPanel({
         <div><strong>{rows.length}</strong><span>条课时方案</span></div>
         <div><strong>{weekdayTotal}</strong><span>工作日课时</span></div>
         <div><strong>{saturdayTotal}</strong><span>周六课时</span></div>
-        <div><strong>{daytimeTotal}</strong><span>排课课时</span></div>
+        <div><strong>{daytimeTotal}</strong><span>白天课时合计</span></div>
         <div className="sk-hours-summary-note">当前范围：{classId ? (classes.find((item) => item.id === classId)?.name || '当前班级') : '全部班级'} · {academicYear} · 第 {term} 学期</div>
       </div>
       <Table<CourseHourPlanInfo>
@@ -284,10 +284,10 @@ export default function CourseHoursPanel({
           <Form.Item name="saturday_periods" label="周六课时" rules={[{ required: true, message: '请输入周六课时' }]} extra="没有周六课时就填 0。">
             <InputNumber min={0} max={10} step={0.5} addonAfter="节" style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="周课时合计">
+          <Form.Item label="白天课时合计">
             <InputNumber value={weekdayPeriods + saturdayPeriods} addonAfter="节" disabled style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item name="week_parity" label="隔周类型" rules={[{ required: true, message: '请选择隔周类型' }]} extra={hasHalfPeriod ? '0.5 节默认无规定，由对课规则或求解器安排单双周；也可手动钉死单周或双周。' : '整节课按每周安排。'}>
+          <Form.Item name="week_parity" label="白天隔周类型（工作日 + 周六）" rules={[{ required: true, message: '请选择白天隔周类型' }]} extra={hasHalfPeriod ? '作用于上方的工作日课时和周六课时；0.5 节默认无规定，由对课规则或求解器安排单双周。此项不影响晚课。' : '作用于上方的工作日课时和周六课时；整节白天课按每周安排。此项不影响晚课。'}>
             <Select options={Object.entries(parityLabels).map(([value, label]) => ({
               value,
               label: value === 'all'
@@ -297,12 +297,12 @@ export default function CourseHoursPanel({
             }))} />
           </Form.Item>
           <div className="sk-evening-hours-fields">
-            <Form.Item name="evening_periods" label="晚课" rules={[{ required: true, message: '请输入晚课课时' }]} extra="1 = 两周都上（语数外）；0.5 = 每周只上一节；没有就填 0。">
+            <Form.Item name="evening_periods" label="晚课课时（独立维护）" rules={[{ required: true, message: '请输入晚课课时' }]} extra="只作用于晚自习课位，不计入工作日或周六白天课时；1 = 两周都上，0.5 = 每周只上一节，没有就填 0。">
               <InputNumber min={0} max={1} step={0.5} addonAfter="节" style={{ width: '100%' }} />
             </Form.Item>
             <Form.Item
               name="evening_parity"
-              label="0.5 晚课安排"
+              label="0.5 晚课单双周安排"
               extra="单周、双周，或无规定由程序安排。物理和历史无规定时，可单物双史，也可单史双物。"
             >
               <Select
@@ -316,7 +316,7 @@ export default function CourseHoursPanel({
               />
             </Form.Item>
           </div>
-          <div className="sk-rule-info-card"><strong>晚课</strong><span>每个晚上只有 1 节。语数外填 1，单双两周都上。其余科目填 0.5：可选单周、双周或无规定。物理与历史无规定时拼同一格，单物双史或单史双物均可。</span></div>
+          <div className="sk-rule-info-card"><strong>配置范围说明</strong><span>白天隔周类型只控制工作日和周六课时；晚课课时及晚课单双周安排单独控制晚自习。每个晚上只有 1 节：语数外通常填 1，其他科目通常填 0.5，并可选择单周、双周或无规定。</span></div>
         </Form>
       </Modal>
     </section>
