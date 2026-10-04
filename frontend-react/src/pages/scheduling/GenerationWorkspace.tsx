@@ -66,6 +66,10 @@ export default function GenerationWorkspace({
   onClassChange,
   onClose,
 }: GenerationWorkspaceProps) {
+  const selectedAssignments = useMemo(
+    () => assignments.filter((item) => selectedClassId === undefined || item.class_id === selectedClassId),
+    [assignments, selectedClassId],
+  )
   const subjectQueue = useMemo(() => {
     const oddEvenIds = new Set([...(gridConfig.evening_subject_ids_odd || []), ...(gridConfig.evening_subject_ids_even || [])])
     const map = new Map<
@@ -89,7 +93,7 @@ export default function GenerationWorkspace({
           eveningEven: oddEvenIds.has(subject.id) && (gridConfig.evening_subject_ids_even || []).includes(subject.id),
         })
     }
-    for (const item of assignments) {
+    for (const item of selectedAssignments) {
       const current = map.get(item.subject_id)
       if (!current) continue
       if (item.weekly_periods > 0) current.count += item.weekly_periods
@@ -98,7 +102,7 @@ export default function GenerationWorkspace({
     return Array.from(map.values())
       .filter((subject) => subject.count > 0 || subject.eveningOdd || subject.eveningEven)
       .sort((left, right) => right.count - left.count || left.name.localeCompare(right.name, 'zh-CN'))
-  }, [assignments, gridConfig.evening_subject_ids_even, gridConfig.evening_subject_ids_odd, subjects])
+  }, [gridConfig.evening_subject_ids_even, gridConfig.evening_subject_ids_odd, selectedAssignments, subjects])
   const totalSlots = subjectQueue.reduce((sum, subject) => sum + subject.count, 0)
   const columns = useMemo<Column[]>(() => {
     const configuredDays = Math.min(7, Math.max(1, gridConfig.days || 5))
@@ -131,55 +135,51 @@ export default function GenerationWorkspace({
     return rows
   }, [dayRows, gridConfig.enable_evening, gridConfig.evening_daily_periods_even, gridConfig.evening_daily_periods_odd])
   const previewCapacity = columns.length * visualRows.length
-  const finalSlots = useMemo(() => {
-    const findEntry = (column: Column, row: VisualRow) => {
-      if (row.type === 'day') return calendar.find((item) => item.weekday === column.weekday && item.period === row.period && parityMatches(item, column))
-      const start = gridConfig.evening_start_period || dayRows + 1
-      return calendar.find((item) => item.weekday === column.weekday && item.period === start + row.period && parityMatches(item, column, row.parity))
-    }
-    return visualRows.flatMap((row) => columns.map((column) => findEntry(column, row)))
-  }, [calendar, columns, dayRows, gridConfig.evening_start_period, visualRows])
-  const dispatchTasks = useMemo(
-    () =>
-      finalSlots.flatMap((item, slotIndex) =>
-        item?.subject_name
-          ? [
-              {
-                slotIndex,
-                item: {
-                  subject_name: item.subject_name,
-                  teacher_name: item.teacher_name,
-                  preview: true,
-                },
-              },
-            ]
-          : [],
-      ),
-    [finalSlots],
-  )
+  const classPlans = useMemo(() => {
+    const scheduledClassIds = new Set(assignments.filter((item) => item.weekly_periods > 0).map((item) => item.class_id))
+    return classes
+      .filter((item) => scheduledClassIds.has(item.id))
+      .map((classItem) => {
+        const classCalendar = calendar.filter((item) => item.class_id === classItem.id)
+        const findEntry = (column: Column, row: VisualRow) => {
+          if (row.type === 'day') return classCalendar.find((item) => item.weekday === column.weekday && item.period === row.period && parityMatches(item, column))
+          const start = gridConfig.evening_start_period || dayRows + 1
+          return classCalendar.find((item) => item.weekday === column.weekday && item.period === start + row.period && parityMatches(item, column, row.parity))
+        }
+        const slots = visualRows.flatMap((row) => columns.map((column) => findEntry(column, row)))
+        const tasks = slots.flatMap((item, slotIndex) =>
+          item?.subject_name
+            ? [{ slotIndex, item: { subject_name: item.subject_name, teacher_name: item.teacher_name, preview: true } }]
+            : [],
+        )
+        return { classId: classItem.id, className: classItem.name, slots, tasks }
+      })
+  }, [assignments, calendar, classes, columns, dayRows, gridConfig.evening_start_period, visualRows])
+  const currentClassId = selectedClassId ?? classes[0]?.id
+  const selectedPlan = classPlans.find((plan) => plan.classId === currentClassId)
+  const finalSlots = selectedPlan?.slots ?? Array.from({ length: previewCapacity }, () => undefined)
+  const dispatchTasks = selectedPlan?.tasks ?? []
   const dispatchCapacity = dispatchTasks.length
-  const [previewPlaced, setPreviewPlaced] = useState(0)
-  const [robotCursor, setRobotCursor] = useState(0)
+  const [deliveredByClass, setDeliveredByClass] = useState<Record<number, number>>({})
   const [robotPhase, setRobotPhase] = useState<'pickup' | 'moving' | 'drop'>('pickup')
   useEffect(() => {
     if (!open || generating) {
-      setPreviewPlaced(0)
-      setRobotCursor(0)
+      setDeliveredByClass({})
       setRobotPhase('pickup')
     }
   }, [generating, open])
-  useEffect(() => {
-    setPreviewPlaced(0)
-    setRobotCursor(0)
-    setRobotPhase('pickup')
-  }, [selectedClassId])
-  const dispatchReady = !generating && stage === 'done' && calendar.length > 0
-  const playbackActive = dispatchReady && previewPlaced < dispatchCapacity
-  const dispatchComplete = dispatchReady && previewPlaced >= dispatchCapacity
+  const previewPlaced = currentClassId == null ? 0 : Math.min(deliveredByClass[currentClassId] || 0, dispatchCapacity)
+  const allClassSchedulesLoaded = classPlans.length > 0 && classPlans.every((plan) => plan.tasks.length > 0)
+  const dispatchReady = !generating && stage === 'done' && allClassSchedulesLoaded
+  const fleetCapacity = classPlans.reduce((sum, plan) => sum + plan.tasks.length, 0)
+  const fleetDelivered = classPlans.reduce((sum, plan) => sum + Math.min(deliveredByClass[plan.classId] || 0, plan.tasks.length), 0)
+  const playbackActive = dispatchReady && fleetDelivered < fleetCapacity
+  const dispatchComplete = dispatchReady && fleetDelivered >= fleetCapacity
+  const selectedRobotActive = playbackActive && previewPlaced < dispatchCapacity
+  const selectedDispatchComplete = dispatchReady && previewPlaced >= dispatchCapacity
   useEffect(() => {
     if (!open || !playbackActive) return
-    if (robotPhase === 'pickup' && previewPlaced >= dispatchCapacity) return
-    const phaseDuration = robotPhase === 'pickup' ? 1800 : robotPhase === 'moving' ? 5400 : 1300
+    const phaseDuration = robotPhase === 'pickup' ? 200 : robotPhase === 'moving' ? 600 : 200
     const timer = window.setTimeout(() => {
       if (robotPhase === 'pickup') {
         setRobotPhase('moving')
@@ -189,24 +189,26 @@ export default function GenerationWorkspace({
         setRobotPhase('drop')
         return
       }
-      setPreviewPlaced((value) => {
-        if (value >= dispatchCapacity) return value
-        const next = value + 1
-        setRobotCursor(Math.min(next, Math.max(0, dispatchTasks.length - 1)))
+      setDeliveredByClass((value) => {
+        const next = { ...value }
+        classPlans.forEach((plan) => {
+          const delivered = Math.min(value[plan.classId] || 0, plan.tasks.length)
+          if (delivered < plan.tasks.length) next[plan.classId] = delivered + 1
+        })
         return next
       })
       setRobotPhase('pickup')
     }, phaseDuration)
     return () => window.clearTimeout(timer)
-  }, [dispatchCapacity, dispatchTasks.length, open, playbackActive, previewPlaced, robotPhase])
+  }, [classPlans, open, playbackActive, robotPhase])
   const displayedSlots = useMemo(() => {
-    if (dispatchComplete) return finalSlots
+    if (selectedDispatchComplete) return finalSlots
     const slots = Array.from({ length: previewCapacity }, () => undefined as (typeof dispatchTasks)[number]['item'] | undefined)
     dispatchTasks.slice(0, previewPlaced).forEach((task) => {
       slots[task.slotIndex] = task.item
     })
     return slots
-  }, [dispatchComplete, dispatchTasks, finalSlots, previewCapacity, previewPlaced])
+  }, [dispatchTasks, finalSlots, previewCapacity, previewPlaced, selectedDispatchComplete])
   const dispatchPercent = dispatchCapacity > 0 ? Math.round((previewPlaced / dispatchCapacity) * 100) : 0
   const visiblePercent = generating ? Math.round(percent) : dispatchReady ? dispatchPercent : Math.round(percent)
   const workflowSteps: Array<{ label: string; state: 'pending' | 'current' | 'done' }> = [
@@ -224,8 +226,9 @@ export default function GenerationWorkspace({
       state: dispatchComplete ? 'done' : playbackActive ? 'current' : 'pending',
     },
   ]
-  const placedCount = dispatchReady ? Math.min(previewPlaced, dispatchCapacity) : 0
-  const activeDispatchTask = playbackActive ? dispatchTasks[Math.min(robotCursor, Math.max(0, dispatchTasks.length - 1))] : undefined
+  const placedCount = dispatchReady ? previewPlaced : 0
+  const selectedRobotNumber = Math.max(1, classPlans.findIndex((plan) => plan.classId === currentClassId) + 1)
+  const activeDispatchTask = selectedRobotActive ? dispatchTasks[previewPlaced] : undefined
   const robotSlotIndex = activeDispatchTask?.slotIndex ?? 0
   const robotSubject = activeDispatchTask?.item
   const robotRouteColumn = robotSlotIndex % Math.max(1, columns.length)
@@ -242,29 +245,30 @@ export default function GenerationWorkspace({
     '--robot-y': robotMotion.y,
   } as CSSProperties
   const robotPhaseLabel = robotPhase === 'pickup' ? '前往仓库取货' : robotPhase === 'moving' ? '沿通道运输' : '正在投递课位'
-  const dispatchJobs = (
-    playbackActive
-      ? Array.from({ length: 3 }, (_, offset) => {
-          const taskIndex = robotCursor + offset
-          const task = dispatchTasks[taskIndex]
-          const row = task ? visualRows[Math.floor(task.slotIndex / Math.max(1, columns.length))] : undefined
-          const column = task ? columns[task.slotIndex % Math.max(1, columns.length)] : undefined
-          return task && row && column
-            ? {
-                id: `JOB-${String(taskIndex + 1).padStart(3, '0')}`,
-                subject: task.item.subject_name,
-                target: row.type === 'day' ? `${column.label} · 第 ${row.period} 节` : `${column.label} · ${row.parity === 'odd' ? '单周' : '双周'}晚自习 ${row.period + 1}`,
-                active: offset === 0,
-              }
-            : undefined
-        }).filter(Boolean)
+  const dispatchJobs = classPlans.flatMap((plan, robotIndex) => {
+    const taskIndex = Math.min(deliveredByClass[plan.classId] || 0, plan.tasks.length)
+    const task = plan.tasks[taskIndex]
+    const row = task ? visualRows[Math.floor(task.slotIndex / Math.max(1, columns.length))] : undefined
+    const column = task ? columns[task.slotIndex % Math.max(1, columns.length)] : undefined
+    return task && row && column
+      ? [{
+          id: `JOB-${String(taskIndex + 1).padStart(3, '0')}`,
+          robotId: `AGV-${String(robotIndex + 1).padStart(2, '0')}`,
+          className: plan.className,
+          subject: task.item.subject_name,
+          target: row.type === 'day' ? `${column.label} · 第 ${row.period} 节` : `${column.label} · ${row.parity === 'odd' ? '单周' : '双周'}晚自习 ${row.period + 1}`,
+          active: plan.classId === currentClassId,
+        }]
       : []
-  ) as Array<{
+  }) as Array<{
     id: string
+    robotId: string
+    className: string
     subject: string
     target: string
     active: boolean
   }>
+  const selectedDispatchJob = dispatchJobs.find((job) => job.active)
   if (!open) return null
   return (
     <div className="generation-workspace" role="dialog" aria-modal="true" aria-label="自动排课工作区">
@@ -312,13 +316,13 @@ export default function GenerationWorkspace({
           <div className="generation-warehouse-badge">
             <span>▣</span>
             <strong>学科仓库</strong>
-            <small>{generating ? '等待求解' : dispatchComplete ? '已完成' : robotPhase === 'pickup' ? '正在取货' : robotPhase === 'moving' ? '搬运中' : '正在放置'}</small>
+            <small>{generating ? '等待求解' : selectedDispatchComplete ? '已完成' : robotPhase === 'pickup' ? '正在取货' : robotPhase === 'moving' ? '搬运中' : '正在放置'}</small>
           </div>
           <div className="generation-subject-list">
             {subjectQueue.map((subject, index) => {
               const previewCount = dispatchTasks.slice(0, previewPlaced).filter((task) => task.item.subject_name === subject.name).length
-              const finalCount = calendar.filter((item) => item.subject_id === subject.id).length
-              const subjectPlaced = dispatchComplete ? Math.min(subject.count, finalCount) : previewCount
+              const finalCount = calendar.filter((item) => item.class_id === currentClassId && item.subject_id === subject.id).length
+              const subjectPlaced = selectedDispatchComplete ? Math.min(subject.count, finalCount) : previewCount
               const isCarrying = robotSubject?.subject_name === subject.name
               return (
                 <div
@@ -348,7 +352,7 @@ export default function GenerationWorkspace({
             {!subjectQueue.length && <div className="generation-empty">暂无可排学科，请先配置课时和任教关系。</div>}
           </div>
           <div className="generation-rail-footer">
-            <span>{generating ? '等待配送' : dispatchComplete ? '已投递' : '配送进度'}</span>
+            <span>{generating ? '等待配送' : selectedDispatchComplete ? '已投递' : '配送进度'}</span>
             <strong>{placedCount}</strong>
             <small>/ {dispatchReady ? dispatchCapacity : totalSlots} 个课位</small>
           </div>
@@ -357,12 +361,12 @@ export default function GenerationWorkspace({
           <div className="generation-board-head">
             <div>
               <span className="generation-eyebrow">ROBOT DISPATCH SIMULATION · DATABASE GRID</span>
-              <h1>{generating ? '正在生成完整课表' : playbackActive ? '课表已生成，正在配送' : dispatchComplete ? '课表配送完成' : '排课未完成'}</h1>
-              <p>{playbackActive ? `最终课表已经保存，正在将第 ${previewPlaced + 1} / ${dispatchCapacity} 个课程运输到真实课位。` : summary || '等待算法开始…'}</p>
+              <h1>{generating ? '正在生成完整课表' : selectedRobotActive ? `${selectedClassName}正在并行配送` : selectedDispatchComplete && playbackActive ? `${selectedClassName}已完成，车队仍在运行` : dispatchComplete ? '全部班级配送完成' : '排课未完成'}</h1>
+              <p>{selectedRobotActive ? `AGV-${String(selectedRobotNumber).padStart(2, '0')} 正在运输第 ${previewPlaced + 1} / ${dispatchCapacity} 个课程；其余班级机器人同步运行。` : summary || '等待算法开始…'}</p>
             </div>
             <div className="generation-board-stat">
               <strong>{visiblePercent}%</strong>
-              <small>{generating ? (solutions ? `${solutions} 个可行解` : '完整求解中') : playbackActive ? `${previewPlaced}/${dispatchCapacity} 个课位已投递` : dispatchComplete ? `${dispatchCapacity} 个课位配送完成` : '等待任务'}</small>
+              <small>{generating ? (solutions ? `${solutions} 个可行解` : '完整求解中') : selectedRobotActive ? `${previewPlaced}/${dispatchCapacity} 个课位已投递` : selectedDispatchComplete ? `${dispatchCapacity} 个课位配送完成` : '等待任务'}</small>
             </div>
           </div>
           <div className="generation-progress-track">
@@ -376,8 +380,9 @@ export default function GenerationWorkspace({
             activeSubject={robotSubject?.subject_name}
             activeTeacher={robotSubject?.teacher_name}
             robotPhase={robotPhase}
+            robotNumber={selectedRobotNumber}
             subjectNames={subjectQueue.map((subject) => subject.name)}
-            playbackActive={playbackActive}
+            playbackActive={selectedRobotActive}
             isUnavailable={(column, row) =>
               row.type === 'day'
                 ? row.period > (gridConfig.daily_periods?.[column.weekday - 1] ?? dayRows)
@@ -493,19 +498,19 @@ export default function GenerationWorkspace({
           </div>
           <div className="generation-dispatch-current">
             <div>
-              <span className="generation-agv-id">AGV-01</span>
-              <small>{playbackActive ? robotPhaseLabel : '待命区'}</small>
+              <span className="generation-agv-id">AGV-{String(selectedRobotNumber).padStart(2, '0')}</span>
+              <small>{selectedRobotActive ? robotPhaseLabel : '待命区'}</small>
             </div>
             <strong>{robotSubject?.subject_name || (dispatchComplete ? '本轮调度已完成' : generating ? '等待最终课表' : '等待调度任务')}</strong>
-            <p>{dispatchJobs[0]?.target || (dispatchComplete ? `已完成 ${placedCount} 个课位投递` : generating ? '完整课表生成并保存后开始配送' : '正在准备运输任务')}</p>
+            <p>{selectedDispatchJob?.target || (selectedDispatchComplete ? `本班已完成 ${placedCount} 个课位投递` : generating ? '完整课表生成并保存后开始配送' : '正在准备运输任务')}</p>
           </div>
           {dispatchJobs.length > 0 && (
             <div className="generation-job-list" aria-label="运输任务队列">
               {dispatchJobs.map((job) => (
-                <div className={`generation-job-card${job.active ? ' is-active' : ''}`} key={job.id}>
+                <div className={`generation-job-card${job.active ? ' is-active' : ''}`} key={`${job.robotId}-${job.id}`}>
                   <div>
-                    <strong>{job.id}</strong>
-                    <small>{job.active ? robotPhaseLabel : '等待分配'}</small>
+                    <strong>{job.robotId} · {job.id}</strong>
+                    <small>{job.className} · {robotPhaseLabel}</small>
                   </div>
                   <p>
                     <span>{job.subject}</span>
@@ -526,7 +531,7 @@ export default function GenerationWorkspace({
           </ol>
           <div className="generation-message">
             <strong>{generating ? '算法正在生成完整课表' : playbackActive ? '最终课表已保存，机器人正在配送' : dispatchComplete ? '全部课位配送完成' : '排课任务需要处理'}</strong>
-            <p>{playbackActive ? `正在执行 JOB-${String(robotCursor + 1).padStart(3, '0')}，剩余 ${Math.max(0, dispatchCapacity - previewPlaced)} 个课位。` : summary || '正在等待任务状态…'}</p>
+            <p>{playbackActive ? `${dispatchJobs.length} 台班级机器人同步运行，每轮 1 秒；全校剩余 ${Math.max(0, fleetCapacity - fleetDelivered)} 个课位。` : summary || '正在等待任务状态…'}</p>
           </div>
           <div className="generation-trace">
             <div className="generation-trace-title">

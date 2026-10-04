@@ -365,7 +365,7 @@
 .twin-route-live { fill: none; stroke-linecap: round; stroke-linejoin: round; }
 .twin-route-reserved { stroke: rgba(79,225,193,.13); stroke-width: 10; }
 .twin-route-live { stroke: var(--twin-cyan); stroke-width: 3.5; stroke-dasharray: 1; stroke-dashoffset: 1; filter: url(#twin-glow); }
-.twin-active-route.is-moving .twin-route-live { animation: twin-route-reveal 5.35s linear forwards; }
+.twin-active-route.is-moving .twin-route-live { animation: twin-route-reveal .6s linear forwards; }
 .twin-active-route.is-drop .twin-route-live { stroke-dashoffset: 0; }
 .twin-target-ring { fill: rgba(245,184,75,.1); stroke: var(--twin-amber); stroke-width: 2; filter: url(#twin-glow); animation: twin-target 1s ease-out infinite; }
 .twin-agv-halo { fill: rgba(79,225,193,.12); stroke: var(--twin-cyan); stroke-width: 2; filter: url(#twin-glow); }

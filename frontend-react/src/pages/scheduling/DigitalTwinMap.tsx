@@ -37,6 +37,7 @@ interface DigitalTwinMapProps {
   activeSubject?: string
   activeTeacher?: string
   robotPhase: 'pickup' | 'moving' | 'drop'
+  robotNumber?: number
   subjectNames: string[]
   playbackActive: boolean
   isUnavailable: (column: TwinColumn, row: TwinRow) => boolean
@@ -105,6 +106,7 @@ export default function DigitalTwinMap({
   activeSubject,
   activeTeacher,
   robotPhase,
+  robotNumber = 1,
   subjectNames,
   playbackActive,
   isUnavailable,
@@ -285,22 +287,22 @@ export default function DigitalTwinMap({
                 <g className="twin-agv is-loading" transform={`translate(${sourceX} ${sourceY})`}>
                   <circle r="13" className="twin-agv-halo" />
                   <circle r="8" className="twin-agv-body" />
-                  <text y="3" textAnchor="middle">1</text>
+                  <text y="3" textAnchor="middle">{robotNumber}</text>
                 </g>
               )}
               {robotPhase === 'moving' && (
                 <g className="twin-agv is-moving" key={`${activeSlotIndex}-${activeSubject}-moving`}>
                   <circle r="13" className="twin-agv-halo" />
                   <circle r="8" className="twin-agv-body" />
-                  <text y="3" textAnchor="middle">1</text>
-                  <animateMotion dur="5.35s" path={routePath} fill="freeze" calcMode="linear" />
+                  <text y="3" textAnchor="middle">{robotNumber}</text>
+                  <animateMotion dur="0.6s" path={routePath} fill="freeze" calcMode="linear" />
                 </g>
               )}
               {robotPhase === 'drop' && (
                 <g className="twin-agv is-dropping" transform={`translate(${targetX} ${targetY})`}>
                   <circle r="13" className="twin-agv-halo" />
                   <circle r="8" className="twin-agv-body" />
-                  <text y="3" textAnchor="middle">1</text>
+                  <text y="3" textAnchor="middle">{robotNumber}</text>
                 </g>
               )}
             </g>
