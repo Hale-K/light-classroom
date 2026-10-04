@@ -61,10 +61,25 @@ async def load_model_ids(provider_type: str | None, base_url: str, api_key: str 
             if name:
                 ids.append(str(name))
     else:
-        for item in data.get("data") or []:
-            mid = item.get("id")
-            if mid:
-                ids.append(str(mid))
+        # OpenAI-compatible providers return ``data[].id``. Jev currently
+        # returns a compact ``Models`` array instead, so accept both shapes.
+        model_items = data.get("data") or []
+        if isinstance(model_items, list):
+            for item in model_items:
+                if isinstance(item, dict):
+                    mid = item.get("id")
+                    if mid:
+                        ids.append(str(mid))
+                elif item:
+                    ids.append(str(item))
+        if not ids:
+            for item in data.get("Models") or data.get("models") or []:
+                if isinstance(item, dict):
+                    mid = item.get("id") or item.get("name")
+                    if mid:
+                        ids.append(str(mid))
+                elif item:
+                    ids.append(str(item))
     return ids
 
 
