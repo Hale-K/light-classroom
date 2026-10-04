@@ -11,7 +11,7 @@ from app.ai.guide import AssistantUiGuide
 from app.ai.gateway import ModelGateway, ToolGateway
 from app.ai.harness import HarnessRouter
 from app.ai.intent import IntentGateway
-from app.ai.intent import PostgresIntentClassifier, SentenceTransformerEmbedding
+from app.ai.intent import JevDecisionClassifier, PostgresIntentClassifier, SentenceTransformerEmbedding
 from app.ai.knowledge.search import KnowledgeSearchService
 from app.core.config import settings
 from app.ai.resilience import ProviderCircuitBreaker, provider_circuits
@@ -24,7 +24,8 @@ from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadiness
 _intent_gateway = IntentGateway(
     PostgresIntentClassifier(
         SentenceTransformerEmbedding(settings.assistant_embedding_model_path)
-    )
+    ),
+    decision_classifier=JevDecisionClassifier(),
 )
 _knowledge_search = KnowledgeSearchService(
     SentenceTransformerEmbedding(settings.assistant_embedding_model_path)

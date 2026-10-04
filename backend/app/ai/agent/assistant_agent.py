@@ -74,6 +74,7 @@ async def agent_reply(
         circuits=provider_circuits,
     )
     if harness is None:
+        session.info["tenant_id"] = tenant_id
         last_user = last_user_message(turns)
         decision = await cast(
             IntentGatewayService, runtime.service("intent_gateway")
@@ -159,6 +160,9 @@ async def handle_assistant_turn(
     runtime = runtime or AssistantRuntime(
         on_progress=on_progress, on_trace=on_trace, circuits=provider_circuits,
     )
+    # The shared intent gateway is tenant-agnostic; expose the current tenant
+    # only through this request-scoped SQLAlchemy session for Jev lookup.
+    session.info["tenant_id"] = tenant_id
     if (
         last.get("role") == "user"
         and blocked_destructive_request(str(last.get("content") or ""))

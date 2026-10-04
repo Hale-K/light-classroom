@@ -11,6 +11,7 @@ from app.ai.intent.gateway import (
     RouterPolicyDecision,
 )
 from app.ai.intent.vector import PostgresIntentClassifier, SentenceTransformerEmbedding
+from app.ai.intent.jev import JevDecisionClassifier
 
 __all__ = [
     "AssistantIntent",
@@ -23,4 +24,5 @@ __all__ = [
     "RouterPolicyDecision",
     "PostgresIntentClassifier",
     "SentenceTransformerEmbedding",
+    "JevDecisionClassifier",
 ]
