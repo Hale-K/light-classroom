@@ -8,7 +8,7 @@ import TableCard from '@/components/TableCard'
 import EmptyState from '@/components/EmptyState'
 
 const PROVIDER_PRESETS = [
-  { value: 'JEV', label: 'Jev 决策模型', defaultBaseUrl: '', helpUrl: 'https://www.jevtypesafeai.com/', helpLabel: '查看 Jev 说明', keyOptional: false },
+  { value: 'JEV', label: 'Jev 决策模型', defaultBaseUrl: 'https://api.typesafe.ai/v1', helpUrl: 'https://www.jevtypesafeai.com/', helpLabel: '查看 Jev 说明', keyOptional: false },
   { value: 'OLLAMA', label: 'Ollama（本地）', defaultBaseUrl: 'http://127.0.0.1:11434', helpUrl: 'https://docs.ollama.com/windows', helpLabel: '查看 Ollama 安装说明', keyOptional: true },
   { value: 'OPENAI', label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com/v1', helpUrl: 'https://platform.openai.com/api-keys' },
   { value: 'DEEPSEEK', label: 'DeepSeek', defaultBaseUrl: 'https://api.deepseek.com/v1', helpUrl: 'https://platform.deepseek.com/api_keys' },
@@ -139,6 +139,10 @@ export default function AiProvidersView() {
   }
 
   const save = async (values: AiProviderForm & { is_default: boolean }) => {
+    if (values.provider_type === 'JEV' && !values.chat_model?.trim()) {
+      message.warning('请先加载并选择 Jev 决策模型')
+      return
+    }
     setSaving(true)
     try {
       const payload: AiProviderForm = { ...values, status: values.status ?? 1 }

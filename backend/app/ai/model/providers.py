@@ -6,6 +6,7 @@ from dataclasses import dataclass
 import httpx
 
 PRESETS: dict[str, dict] = {
+    "JEV": {"label": "Jev 决策模型", "base": "https://api.typesafe.ai/v1", "models": "/models", "health": "/models", "need_key": True},
     "OLLAMA": {"label": "Ollama（本地）", "base": "http://127.0.0.1:11434", "models": "/api/tags", "health": "/api/version", "need_key": False},
     "OPENAI": {"label": "OpenAI", "base": "https://api.openai.com/v1", "models": "/models", "health": "/models", "need_key": True},
     "DEEPSEEK": {"label": "DeepSeek", "base": "https://api.deepseek.com/v1", "models": "/models", "health": "/models", "need_key": True},
