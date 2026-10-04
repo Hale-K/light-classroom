@@ -7,10 +7,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+import logging
 import re
 from typing import Awaitable, Callable, Protocol
 
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 class AssistantIntent(StrEnum):
@@ -53,6 +56,7 @@ SemanticClassifier = Callable[
     [AsyncSession | None, str, str | None, list[dict]],
     Awaitable[IntentDecision | None],
 ]
+DecisionClassifier = SemanticClassifier
 
 
 class IntentGatewayService(Protocol):
@@ -69,8 +73,16 @@ class IntentGatewayService(Protocol):
 class IntentGateway:
     """Semantic intent gate with a safe guide fallback."""
 
-    def __init__(self, semantic_classifier: SemanticClassifier | None = None):
+    def __init__(
+        self,
+        semantic_classifier: SemanticClassifier | None = None,
+        *,
+        decision_classifier: DecisionClassifier | None = None,
+        minimum_decision_confidence: float = 0.70,
+    ):
         self._semantic_classifier = semantic_classifier
+        self._decision_classifier = decision_classifier
+        self._minimum_decision_confidence = minimum_decision_confidence
 
     _SIMPLE_ARITHMETIC = re.compile(
         r"^\s*\d{1,9}\s*[+\-*/×÷]\s*\d{1,9}\s*(?:=\s*)?[?？]?\s*$"
@@ -107,6 +119,23 @@ class IntentGateway:
                 source="fast_path",
                 route=AssistantRoute.DIRECT,
             )
+
+        # Jev or another bounded decision service is optional. Any unavailable
+        # or low-confidence result falls through to the existing pgvector path.
+        if self._decision_classifier is not None:
+            try:
+                decision = await self._decision_classifier(session, query, page_path, turns)
+            except Exception as exc:  # decision layer must never block the assistant
+                logger.warning("assistant.router decision layer unavailable: %s", exc)
+                decision = None
+            if decision is not None and decision.confidence >= self._minimum_decision_confidence:
+                return IntentDecision(
+                    kind=decision.kind,
+                    confidence=decision.confidence,
+                    source=decision.source or "decision_layer",
+                    needs_clarification=decision.needs_clarification,
+                    route=self._route_for(decision.kind, decision.route),
+                )
 
         if self._semantic_classifier is not None:
             semantic = await self._semantic_classifier(session, query, page_path, turns)

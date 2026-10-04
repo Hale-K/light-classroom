@@ -60,6 +60,36 @@ async def test_intent_gateway_fast_path_skips_semantic_classifier_for_arithmetic
 
 
 @pytest.mark.asyncio
+async def test_optional_decision_layer_falls_back_when_unavailable_or_uncertain():
+    async def jev(*_args):
+        return IntentDecision(AssistantIntent.DIAGNOSIS, 0.40, "jev")
+
+    async def semantic(_session, _query, _page_path, _recent_turns):
+        return IntentDecision(AssistantIntent.READINESS, 0.88, "pgvector")
+
+    decision = await IntentGateway(semantic, decision_classifier=jev).classify(None, "检查排课准备")
+
+    assert decision.kind is AssistantIntent.READINESS
+    assert decision.source == "pgvector"
+    assert decision.route is AssistantRoute.SUPERVISOR
+
+
+@pytest.mark.asyncio
+async def test_optional_decision_layer_is_used_when_confident():
+    async def jev(*_args):
+        return IntentDecision(AssistantIntent.DIAGNOSIS, 0.91, "jev")
+
+    async def semantic(*_args):
+        raise AssertionError("fallback classifier should not run")
+
+    decision = await IntentGateway(semantic, decision_classifier=jev).classify(None, "排课为什么失败")
+
+    assert decision.kind is AssistantIntent.DIAGNOSIS
+    assert decision.source == "jev"
+    assert decision.route is AssistantRoute.SUPERVISOR
+
+
+@pytest.mark.asyncio
 async def test_intent_gateway_delegates_ambiguous_language_to_semantic_classifier():
     async def semantic(session, query, page_path, recent_turns):
         assert query == "照刚才说的处理"
