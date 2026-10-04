@@ -92,10 +92,13 @@ pnpm dev -- --port 5176
 
 | 服务 | 地址 |
 | --- | --- |
-| 前端 | http://127.0.0.1:5176 |
+| 学校教务后台 | http://127.0.0.1:5176/login |
+| 平台超管后台 | http://127.0.0.1:5176/admin/login |
 | API | http://127.0.0.1:8001 |
 | OpenAPI 文档 | http://127.0.0.1:8001/docs |
 | 健康检查 | http://127.0.0.1:8001/health |
+
+打开 `http://127.0.0.1:5176` 会进入前端应用；学校教务人员使用 `/login` 登录，平台超管使用 `/admin/login` 登录。开发超管账号由 `backend/.env` 中的 `ADMIN_USERNAME` 和 `ADMIN_PASSWORD` 配置，部署前必须修改示例口令。
 
 开发环境 `APP_ENV=dev` 时可以自动建表并写入内置角色。生产环境请按 [`docs/deploy.md`](docs/deploy.md) 执行迁移和部署。
 
