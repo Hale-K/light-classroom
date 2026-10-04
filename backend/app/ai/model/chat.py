@@ -52,7 +52,11 @@ class ChatEndpoint:
 async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[ChatEndpoint]:
     stmt = (
         select(AiProvider)
-        .where(AiProvider.tenant_id == tenant_id, AiProvider.status == 1)
+        .where(
+            AiProvider.tenant_id == tenant_id,
+            AiProvider.status == 1,
+            AiProvider.provider_type != "JEV",
+        )
         .order_by(AiProvider.is_default.desc(), AiProvider.sort, AiProvider.id)
     )
     rows = (await session.execute(stmt)).scalars().all()

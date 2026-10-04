@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Divider, Dropdown, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Table, Tabs, Tag } from 'antd'
+import { App, Button, Card, Divider, Dropdown, Form, Input, InputNumber, Modal, Radio, Select, Space, Switch, Table, Tabs, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { aiProviderApi, type AiProvider, type AiProviderForm } from '@/api'
 import FilterCard from '@/components/FilterCard'
@@ -8,6 +8,7 @@ import TableCard from '@/components/TableCard'
 import EmptyState from '@/components/EmptyState'
 
 const PROVIDER_PRESETS = [
+  { value: 'JEV', label: 'Jev 决策模型', defaultBaseUrl: '', helpUrl: 'https://www.jevtypesafeai.com/', helpLabel: '查看 Jev 说明', keyOptional: false },
   { value: 'OLLAMA', label: 'Ollama（本地）', defaultBaseUrl: 'http://127.0.0.1:11434', helpUrl: 'https://docs.ollama.com/windows', helpLabel: '查看 Ollama 安装说明', keyOptional: true },
   { value: 'OPENAI', label: 'OpenAI', defaultBaseUrl: 'https://api.openai.com/v1', helpUrl: 'https://platform.openai.com/api-keys' },
   { value: 'DEEPSEEK', label: 'DeepSeek', defaultBaseUrl: 'https://api.deepseek.com/v1', helpUrl: 'https://platform.deepseek.com/api_keys' },
@@ -19,6 +20,7 @@ const PROVIDER_PRESETS = [
 
 const MODEL_CATEGORIES = [
   { key: 'CHAT', label: '对话模型', field: 'chat_model' as const },
+  { key: 'DECISION', label: '决策模型', field: 'chat_model' as const },
   { key: 'VISION', label: '视觉模型', field: 'vision_model' as const },
   { key: 'IMAGE', label: '图片模型', field: 'image_model' as const },
   { key: 'VIDEO', label: '视频模型', field: 'video_model' as const },
@@ -78,12 +80,14 @@ export default function AiProvidersView() {
   const filtered = useMemo(() => {
     const cat = MODEL_CATEGORIES.find((c) => c.key === activeCategory)
     if (!cat) return rows
-    return rows.filter((r) => Boolean(r[cat.field]))
+    if (cat.key === 'DECISION') return rows.filter((r) => r.provider_type === 'JEV')
+    if (activeCategory !== 'CHAT') return rows.filter((r) => r.provider_type !== 'JEV' && Boolean(r[cat.field]))
+    return rows.filter((r) => r.provider_type !== 'JEV' && Boolean(r[cat.field]))
   }, [rows, activeCategory])
 
   const openEdit = (row?: AiProvider) => {
     setEditing(row ?? null)
-    const preset = PROVIDER_PRESETS[0]
+    const preset = PROVIDER_PRESETS.find((item) => item.value === 'OLLAMA')!
     form.setFieldsValue(
       row
         ? {
@@ -124,6 +128,9 @@ export default function AiProvidersView() {
         const v = stored[c.key]
         if (v) categorized[c.key] = [{ value: v, label: v }]
       })
+      if (row.provider_type === 'JEV' && row.chat_model) {
+        categorized.DECISION = [{ value: row.chat_model, label: row.chat_model }]
+      }
       setModelOptions(categorized)
     } else {
       setModelOptions({ CHAT: [] })
@@ -157,6 +164,7 @@ export default function AiProvidersView() {
     try {
       const ids = await aiProviderApi.loadModels({ provider_type, base_url, api_key })
       const categorized = categorizeModels(ids)
+      if (provider_type === 'JEV') categorized.DECISION = categorized.CHAT ?? []
       setModelOptions(categorized)
       if (!form.getFieldValue('chat_model') && categorized.CHAT?.[0]) {
         form.setFieldValue('chat_model', categorized.CHAT[0].value)
@@ -258,6 +266,15 @@ export default function AiProvidersView() {
         onChange={setActiveCategory}
         items={MODEL_CATEGORIES.map((c) => ({ key: c.key, label: c.label }))}
       />
+      {activeCategory === 'DECISION' && (
+        <Card size="small" style={{ marginBottom: 16 }}>
+          <Space direction="vertical" size={4}>
+            <strong>决策模型降级策略</strong>
+            <span style={{ color: '#667085' }}>Jev 未配置、调用失败或置信度不足时，系统自动回退到 pgvector 和本地默认 Router。</span>
+            <Tag color="blue">默认安全策略：不影响现有助手流程</Tag>
+          </Space>
+        </Card>
+      )}
       <FilterCard>
         <Form layout="inline">
           <Form.Item label="关键词">
@@ -277,7 +294,7 @@ export default function AiProvidersView() {
           dataSource={filtered}
           loading={loading}
           pagination={{ pageSize: 10, showTotal: (t) => `共 ${t} 个` }}
-          locale={{ emptyText: <EmptyState icon="cloud" title="还没有服务商" desc="新增后，助手对话会走默认启用的对话模型。" height={240} /> }}
+          locale={{ emptyText: <EmptyState icon="cloud" title={activeCategory === 'DECISION' ? '还没有决策模型' : '还没有服务商'} desc={activeCategory === 'DECISION' ? '新增 Jev 后，Router 才会在配置的置信度范围内使用它。未配置时自动使用默认路由。' : '新增后，助手对话会走默认启用的对话模型。'} height={240} /> }}
         />
       </TableCard>
       <Modal title={editing ? '编辑服务商' : '新增服务商'} open={open} onCancel={() => setOpen(false)} onOk={() => form.submit()} confirmLoading={saving} width={720} destroyOnClose>
