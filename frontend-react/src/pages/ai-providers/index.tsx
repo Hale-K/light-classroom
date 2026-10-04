@@ -45,6 +45,11 @@ function categorizeModels(ids: string[]): Categorized {
   return out
 }
 
+function normalizeProviderBase(providerType: string, baseUrl: string) {
+  const base = baseUrl.trim().replace(/\/$/, '')
+  return providerType === 'JEV' && !base.endsWith('/v1') ? `${base}/v1` : base
+}
+
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(PROVIDER_PRESETS.map((p) => [p.value, p.label]))
 
 export default function AiProvidersView() {
@@ -93,7 +98,7 @@ export default function AiProvidersView() {
         ? {
             name: row.name,
             provider_type: row.provider_type,
-            base_url: row.base_url,
+            base_url: normalizeProviderBase(row.provider_type, row.base_url),
             chat_model: row.chat_model ?? undefined,
             vision_model: row.vision_model ?? undefined,
             image_model: row.image_model ?? undefined,

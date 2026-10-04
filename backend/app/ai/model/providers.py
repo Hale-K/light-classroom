@@ -26,6 +26,13 @@ def _join(base_url: str, path: str) -> str:
     return base_url.rstrip("/") + path
 
 
+def _normalize_probe_base(provider_type: str | None, base_url: str) -> str:
+    base = base_url.strip().rstrip("/")
+    if (provider_type or "").upper() == "JEV" and not base.endswith("/v1"):
+        return f"{base}/v1"
+    return base
+
+
 @dataclass
 class ProbeError(Exception):
     message: str
@@ -38,7 +45,7 @@ async def load_model_ids(provider_type: str | None, base_url: str, api_key: str 
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key.strip()}"
-    url = _join(base_url.strip(), spec["models"])
+    url = _join(_normalize_probe_base(provider_type, base_url), spec["models"])
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             resp = await client.get(url, headers=headers)
@@ -66,7 +73,7 @@ async def test_connection(provider_type: str | None, base_url: str, api_key: str
     headers = {"Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key.strip()}"
-    url = _join(base_url.strip(), spec["health"])
+    url = _join(_normalize_probe_base(provider_type, base_url), spec["health"])
     async with httpx.AsyncClient(timeout=20) as client:
         resp = await client.get(url, headers=headers)
     return 200 <= resp.status_code < 300
