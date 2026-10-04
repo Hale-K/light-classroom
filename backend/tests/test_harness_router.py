@@ -46,6 +46,7 @@ async def test_intent_gateway_uses_semantic_classifier_without_phrase_enumeratio
 
     assert decision.kind is AssistantIntent.DIAGNOSIS
     assert decision.source == "pgvector"
+    assert decision.route is AssistantRoute.SUPERVISOR
 
 
 @pytest.mark.asyncio

@@ -26,6 +26,9 @@ class AssistantRoute(StrEnum):
 
     DIRECT = "direct"
     AGENT = "agent"
+    SUPERVISOR = "supervisor"
+    WORKFLOW = "workflow"
+    HUMAN_REVIEW = "human_review"
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +76,17 @@ class IntentGateway:
         r"^\s*\d{1,9}\s*[+\-*/×÷]\s*\d{1,9}\s*(?:=\s*)?[?？]?\s*$"
     )
 
+    @staticmethod
+    def _route_for(kind: AssistantIntent, route: AssistantRoute) -> AssistantRoute:
+        """把意图规范化为可观测的执行模式；权限仍由 Harness/ToolGateway 控制。"""
+        if route is AssistantRoute.DIRECT:
+            return route
+        if kind in {AssistantIntent.READINESS, AssistantIntent.DIAGNOSIS}:
+            return AssistantRoute.SUPERVISOR
+        if kind is AssistantIntent.CONFIGURATION:
+            return AssistantRoute.HUMAN_REVIEW
+        return route
+
     async def classify(
         self,
         session: AsyncSession | None,
@@ -97,13 +111,21 @@ class IntentGateway:
         if self._semantic_classifier is not None:
             semantic = await self._semantic_classifier(session, query, page_path, turns)
             if semantic is not None:
-                return semantic
+                route = self._route_for(semantic.kind, semantic.route)
+                return IntentDecision(
+                    kind=semantic.kind,
+                    confidence=semantic.confidence,
+                    source=semantic.source,
+                    needs_clarification=semantic.needs_clarification,
+                    route=route,
+                )
 
         if text:
             return IntentDecision(
                 kind=AssistantIntent.GUIDE,
                 confidence=0.55,
                 source="safe_fallback",
+                route=AssistantRoute.AGENT,
             )
         return IntentDecision(
             kind=AssistantIntent.UNKNOWN,
