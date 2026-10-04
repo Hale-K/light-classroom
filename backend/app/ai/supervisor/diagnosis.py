@@ -16,6 +16,7 @@ from app.ai.supervisor.contracts import (
     SupervisorResultStatus,
     SupervisorTask,
 )
+from app.ai.intent import IntentGateway
 
 
 DiagnosisExecutor = Callable[[SupervisorTask, SupervisorTaskContext], Awaitable[str]]
@@ -74,7 +75,10 @@ class SchedulingDiagnosisSupervisor:
                         await on_event("supervisor.task_succeeded", {"task_id": task.id, "attempt": attempts + 1})
                     break
                 except Exception as exc:
-                    if attempts < max(0, max_retries):
+                    policy = IntentGateway.failure_policy(retry_count=attempts, max_retries=max_retries)
+                    if on_event:
+                        await on_event("router.failure_policy", {"task_id": task.id, **policy.trace_data()})
+                    if policy.action.value == "retry":
                         attempts += 1
                         if on_event:
                             await on_event("supervisor.task_retry", {"task_id": task.id, "attempt": attempts + 1, "retry_count": attempts, "error": str(exc)[:500]})

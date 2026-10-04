@@ -20,6 +20,7 @@ from app.ai.guide import fast_reply as _local_fast_reply
 from app.ai.guide import rule_jumps
 from app.ai.harness import HarnessProfile, HarnessRouterService
 from app.ai.intent import AssistantIntent, IntentGatewayService
+from app.ai.intent import IntentGateway
 from app.ai.model.chat import ChatError
 from app.ai.resilience import provider_circuits
 from app.ai.runs.events import TraceCallback
@@ -252,6 +253,10 @@ async def handle_assistant_turn(
             "missing": list(report.missing),
             "next_steps": list(report.next_steps),
         })
+        await runtime.emit("router.review_decision", IntentGateway.review_policy(
+            failed_tasks=report.failed_tasks,
+            missing=report.missing,
+        ).trace_data())
         return AssistantTurn(
             text=guidance + "\n\n### 排课细项检查\n\n" + (report.summary or "排课细项没有返回结果，请稍后重试。"),
             think=[
@@ -310,6 +315,10 @@ async def handle_assistant_turn(
             "missing": list(report.missing),
             "next_steps": list(report.next_steps),
         })
+        await runtime.emit("router.review_decision", IntentGateway.review_policy(
+            failed_tasks=report.failed_tasks,
+            missing=report.missing,
+        ).trace_data())
         return AssistantTurn(
             text=report.summary or "排课诊断没有返回结果，请到排课页查看任务记录。",
             think=[

@@ -6,7 +6,7 @@ from app.ai.agent import assistant_agent
 from app.ai.gateway import model as gateway_model
 from app.ai.gateway.tool import ToolGateway
 from app.ai.harness import HarnessRouter
-from app.ai.intent import AssistantIntent, AssistantRoute, IntentDecision, IntentGateway
+from app.ai.intent import AssistantIntent, AssistantRoute, FailureAction, IntentDecision, IntentGateway, ReviewAction
 from app.ai.runtime import AssistantRuntime, ServiceRegistry
 from app.ai.model.chat import ChatEndpoint, ChatOutcome
 
@@ -31,6 +31,18 @@ def test_router_selects_direct_harness_for_fast_path():
     assert profile.name == "direct"
     assert profile.max_steps == 1
     assert profile.allowed_tools == frozenset()
+
+
+def test_router_policy_retries_then_creates_followup_or_waits_for_user():
+    assert IntentGateway.failure_policy(retry_count=0, max_retries=1).action is FailureAction.RETRY
+    assert IntentGateway.failure_policy(retry_count=1, max_retries=1).action is FailureAction.CREATE_FOLLOWUP
+    assert IntentGateway.failure_policy(retry_count=1, max_retries=1, missing=("任教关系",)).action is FailureAction.WAIT_USER
+
+
+def test_router_policy_requires_review_for_writes_and_recommends_it_for_gaps():
+    assert IntentGateway.review_policy().action is ReviewAction.NONE
+    assert IntentGateway.review_policy(missing=("规则组",)).action is ReviewAction.RECOMMENDED
+    assert IntentGateway.review_policy(mutates_data=True).action is ReviewAction.REQUIRED
 
 
 @pytest.mark.asyncio

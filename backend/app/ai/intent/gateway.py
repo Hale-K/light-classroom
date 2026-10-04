@@ -34,6 +34,33 @@ class AssistantRoute(StrEnum):
     HUMAN_REVIEW = "human_review"
 
 
+class FailureAction(StrEnum):
+    RETRY = "retry"
+    CREATE_FOLLOWUP = "create_followup"
+    WAIT_USER = "wait_user"
+    STOP = "stop"
+
+
+class ReviewAction(StrEnum):
+    NONE = "none"
+    RECOMMENDED = "recommended"
+    REQUIRED = "required"
+
+
+@dataclass(frozen=True, slots=True)
+class RouterPolicyDecision:
+    action: FailureAction | ReviewAction
+    reason: str
+    confidence: float = 1.0
+
+    def trace_data(self) -> dict:
+        return {
+            "action": self.action.value,
+            "reason": self.reason,
+            "confidence": round(self.confidence, 3),
+        }
+
+
 @dataclass(frozen=True, slots=True)
 class IntentDecision:
     kind: AssistantIntent
@@ -98,6 +125,27 @@ class IntentGateway:
         if kind is AssistantIntent.CONFIGURATION:
             return AssistantRoute.HUMAN_REVIEW
         return route
+
+    @staticmethod
+    def failure_policy(*, retry_count: int, max_retries: int, missing: tuple[str, ...] = ()) -> RouterPolicyDecision:
+        """选择单个子任务失败后的动作；不直接执行任何副作用。"""
+        if missing:
+            return RouterPolicyDecision(
+                FailureAction.WAIT_USER,
+                "子任务缺少用户或业务配置，等待补充后再继续",
+            )
+        if retry_count < max(0, max_retries):
+            return RouterPolicyDecision(FailureAction.RETRY, "仍有重试预算")
+        return RouterPolicyDecision(FailureAction.CREATE_FOLLOWUP, "重试预算已用尽，交由 Supervisor 创建补充任务")
+
+    @staticmethod
+    def review_policy(*, failed_tasks: tuple[str, ...] = (), missing: tuple[str, ...] = (), mutates_data: bool = False) -> RouterPolicyDecision:
+        """判断结果是否需要人工复核；写入类动作默认必须人工确认。"""
+        if mutates_data:
+            return RouterPolicyDecision(ReviewAction.REQUIRED, "结果可能改变业务数据，必须人工确认")
+        if failed_tasks or missing:
+            return RouterPolicyDecision(ReviewAction.RECOMMENDED, "结果包含失败项或缺失项，建议人工复核")
+        return RouterPolicyDecision(ReviewAction.NONE, "只读检查已完成且没有未决项")
 
     async def classify(
         self,
