@@ -33,6 +33,7 @@ from app.services.scheduling import (
     ScheduleValidationIssue,
     ensure_teacher_evening_daytime_anchors,
     expand_schedule,
+    find_schedule_conflicts,
     has_scheduled_hours,
     generate_schedule,
     parity_conflicts,
@@ -2636,6 +2637,16 @@ async def _execute_schedule_generation(
             result = replace(result, items=before_soft)
         else:
             result = replace(result, items=improved.items)
+    final_conflicts = find_schedule_conflicts(result.items)
+    if final_conflicts:
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "message": "生成结果存在教师或班级课位冲突，未保存课表",
+                "code": "schedule_conflict_postcheck",
+                "conflicts": final_conflicts[:50],
+            },
+        )
     rule_validation = None
     if rule_group:
         rule_validation = evaluate_rule_group(

@@ -190,7 +190,9 @@ def solve_daytime_cpsat(
         if owner == "class_id" and os.environ.get("CPSAT_DISABLE_CLASS", "") == "1":
             return
         buckets: dict[tuple[int, int, int], list[int]] = defaultdict(list)
-        for (a_idx, d, p) in list(y) + list(ho):
+        # 收集全周、单周腿和双周腿。此前漏掉 he，导致两个同教师的
+        # 双周半课可以落到同一课位，模型仍返回可行解。
+        for (a_idx, d, p) in list(y) + list(ho) + list(he):
             entity = meta[a_idx][owner]
             if entity is None:
                 continue
@@ -344,6 +346,18 @@ def solve_daytime_cpsat(
         int(entry["target_id"])
         for entry in (consecutive_requirements or {}).get("subjects") or []
     }
+    spread_subjects: set[int] = set()
+    if subject_daily_spread:
+        teaching_days = min(days, 5)
+        for assignment in assignments:
+            weekday_periods = assignment.get("weekday_periods")
+            if weekday_periods is None:
+                weekday_periods = min(
+                    float(assignment.get("weekly_periods") or 0),
+                    teaching_days,
+                )
+            if float(weekday_periods or 0) > teaching_days:
+                spread_subjects.add(int(assignment["subject_id"]))
     odd_day_sub: dict[tuple[int, int, int], list[Any]] = defaultdict(list)
     even_day_sub: dict[tuple[int, int, int], list[Any]] = defaultdict(list)
     for (a_idx, d, p), var in y.items():
@@ -356,7 +370,9 @@ def solve_daytime_cpsat(
         even_day_sub[(meta[a_idx]["class_id"], meta[a_idx]["subject_id"], d)].append(var)
     for key, vars_ in list(odd_day_sub.items()) + list(even_day_sub.items()):
         _cid, sid, _d = key
-        cap = 2 if sid in cons_subjects_cap else 1
+        # 课时超过工作日数量时，均匀分布需要允许一个日期出现第 2 节，
+        # 余下日期各 1 节（例如 6 节工作日课时按 4+2 分布）。
+        cap = 2 if sid in cons_subjects_cap or sid in spread_subjects else 1
         if max_same_subject_per_day is not None and sid not in cons_subjects_cap:
             cap = min(cap, int(max_same_subject_per_day))
         if vars_:
@@ -621,11 +637,11 @@ def solve_daytime_cpsat(
             base, remainder = divmod(total_wd_int, teaching_days)
             all_vars = [v for ps in pmap.values() for v in ps]
             # 均分：非连堂学科每天最多 1 节；连堂（数学）才允许 base+1（最多 2）。
-            day_max = 2 if s in cons_subjects else 1
+            day_max = 2 if s in cons_subjects or s in spread_subjects else 1
             model.Add(sum(all_vars) <= min(day_max, base + (1 if remainder else 0)))
             if total_wd_int > teaching_days:
                 model.Add(sum(all_vars) >= base)
-            if remainder and s not in cons_subjects:
+            if remainder and s not in cons_subjects and s not in spread_subjects:
                 for p in range(1, periods_per_day):
                     a1 = sum(pmap.get(p, []))
                     a2 = sum(pmap.get(p + 1, []))
@@ -639,11 +655,11 @@ def solve_daytime_cpsat(
             total_wd_int = int(round(total_wd))
             teaching_days = min(days, 5)
             base, remainder = divmod(total_wd_int, teaching_days)
-            day_max = 2 if s in cons_subjects else 1
+            day_max = 2 if s in cons_subjects or s in spread_subjects else 1
             if not remainder and total_wd_int <= 0:
                 continue
             # 非连堂学科不允许“某天 2 节”的余数天模型。
-            if s not in cons_subjects:
+            if s not in cons_subjects and s not in spread_subjects:
                 continue
             extra_days = []
             for d in range(1, min(days, 5) + 1):

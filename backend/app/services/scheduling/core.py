@@ -120,6 +120,34 @@ def occupancy_keys(
     return [(owner_id, weekday, period, leg.value) for leg in legs]
 
 
+def find_schedule_conflicts(items: Iterable["ScheduleItem"]) -> list[dict[str, Any]]:
+    """Return hard class/teacher collisions using the actual odd/even week legs."""
+    seen: dict[tuple[str, int, int, int, str], ScheduleItem] = {}
+    conflicts: list[dict[str, Any]] = []
+    for item in items:
+        owners = [("class", item.class_id)]
+        if item.teacher_id is not None:
+            owners.append(("teacher", item.teacher_id))
+        for owner_type, owner_id in owners:
+            for _, weekday, period, leg in occupancy_keys(
+                owner_id, item.weekday, item.period, item.week_parity,
+            ):
+                key = (owner_type, owner_id, weekday, period, leg)
+                previous = seen.get(key)
+                if previous is not None:
+                    conflicts.append({
+                        "type": owner_type,
+                        "entity_id": owner_id,
+                        "weekday": weekday,
+                        "period": period,
+                        "week_parity": leg,
+                        "assignment_ids": [previous.assignment_id, item.assignment_id],
+                    })
+                else:
+                    seen[key] = item
+    return conflicts
+
+
 @dataclass(frozen=True)
 class ScheduleItem:
     assignment_id: int

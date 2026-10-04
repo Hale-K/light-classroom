@@ -57,6 +57,12 @@ function matchesParity(entryParity: ScheduleEntry['week_parity'] | undefined, co
   return parity === 'all' || parity === columnParity
 }
 
+function parityConflicts(left: ScheduleEntry['week_parity'], right: ScheduleEntry['week_parity']) {
+  const first = left || 'all'
+  const second = right || 'all'
+  return first === 'all' || second === 'all' || first === second
+}
+
 /** 课表大表：节次 × 星期 网格，适配打印 */
 export default function ScheduleGrid({
   entries,
@@ -141,25 +147,44 @@ export default function ScheduleGrid({
     })
     const tones = ordered.map((lesson) => subjectTone(lesson.subject_name || '未知学科'))
     const tone = tones.length > 1 ? 'multi' : tones[0] || 'default'
-    const classNames = [...new Set(ordered.map((lesson) => lesson.class_name).filter(Boolean))]
     const mine = ordered.some(isMine)
+    const hasConflict = ordered.some((lesson, index) =>
+      ordered.slice(index + 1).some((other) => parityConflicts(lesson.week_parity, other.week_parity)),
+    )
+    const parityLabel = (parity: ScheduleEntry['week_parity']) => {
+      if (parity === 'odd') return '单周'
+      if (parity === 'even') return '双周'
+      return '整周'
+    }
     return (
-      <div className={`st-lessons st-tone-${tone}${mine ? ' is-mine' : ''}`}>
+      <div
+        className={`st-lessons st-tone-${tone}${mine ? ' is-mine' : ''}${hasConflict ? ' has-conflict' : ''}`}
+        aria-label={hasConflict ? `课位冲突，共 ${ordered.length} 条课程` : undefined}
+      >
         {mine && <span className="st-mine-badge" aria-label="我的课">我</span>}
-        <div className="st-subject-line">
+        {hasConflict && <span className="st-conflict-badge">课位冲突</span>}
+        <div className="st-entry-list">
           {ordered.map((lesson, index) => {
             const subjectName = lesson.subject_name || '未知学科'
+            const showParity = showClassName || hasConflict || lesson.week_parity !== 'all'
             return (
-              <span className="st-subject-token" key={`${lesson.subject_id}-${lesson.week_parity || 'all'}-${index}`}>
-                {index > 0 && <span className="st-subject-divider" aria-hidden="true">·</span>}
-                <strong className={`st-subject-name st-subject-${subjectTone(subjectName)}`}>{subjectName}</strong>
-              </span>
+              <div
+                className="st-entry"
+                key={`${lesson.id}-${lesson.subject_id}-${lesson.week_parity || 'all'}-${index}`}
+              >
+                <div className="st-subject-line">
+                  <strong className={`st-subject-name st-subject-${subjectTone(subjectName)}`}>{subjectName}</strong>
+                  {showParity && (
+                    <span className={`st-parity-tag st-parity-${lesson.week_parity || 'all'}`}>
+                      {parityLabel(lesson.week_parity)}
+                    </span>
+                  )}
+                </div>
+                {showClassName && lesson.class_name && <small className="st-class-line">{lesson.class_name}</small>}
+              </div>
             )
           })}
         </div>
-        {showClassName && classNames.length > 0 && (
-          <small className="st-class-line">{classNames.join(' ｜ ')}</small>
-        )}
       </div>
     )
   }

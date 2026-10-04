@@ -1149,6 +1149,58 @@ kbd {
   gap: 3px;
   width: 100%;
 }
+.st-entry-list {
+  display: grid;
+  width: 100%;
+  gap: 5px;
+}
+.st-entry {
+  display: grid;
+  justify-items: center;
+  gap: 1px;
+  min-width: 0;
+  padding: 2px 0;
+}
+.st-entry + .st-entry {
+  padding-top: 5px;
+  border-top: 1px dashed rgba(100, 116, 139, 0.36);
+}
+.st-parity-tag {
+  display: inline-flex;
+  align-items: center;
+  min-height: 16px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 14px;
+  white-space: nowrap;
+}
+.st-parity-all {
+  color: #64748b;
+  background: #f1f5f9;
+}
+.st-parity-odd {
+  color: #b45309;
+  background: #fff7ed;
+}
+.st-parity-even {
+  color: #0369a1;
+  background: #eff6ff;
+}
+.st-conflict-badge {
+  align-self: center;
+  margin-bottom: 3px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  line-height: 15px;
+}
 .st-subject-token {
   display: inline-flex;
   align-items: center;

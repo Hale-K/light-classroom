@@ -1245,6 +1245,28 @@ def test_cpsat_daytime_parity_pair_forces_same_saturday_slot():
     assert all(item.weekday == 6 for item in odd_items + even_items)
 
 
+def test_cpsat_rejects_same_teacher_same_even_week_slot():
+    """Two even-week half lessons cannot share one teacher and Saturday slot."""
+    result = solve_daytime_cpsat(
+        [
+            {
+                "id": 1, "class_id": 10, "subject_id": 30, "teacher_id": 7,
+                "week_parity": "even", "weekly_periods": 0.5,
+                "weekday_periods": 0, "saturday_periods": 0.5,
+            },
+            {
+                "id": 2, "class_id": 11, "subject_id": 31, "teacher_id": 7,
+                "week_parity": "even", "weekly_periods": 0.5,
+                "weekday_periods": 0, "saturday_periods": 0.5,
+            },
+        ],
+        days=6,
+        periods_per_day=1,
+        max_time_seconds=5,
+    )
+    assert result.status == "INFEASIBLE"
+
+
 def test_class_evening_teacher_pins_feed_required_slots():
     group = _group({
         "id": "R19-01",
