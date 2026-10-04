@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy import or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.model.providers import ProbeError, load_model_ids, test_connection
+from app.ai.model.providers import ProbeError, _normalize_probe_base, load_model_ids, test_connection
 from app.ai.model.store import AiProvider
 from app.core.secret_store import decrypt_secret, encrypt_secret
 from app.api.deps import get_current_tenant, get_current_user, require_management_user
@@ -45,7 +45,7 @@ def _to_out(row: AiProvider) -> dict:
         "id": row.id,
         "name": row.name,
         "provider_type": row.provider_type,
-        "base_url": row.base_url,
+        "base_url": _normalize_probe_base(row.provider_type, row.base_url),
         "has_api_key": bool(row.api_key),
         "chat_model": row.chat_model,
         "vision_model": row.vision_model,
