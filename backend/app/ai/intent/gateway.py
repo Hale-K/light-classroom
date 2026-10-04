@@ -184,6 +184,13 @@ class IntentGateway:
                     needs_clarification=decision.needs_clarification,
                     route=self._route_for(decision.kind, decision.route),
                 )
+            if decision is not None:
+                logger.info(
+                    "assistant.router decision fallback source=%s confidence=%.3f threshold=%.3f",
+                    decision.source,
+                    decision.confidence,
+                    self._minimum_decision_confidence,
+                )
 
         if self._semantic_classifier is not None:
             semantic = await self._semantic_classifier(session, query, page_path, turns)
