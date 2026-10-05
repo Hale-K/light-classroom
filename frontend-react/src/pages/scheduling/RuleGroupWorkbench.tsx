@@ -14,6 +14,7 @@ import { schedulingApi } from "@/api";
 import { setAssistantContext, clearAssistantContext } from '@/assistant/context';
 import type {
   Grade,
+  SchedulingGridConfig,
   SchedulingResources,
   SchedulingRuleCode,
   SchedulingRuleDefinition,
@@ -317,6 +318,7 @@ interface RuleGroupWorkbenchProps {
   slotOptions?: string[];
   academicYear?: string;
   term?: string;
+  gridConfig?: SchedulingGridConfig;
   resources?: SchedulingResources;
   grades?: Grade[];
   /** 诊断侧栏点「去改规则」时打开对应综合规则，不自动跟排课失败绑定 */
@@ -2118,9 +2120,11 @@ const rulePreviewModel = (rule: GenericScheduleRule) => {
 function RuleImpactPreview({
   rule,
   compact = false,
+  gridConfig,
 }: {
   rule: GenericScheduleRule;
   compact?: boolean;
+  gridConfig?: SchedulingGridConfig;
 }) {
   const model = rulePreviewModel(rule);
   const daySet = new Set(model.days);
@@ -2128,10 +2132,23 @@ function RuleImpactPreview({
   const parityPair = ["subject_daytime_parity_pair", "subject_evening_parity_pair"].includes(
     ruleCodeForRule(rule),
   ) || rule.cycle === "单周 / 双周";
+  const hasSavedGrid = gridConfig?.configured === true;
+  const configuredDailyPeriods = hasSavedGrid
+    ? gridConfig?.daily_periods || []
+    : [9, 9, 9, 9, 9, 9, 9];
+  const configuredDays = WEEKDAY_ENUMS.filter((_, index) => configuredDailyPeriods[index] > 0);
+  const daytimePeriodCount = Math.max(1, ...configuredDailyPeriods);
+  const eveningPeriodCount = hasSavedGrid && gridConfig?.enable_evening
+    ? Math.max(...(gridConfig.evening_daily_periods_odd || []), ...(gridConfig.evening_daily_periods_even || []), 0)
+    : 0;
+  const previewDays = configuredDays.length ? configuredDays : WEEKDAY_ENUMS;
+  const configuredPeriodCount = model.isEvening
+    ? daytimePeriodCount + eveningPeriodCount
+    : daytimePeriodCount;
   const basePeriods = parityPair && model.periods.length === 0
-    ? (model.isEvening ? ["第10节"] : PERIOD_ENUMS.slice(0, 7))
+    ? (model.isEvening ? [`第${Math.max(daytimePeriodCount + 1, 10)}节`] : PERIOD_ENUMS.slice(0, configuredPeriodCount))
     : [...new Set([
-        ...PERIOD_ENUMS.slice(0, model.isEvening ? 10 : 9),
+        ...PERIOD_ENUMS.slice(0, configuredPeriodCount),
         ...model.periods,
       ])];
   const previewRows = parityPair
@@ -2163,12 +2180,12 @@ function RuleImpactPreview({
         <div className="rule-group-impact-grid" aria-label="规则作用课位预览">
           <div className="rule-group-impact-grid-row is-head">
             <span>节次</span>
-            {WEEKDAY_ENUMS.map((day) => <span key={day}>{day}</span>)}
+            {previewDays.map((day) => <span key={day}>{day}</span>)}
           </div>
           {previewRows.map((row) => (
             <div className="rule-group-impact-grid-row" key={row.label}>
               <span>{row.label}</span>
-              {WEEKDAY_ENUMS.map((day) => {
+              {previewDays.map((day) => {
                 const active = daySet.has(day) && periodSet.has(row.period);
                 return (
                   <span
@@ -3824,6 +3841,7 @@ export default function RuleGroupWorkbench({
   slotOptions = [],
   academicYear = "2026-2027",
   term = "1",
+  gridConfig,
   resources,
   grades = [],
   openGroupRequest = null,
@@ -5805,7 +5823,7 @@ export default function RuleGroupWorkbench({
                 </small>
               </div>
               )}
-              {!showSlotPattern && <RuleImpactPreview rule={draft} />}
+              {!showSlotPattern && <RuleImpactPreview rule={draft} gridConfig={gridConfig} />}
             </div>
             <div className="rule-group-priority">
               <span>优先级</span>

@@ -1495,6 +1495,7 @@ export default function SchedulingView() {
                   slotOptions={configuredSlotOptions}
                   academicYear={academicYear}
                   term={term}
+                  gridConfig={gridConfig}
                   resources={resources}
                   grades={grades}
                   openGroupRequest={generationFocus}
