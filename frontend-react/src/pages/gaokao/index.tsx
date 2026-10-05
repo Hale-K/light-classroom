@@ -35,6 +35,7 @@ export default function GaokaoView() {
 
   const [academicYear, setAcademicYear] = useState('2026-2027')
   const [term, setTerm] = useState('1')
+  const [academicContextReady, setAcademicContextReady] = useState(false)
   const [gradeId, setGradeId] = useState<number>()
   const [mode, setMode] = useState<GaokaoMode>('3+1+2')
   const [overview, setOverview] = useState<GaokaoOverview>()
@@ -84,13 +85,14 @@ export default function GaokaoView() {
     authApi.academicYears().then((settings) => {
       if (settings.current_academic_year) setAcademicYear(settings.current_academic_year)
       if (settings.current_term) setTerm(settings.current_term)
-    }).catch(() => undefined)
+    }).catch(() => undefined).finally(() => setAcademicContextReady(true))
   }, [])
 
   useEffect(() => {
+    if (!academicContextReady) return
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [academicYear, term, canReviewChoices])
+  }, [academicContextReady, academicYear, term, canReviewChoices])
 
   // 年级变化时重新拉取（gradeId 首次由 overview 回填后再触发一次）
   useEffect(() => {
@@ -400,9 +402,9 @@ export default function GaokaoView() {
                   ),
                 },
                 {
-                  title: '走班学生',
-                  dataIndex: 'walk_student_count',
-                  key: 'walk_student_count',
+                  title: '学生数',
+                  dataIndex: 'student_count',
+                  key: 'student_count',
                   width: 80,
                   align: 'right' as const,
                 },
