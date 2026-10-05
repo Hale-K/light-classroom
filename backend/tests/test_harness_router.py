@@ -33,6 +33,26 @@ def test_router_selects_direct_harness_for_fast_path():
     assert profile.allowed_tools == frozenset()
 
 
+def test_router_jev_tool_hint_narrows_only_existing_allowlist():
+    router = HarnessRouter()
+    decision = IntentDecision(
+        kind=AssistantIntent.GUIDE,
+        confidence=0.95,
+        source="jev",
+        tool_hints=frozenset({"lookup_teachers"}),
+    )
+    profile = router.select(decision)
+    assert profile.allowed_tools == frozenset({"lookup_teachers"})
+
+    unknown = IntentDecision(
+        kind=AssistantIntent.GUIDE,
+        confidence=0.95,
+        source="jev",
+        tool_hints=frozenset({"delete_everything"}),
+    )
+    assert router.select(unknown).allowed_tools == router.profiles["guide"].allowed_tools
+
+
 def test_router_policy_retries_then_creates_followup_or_waits_for_user():
     assert IntentGateway.failure_policy(retry_count=0, max_retries=1).action is FailureAction.RETRY
     assert IntentGateway.failure_policy(retry_count=1, max_retries=1).action is FailureAction.CREATE_FOLLOWUP

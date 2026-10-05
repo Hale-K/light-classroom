@@ -20,6 +20,14 @@ logger = logging.getLogger(__name__)
 
 JEV_TIMEOUT_SECONDS = 3.0
 
+JEV_TOOL_HINTS = {
+    "teachers": frozenset({"lookup_teachers"}),
+    "schedule_setup": frozenset({"lookup_schedule_setup"}),
+    "rules": frozenset({"lookup_rules"}),
+    "generation_status": frozenset({"lookup_generation_status"}),
+    "playbook": frozenset({"lookup_playbook"}),
+}
+
 
 class JevDecisionClassifier:
     """Classify one user request through the configured tenant Jev provider."""
@@ -87,7 +95,19 @@ class JevDecisionClassifier:
                         "configuration": "创建或修改排课规则、人员、空间、课表等业务配置",
                         "unknown": "无法可靠归类或需要用户补充信息",
                     },
-                }
+                },
+                "tool": {
+                    "type": "choice",
+                    "instructions": "选择回答这个问题最主要需要的查询工具；如果需要多个工具或无需工具，选择 all。",
+                    "criteria": {
+                        "teachers": "查询教师、任教关系或教师工作量",
+                        "schedule_setup": "查询课时、课位、班级或排课准备状态",
+                        "rules": "查询已有排课规则或规则组",
+                        "generation_status": "查询课表生成任务是否运行、失败或完成",
+                        "playbook": "查询排课操作手册或页面使用步骤",
+                        "all": "问题需要多个工具，或当前无法只选一个工具",
+                    },
+                },
             },
         }
 
@@ -104,13 +124,16 @@ class JevDecisionClassifier:
             answer = (body.get("answers") or {}).get("intent") or {}
             choice = str(answer.get("choice") or "").strip().lower()
             confidence = float(answer.get("confidence") or 0.0)
+            tool_answer = (body.get("answers") or {}).get("tool") or {}
+            tool_choice = str(tool_answer.get("choice") or "all").strip().lower()
+            tool_hints = JEV_TOOL_HINTS.get(tool_choice, frozenset())
             try:
                 kind = AssistantIntent(choice)
             except ValueError:
                 logger.warning("assistant.router decision invalid provider=jev choice=%s", choice[:40])
                 return None
             if kind is AssistantIntent.UNKNOWN:
-                return IntentDecision(kind, confidence, "jev", needs_clarification=True)
+                return IntentDecision(kind, confidence, "jev", needs_clarification=True, tool_hints=tool_hints)
             logger.info(
                 "assistant.router decision result provider=jev kind=%s confidence=%.3f",
                 kind.value,
@@ -122,7 +145,18 @@ class JevDecisionClassifier:
                 AssistantIntent.DIAGNOSIS: AssistantRoute.SUPERVISOR,
                 AssistantIntent.CONFIGURATION: AssistantRoute.HUMAN_REVIEW,
             }.get(kind, AssistantRoute.AGENT)
-            return IntentDecision(kind, max(0.0, min(1.0, confidence)), "jev", route=route)
+            logger.info(
+                "assistant.router tools provider=jev choice=%s selected=%s",
+                tool_choice,
+                ",".join(sorted(tool_hints)) or "all",
+            )
+            return IntentDecision(
+                kind,
+                max(0.0, min(1.0, confidence)),
+                "jev",
+                route=route,
+                tool_hints=tool_hints,
+            )
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
             logger.warning("assistant.router decision unavailable provider=jev error=%s", type(exc).__name__)
             return None

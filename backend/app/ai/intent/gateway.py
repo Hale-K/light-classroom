@@ -68,6 +68,7 @@ class IntentDecision:
     source: str
     needs_clarification: bool = False
     route: AssistantRoute = AssistantRoute.AGENT
+    tool_hints: frozenset[str] = frozenset()
 
     def trace_data(self) -> dict:
         return {
@@ -76,6 +77,7 @@ class IntentDecision:
             "source": self.source,
             "needs_clarification": self.needs_clarification,
             "route": self.route.value,
+            "tool_hints": sorted(self.tool_hints),
         }
 
 

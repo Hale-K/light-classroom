@@ -5,7 +5,7 @@ generated Python or lets a request add tools to its own capability set.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Protocol
 
@@ -141,4 +141,12 @@ class HarnessRouter:
     def select(self, decision: IntentDecision) -> HarnessProfile:
         if decision.route is AssistantRoute.DIRECT:
             return DIRECT_HARNESS
-        return self._intent_profiles[decision.kind]
+        profile = self._intent_profiles[decision.kind]
+        # Jev can narrow the query scope, but can never add a tool or bypass
+        # the server-owned harness allowlist. Supervisor branches keep their
+        # fixed task tool sets because they coordinate several checks.
+        if decision.tool_hints and decision.route not in {AssistantRoute.SUPERVISOR, AssistantRoute.WORKFLOW}:
+            allowed = profile.allowed_tools.intersection(decision.tool_hints)
+            if allowed:
+                return replace(profile, allowed_tools=frozenset(allowed))
+        return profile
