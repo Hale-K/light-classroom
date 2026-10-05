@@ -181,6 +181,7 @@ async def update_building_status(building_id: int, body: BuildingStatusIn,
 
 @router.get("/facilities/rooms")
 async def list_rooms(building_id: int | None = None, room_type: str | None = None,
+    academic_year: str = "2026-2027",
     term: str = "1",
     tenant_id: int = Depends(get_current_tenant), session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user)):
@@ -194,6 +195,7 @@ async def list_rooms(building_id: int | None = None, room_type: str | None = Non
     allocations = list((await session.execute(select(RoomCohortAllocation).where(
         RoomCohortAllocation.tenant_id == tenant_id,
         RoomCohortAllocation.status == "active",
+        RoomCohortAllocation.academic_year == academic_year,
         RoomCohortAllocation.term == term,
     ).order_by(RoomCohortAllocation.cohort_label))).scalars().all())
     allocations_by_room: dict[int, list[RoomCohortAllocation]] = {}
@@ -572,6 +574,7 @@ class BuildingPreference(BaseModel):
 class ClassPlanningPreviewIn(BaseModel):
     grade_id: int
     grade_group_id: int | None = None
+    academic_year: str = Field(default="2026-2027", min_length=9, max_length=20)
     term: str = Field(default="1", pattern=r"^(1|2)$")
     elite_count: int = Field(default=0, ge=0, le=500)
     key_count: int = Field(default=0, ge=0, le=500)
@@ -610,6 +613,7 @@ async def _collect_planning_rooms(
     custom_room_ids: list[int] | None,
     custom_sub_strategy: str | None,
     skip_generated: bool,
+    academic_year: str = "2026-2027",
     term: str = "1",
     cohort_label: str | None = None,
 ) -> tuple[Grade, list[dict], str]:
@@ -630,6 +634,7 @@ async def _collect_planning_rooms(
     all_allocations = list((await session.execute(select(RoomCohortAllocation).where(
         RoomCohortAllocation.tenant_id == tenant_id,
         RoomCohortAllocation.status == "active",
+        RoomCohortAllocation.academic_year == academic_year,
         RoomCohortAllocation.term == term,
     ))).scalars().all())
     alloc_by_room: dict[int, set[str]] = {}
@@ -772,7 +777,7 @@ async def _run_class_planning_preview(
 
     grade, candidates, _strategy = await _collect_planning_rooms(
         session, tenant_id, body.grade_id, body.strategy,
-        body.custom_room_ids, body.custom_sub_strategy, body.skip_generated, body.term, cohort_label,
+        body.custom_room_ids, body.custom_sub_strategy, body.skip_generated, body.academic_year, body.term, cohort_label,
     )
     candidates = _apply_building_preferences(candidates, body.building_preferences)
 

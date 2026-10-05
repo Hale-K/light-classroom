@@ -19,11 +19,11 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { DataNode } from 'antd/es/tree'
-import { authApi, facilityApi, orgApi, organizationApi } from '@/api'
+import { authApi, facilityApi, orgApi, organizationApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
-import type { Building, Campus, ClassInfo, FacilityOverview, Grade, OrganizationUnit, ResourceAllocationRule, RoomResource } from '@/types'
+import type { Building, Campus, ClassInfo, FacilityOverview, Grade, OrganizationUnit, ResourceAllocationRule, RoomResource, SchedulingGridConfig } from '@/types'
 import AllocationRuleDrawer from './allocation-rule-drawer'
 import { hasRoomFeature } from './room-features'
 
@@ -166,6 +166,8 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [resourceBuildingId, setResourceBuildingId] = useState<number>()
   const [resourceFloor, setResourceFloor] = useState<number>()
   const [resourceTerm, setResourceTerm] = useState<'1' | '2'>('1')
+  const [resourceAcademicYear, setResourceAcademicYear] = useState('2026-2027')
+  const [gridConfig, setGridConfig] = useState<SchedulingGridConfig | null>(null)
   const [appliedResourceKeyword, setAppliedResourceKeyword] = useState('')
   const [appliedResourceBuildingId, setAppliedResourceBuildingId] = useState<number>()
   const [appliedResourceFloor, setAppliedResourceFloor] = useState<number>()
@@ -201,10 +203,12 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     setLoading(true)
     try {
       const [overview, roomItems, classItems, gradeItems, ruleItems, orgTree] = await Promise.all([
-        facilityApi.overview(), facilityApi.rooms({ term: resourceTerm }), orgApi.classes(), orgApi.grades(), facilityApi.allocationRules({ term: resourceTerm }), organizationApi.tree(),
+        facilityApi.overview(), facilityApi.rooms({ academic_year: resourceAcademicYear, term: resourceTerm }), orgApi.classes(), orgApi.grades(), facilityApi.allocationRules({ academic_year: resourceAcademicYear, term: resourceTerm }), organizationApi.tree(),
       ])
       setData(overview); setRooms(roomItems); setClasses(classItems); setGrades(gradeItems); setAllocationRules(ruleItems)
       setGradeGroups(flattenGradeGroups(orgTree.units))
+      const configuredGrid = await schedulingApi.gridConfig({ academic_year: resourceAcademicYear, term: resourceTerm }).catch(() => null)
+      setGridConfig(configuredGrid)
     }
     catch (error) { message.error(error instanceof Error ? error.message : '加载校区楼宇失败') }
     finally { setLoading(false) }
@@ -213,9 +217,10 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   useEffect(() => {
     void authApi.academicYears().then((settings) => {
       if (settings.current_term) setResourceTerm(settings.current_term)
+      if (settings.current_academic_year) setResourceAcademicYear(settings.current_academic_year)
     }).catch(() => undefined)
   }, [])
-  useEffect(() => { void load() }, [resourceTerm])
+  useEffect(() => { void load() }, [resourceAcademicYear, resourceTerm])
 
   const createCampus = async (values: CampusForm) => {
     setSaving(true)
@@ -388,6 +393,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       const result = await facilityApi.classPlanningPreview({
         grade_id: planGradeId,
         grade_group_id: planGradeGroupId ?? undefined,
+        academic_year: resourceAcademicYear,
         term: resourceTerm,
         elite_count: planTypeCounts.elite,
         key_count: planTypeCounts.key,
@@ -432,6 +438,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     try {
       const stats = await facilityApi.classPlanningPreview({
         grade_id: grade.id, grade_group_id: groupId,
+        academic_year: resourceAcademicYear,
         term: resourceTerm,
         elite_count: 0, key_count: 0, experimental_count: 0, regular_count: 0,
         strategy: 'snake', skip_generated: true, inspect_only: true,
@@ -466,6 +473,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       const result = await facilityApi.classPlanningExecute({
         grade_id: planGradeId,
         grade_group_id: planGradeGroupId ?? undefined,
+        academic_year: resourceAcademicYear,
         term: resourceTerm,
         elite_count: planTypeCounts.elite,
         key_count: planTypeCounts.key,
@@ -583,7 +591,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
         </div>}
       </div>
         {focus === 'allocation' && <>
-          <div className="facility-term-toolbar"><span>当前资源学期</span><Select value={resourceTerm} options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} onChange={setResourceTerm} /></div>
+          <div className="facility-term-toolbar"><span>{resourceAcademicYear} · 当前资源学期</span><Select value={resourceTerm} options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} onChange={setResourceTerm} /><span className="facility-muted">{gridConfig ? `课位结构：${gridConfig.days}天 / 每天${gridConfig.periods_per_day}节${gridConfig.enable_evening ? ' · 含晚自习' : ''}` : '课位结构尚未配置'}</span></div>
           <Table rowKey="id" size="middle" dataSource={allocationRules} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
           { title: '规则名称', dataIndex: 'name', width: 220, render: (value) => <strong>{value}</strong> },
           { title: '目标届别', dataIndex: 'cohort_label', width: 120, render: (value) => <Tag color="blue">{value}</Tag> },
