@@ -19,7 +19,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { DataNode } from 'antd/es/tree'
-import { facilityApi, orgApi, organizationApi } from '@/api'
+import { authApi, facilityApi, orgApi, organizationApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
@@ -165,6 +165,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [resourceKeyword, setResourceKeyword] = useState('')
   const [resourceBuildingId, setResourceBuildingId] = useState<number>()
   const [resourceFloor, setResourceFloor] = useState<number>()
+  const [resourceTerm, setResourceTerm] = useState<'1' | '2'>('1')
   const [appliedResourceKeyword, setAppliedResourceKeyword] = useState('')
   const [appliedResourceBuildingId, setAppliedResourceBuildingId] = useState<number>()
   const [appliedResourceFloor, setAppliedResourceFloor] = useState<number>()
@@ -200,7 +201,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     setLoading(true)
     try {
       const [overview, roomItems, classItems, gradeItems, ruleItems, orgTree] = await Promise.all([
-        facilityApi.overview(), facilityApi.rooms(), orgApi.classes(), orgApi.grades(), facilityApi.allocationRules(), organizationApi.tree(),
+        facilityApi.overview(), facilityApi.rooms({ term: resourceTerm }), orgApi.classes(), orgApi.grades(), facilityApi.allocationRules({ term: resourceTerm }), organizationApi.tree(),
       ])
       setData(overview); setRooms(roomItems); setClasses(classItems); setGrades(gradeItems); setAllocationRules(ruleItems)
       setGradeGroups(flattenGradeGroups(orgTree.units))
@@ -209,7 +210,12 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     finally { setLoading(false) }
   }
 
-  useEffect(() => { void load() }, [])
+  useEffect(() => {
+    void authApi.academicYears().then((settings) => {
+      if (settings.current_term) setResourceTerm(settings.current_term)
+    }).catch(() => undefined)
+  }, [])
+  useEffect(() => { void load() }, [resourceTerm])
 
   const createCampus = async (values: CampusForm) => {
     setSaving(true)
@@ -382,6 +388,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       const result = await facilityApi.classPlanningPreview({
         grade_id: planGradeId,
         grade_group_id: planGradeGroupId ?? undefined,
+        term: resourceTerm,
         elite_count: planTypeCounts.elite,
         key_count: planTypeCounts.key,
         experimental_count: planTypeCounts.experimental,
@@ -425,6 +432,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     try {
       const stats = await facilityApi.classPlanningPreview({
         grade_id: grade.id, grade_group_id: groupId,
+        term: resourceTerm,
         elite_count: 0, key_count: 0, experimental_count: 0, regular_count: 0,
         strategy: 'snake', skip_generated: true, inspect_only: true,
       })
@@ -458,6 +466,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       const result = await facilityApi.classPlanningExecute({
         grade_id: planGradeId,
         grade_group_id: planGradeGroupId ?? undefined,
+        term: resourceTerm,
         elite_count: planTypeCounts.elite,
         key_count: planTypeCounts.key,
         experimental_count: planTypeCounts.experimental,
@@ -563,6 +572,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
         {focus === 'allocation' && <header className="facility-resource-list-head"><div><strong>资源分配规则</strong><span>每一行是一条资源分配规则；执行后再到资源详情查看具体教室。</span></div><Button type="primary" onClick={() => { setViewAllocationRule(undefined); setRuleOpen(true) }}>新建分配规则</Button></header>}
         {focus === 'class-planning' && <div className="facility-resource-filters">
         <>
+          <Select value={resourceTerm} options={[{ value: '1', label: '上学期资源' }, { value: '2', label: '下学期资源' }]} onChange={setResourceTerm} />
           <Input allowClear value={resourceKeyword} placeholder="搜索教室名称、编号或楼宇" onChange={(event) => setResourceKeyword(event.target.value)} onPressEnter={handleResourceSearch} />
           <Select allowClear value={resourceBuildingId} placeholder="全部教学楼" options={(data?.buildings || []).map((building) => ({ label: building.name, value: building.id }))} onChange={setResourceBuildingId} />
           <Select allowClear value={resourceFloor} placeholder="全部楼层" options={resourceFloors.map((floor) => ({ label: `${floor}层`, value: floor }))} onChange={setResourceFloor} />
@@ -572,7 +582,9 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
         {focus === 'class-planning' && <Space className="facility-filters-suffix-actions"><Button type="primary" onClick={openBatchClassCreation}>按需生成班级</Button><Button onClick={() => navigate('/classes')}>进入班级管理</Button></Space>}
         </div>}
       </div>
-        {focus === 'allocation' && <Table rowKey="id" size="middle" dataSource={allocationRules} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
+        {focus === 'allocation' && <>
+          <div className="facility-term-toolbar"><span>当前资源学期</span><Select value={resourceTerm} options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} onChange={setResourceTerm} /></div>
+          <Table rowKey="id" size="middle" dataSource={allocationRules} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
           { title: '规则名称', dataIndex: 'name', width: 220, render: (value) => <strong>{value}</strong> },
           { title: '目标届别', dataIndex: 'cohort_label', width: 120, render: (value) => <Tag color="blue">{value}</Tag> },
           { title: '适用学年', dataIndex: 'academic_year', width: 130 },
@@ -583,7 +595,8 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           { title: '匹配教室', dataIndex: 'matched_room_count', width: 100, render: (value) => `${value} 间` },
           { title: '状态', dataIndex: 'status', width: 90, render: (value) => <Tag color={value === 'active' ? 'green' : 'default'}>{value === 'active' ? '生效中' : '已停用'}</Tag> },
           { title: '操作', key: 'action', width: 110, render: (_, row) => <Button type="link" size="small" onClick={() => { setViewAllocationRule(row); setRuleOpen(true) }}>查看资源</Button> },
-        ]} locale={{ emptyText: <EmptyState icon="sitemap" title="暂无资源分配规则" desc="点击右上角“新建分配规则”创建第一条规则。" height={240} /> }} />}
+        ]} locale={{ emptyText: <EmptyState icon="sitemap" title={`暂无${resourceTerm === '1' ? '上' : '下'}学期资源分配规则`} desc="切换学期查看对应资源，或点击右上角“新建分配规则”创建。" height={240} /> }} />
+        </>}
       {focus === 'class-planning' && <div className="facility-class-resource-grid">
         {pagedResourceRooms.map((room) => <article className="facility-class-resource-card" key={room.id}>
           <div className="facility-class-resource-card-top"><div><span className="facility-class-resource-kicker">{room.building_name} · {room.floor}层</span><strong>{room.name}</strong></div><Tag color={room.class_assignments?.length ? 'green' : 'gold'}>{room.class_assignments?.length ? '已生成班级' : '待生成班级'}</Tag></div>

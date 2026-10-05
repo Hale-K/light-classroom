@@ -181,8 +181,11 @@ async def update_building_status(building_id: int, body: BuildingStatusIn,
 
 @router.get("/facilities/rooms")
 async def list_rooms(building_id: int | None = None, room_type: str | None = None,
+    term: str = "1",
     tenant_id: int = Depends(get_current_tenant), session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user)):
+    if term not in {"1", "2"}:
+        raise HTTPException(status_code=422, detail="学期只能是 1 或 2")
     stmt = select(Room).where(Room.tenant_id == tenant_id)
     if building_id: stmt = stmt.where(Room.building_id == building_id)
     if room_type: stmt = stmt.where(Room.room_type == room_type)
@@ -191,6 +194,7 @@ async def list_rooms(building_id: int | None = None, room_type: str | None = Non
     allocations = list((await session.execute(select(RoomCohortAllocation).where(
         RoomCohortAllocation.tenant_id == tenant_id,
         RoomCohortAllocation.status == "active",
+        RoomCohortAllocation.term == term,
     ).order_by(RoomCohortAllocation.cohort_label))).scalars().all())
     allocations_by_room: dict[int, list[RoomCohortAllocation]] = {}
     for allocation in allocations:
@@ -420,19 +424,24 @@ async def preview_allocation_rule(
 
 @router.get("/facilities/allocation-rules")
 async def list_allocation_rules(
+    term: str = "1",
     tenant_id: int = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
     user: User = Depends(get_current_user),
 ):
+    if term not in {"1", "2"}:
+        raise HTTPException(status_code=422, detail="学期只能是 1 或 2")
     rules = list((await session.execute(select(ResourceAllocationRule).where(
         ResourceAllocationRule.tenant_id == tenant_id,
         ResourceAllocationRule.status == "active",
+        ResourceAllocationRule.term == term,
     ).order_by(ResourceAllocationRule.id.desc()))).scalars().all())
     counts = dict((await session.execute(select(
         RoomCohortAllocation.rule_id, func.count(RoomCohortAllocation.id),
     ).where(
         RoomCohortAllocation.tenant_id == tenant_id,
         RoomCohortAllocation.status == "active",
+        RoomCohortAllocation.term == term,
     ).group_by(RoomCohortAllocation.rule_id))).all())
     return {"code": 0, "message": "ok", "data": [
         {**rule.model_dump(), "matched_room_count": counts.get(rule.id, 0)} for rule in rules
@@ -563,6 +572,7 @@ class BuildingPreference(BaseModel):
 class ClassPlanningPreviewIn(BaseModel):
     grade_id: int
     grade_group_id: int | None = None
+    term: str = Field(default="1", pattern=r"^(1|2)$")
     elite_count: int = Field(default=0, ge=0, le=500)
     key_count: int = Field(default=0, ge=0, le=500)
     experimental_count: int = Field(default=0, ge=0, le=500)
@@ -600,6 +610,7 @@ async def _collect_planning_rooms(
     custom_room_ids: list[int] | None,
     custom_sub_strategy: str | None,
     skip_generated: bool,
+    term: str = "1",
     cohort_label: str | None = None,
 ) -> tuple[Grade, list[dict], str]:
     """返回(grade, 候选教室列表[{room, building_name}], 排序策略字符串)。
@@ -619,6 +630,7 @@ async def _collect_planning_rooms(
     all_allocations = list((await session.execute(select(RoomCohortAllocation).where(
         RoomCohortAllocation.tenant_id == tenant_id,
         RoomCohortAllocation.status == "active",
+        RoomCohortAllocation.term == term,
     ))).scalars().all())
     alloc_by_room: dict[int, set[str]] = {}
     for alloc in all_allocations:
@@ -760,7 +772,7 @@ async def _run_class_planning_preview(
 
     grade, candidates, _strategy = await _collect_planning_rooms(
         session, tenant_id, body.grade_id, body.strategy,
-        body.custom_room_ids, body.custom_sub_strategy, body.skip_generated, cohort_label,
+        body.custom_room_ids, body.custom_sub_strategy, body.skip_generated, body.term, cohort_label,
     )
     candidates = _apply_building_preferences(candidates, body.building_preferences)
 

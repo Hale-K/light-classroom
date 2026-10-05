@@ -295,7 +295,7 @@ export const facilityApi = {
     unwrap<Building>(http.post('/facilities/buildings', data)),
   updateBuildingStatus: (id: number, status: 'active' | 'maintenance' | 'disabled') =>
     unwrap<Building>(http.patch(`/facilities/buildings/${id}/status`, { status })),
-  rooms: (params?: { building_id?: number; room_type?: RoomResource['room_type']; keyword?: string }) =>
+  rooms: (params?: { building_id?: number; room_type?: RoomResource['room_type']; keyword?: string; term?: '1' | '2' }) =>
     unwrap<RoomResource[]>(http.get('/facilities/rooms', { params })),
   createRoom: (data: {
     building_id: number
@@ -319,7 +319,7 @@ export const facilityApi = {
     multimedia: boolean
     is_schedulable: boolean
   }) => unwrap<{ created_count: number; skipped_count: number; skipped_names: string[] }>(http.post('/facilities/rooms/batch', data)),
-  allocationRules: () => unwrap<ResourceAllocationRule[]>(http.get('/facilities/allocation-rules')),
+  allocationRules: (params?: { term?: '1' | '2' }) => unwrap<ResourceAllocationRule[]>(http.get('/facilities/allocation-rules', { params })),
   previewAllocationRule: (data: Record<string, unknown>) =>
     unwrap<AllocationPreviewResult>(http.post('/facilities/allocation-rules/preview', data)),
   createAllocationRule: (data: Record<string, unknown>) =>
@@ -328,6 +328,7 @@ export const facilityApi = {
   classPlanningPreview: (data: {
     grade_id: number
     grade_group_id?: number
+    term?: '1' | '2'
     elite_count: number
     key_count: number
     experimental_count: number
@@ -372,6 +373,7 @@ export const facilityApi = {
   classPlanningExecute: (data: {
     grade_id: number
     grade_group_id?: number
+    term?: '1' | '2'
     elite_count: number
     key_count: number
     experimental_count: number
