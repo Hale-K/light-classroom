@@ -9,6 +9,16 @@ export type PreparedSubject = {
   task_token?: string
 }
 
+export async function classifyPageIntent(content: string, signal: AbortSignal): Promise<'create_subject' | 'other'> {
+  const response = await fetch(`${getApiBaseURL()}/page-agent/intent`, {
+    method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content }), signal,
+  })
+  const body = await response.json()
+  if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : '暂时无法识别操作意图。')
+  return body.data.intent === 'create_subject' ? 'create_subject' : 'other'
+}
+
 export async function prepareSubject(content: string, draft: SubjectDraft | null, signal: AbortSignal): Promise<PreparedSubject> {
   const response = await fetch(`${getApiBaseURL()}/page-agent/subjects/prepare`, {
     method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
