@@ -443,21 +443,31 @@ def solve_daytime_cpsat(
             scope = set(entry.get("weekdays") or range(1, days + 1))
             target_id = int(entry["target_id"])
             owner_key = "class_id" if kind == "subjects" else "teacher_id"
-            by_owner: dict[Any, list[tuple[int, int]]] = defaultdict(list)
+            by_owner: dict[Any, list[tuple[int, int, Any, int]]] = defaultdict(list)
+            class_mode = str(entry.get("class_mode") or "same_class") if kind == "teachers" else "same_class"
             for slot_map in (y, ho, he):
                 for (a_idx, d, p), var in slot_map.items():
                     entity = meta[a_idx][owner_key]
                     if kind == "subjects" and meta[a_idx]["subject_id"] == target_id:
-                        by_owner[meta[a_idx]["class_id"]].append((d, p, var))
+                        by_owner[meta[a_idx]["class_id"]].append((d, p, var, meta[a_idx]["class_id"]))
                     elif kind == "teachers" and entity == target_id:
-                        by_owner[entity].append((d, p, var))
+                        by_owner[entity].append((d, p, var, meta[a_idx]["class_id"]))
             for owner, placements in by_owner.items():
-                # 槽位占用指示 o[d,p]=1 当且仅当该教师在 (d,p) 有课（不管给哪个班）。
-                # 连堂窗口绑定 o 而非单个任务变量：相邻两节的课可来自不同班级。
+                # same_class：同一班自己的连续课；cross_class：同一教师的连续课必须覆盖至少两个班。
+                # 旧规则默认 same_class，避免把普通教师连堂误解释成跨班连堂。
                 vars_by_slot: dict[tuple[int, int], list[Any]] = defaultdict(list)
-                for (d, p, var) in placements:
+                vars_by_class_slot: dict[tuple[int, int, int], list[Any]] = defaultdict(list)
+                for (d, p, var, class_id) in placements:
                     vars_by_slot[(d, p)].append(var)
-                occupied = {}
+                    vars_by_class_slot[(class_id, d, p)].append(var)
+                occupied: dict[tuple[int, int], Any] = {}
+                occupied_by_class: dict[tuple[int, int, int], Any] = {}
+                for (class_id, d, p), vars_ in vars_by_class_slot.items():
+                    o = model.NewBoolVar(f"occ_{kind}_{target_id}_{owner}_{class_id}_{d}_{p}")
+                    for v in vars_:
+                        model.AddImplication(v, o)
+                    model.Add(o <= sum(vars_))
+                    occupied_by_class[(class_id, d, p)] = o
                 for (d, p), vars_ in vars_by_slot.items():
                     o = model.NewBoolVar(f"occ_{kind}_{target_id}_{owner}_{d}_{p}")
                     for v in vars_:
@@ -467,14 +477,43 @@ def solve_daytime_cpsat(
                 day_sat = {}
                 for d in sorted({d for (d, _p) in occupied} & scope):
                     windows = []
-                    for start in range(1, periods_per_day - min_block + 2):
-                        window_vars = [occupied.get((d, start + j)) for j in range(min_block)]
-                        if any(v is None for v in window_vars):
-                            continue
-                        w = model.NewBoolVar(f"blk_{kind}_{target_id}_{owner}_{d}_{start}")
-                        for v in window_vars:
-                            model.AddImplication(w, v)
-                        windows.append(w)
+                    if kind == "teachers" and class_mode == "same_class":
+                        class_ids = sorted({class_id for class_id, day, _period in occupied_by_class if day == d})
+                        for class_id in class_ids:
+                            class_windows = []
+                            for start in range(1, periods_per_day - min_block + 2):
+                                window_vars = [occupied_by_class.get((class_id, d, start + j)) for j in range(min_block)]
+                                if any(v is None for v in window_vars):
+                                    continue
+                                w = model.NewBoolVar(f"blk_{kind}_{target_id}_{owner}_{class_id}_{d}_{start}")
+                                for v in window_vars:
+                                    model.AddImplication(w, v)
+                                class_windows.append(w)
+                            windows.extend(class_windows)
+                    else:
+                        for start in range(1, periods_per_day - min_block + 2):
+                            window_vars = [occupied.get((d, start + j)) for j in range(min_block)]
+                            if any(v is None for v in window_vars):
+                                continue
+                            w = model.NewBoolVar(f"blk_{kind}_{target_id}_{owner}_{d}_{start}")
+                            for v in window_vars:
+                                model.AddImplication(w, v)
+                            if kind == "teachers" and class_mode == "cross_class":
+                                class_flags = []
+                                for class_id in sorted({class_id for class_id, day, _period in occupied_by_class if day == d}):
+                                    flags = [occupied_by_class.get((class_id, d, start + j)) for j in range(min_block)]
+                                    flags = [flag for flag in flags if flag is not None]
+                                    if not flags:
+                                        continue
+                                    cf = model.NewBoolVar(f"blk_class_{target_id}_{owner}_{class_id}_{d}_{start}")
+                                    for flag in flags:
+                                        model.AddImplication(flag, cf)
+                                    model.Add(cf <= sum(flags))
+                                    class_flags.append(cf)
+                                if len(class_flags) < 2:
+                                    continue
+                                model.Add(sum(class_flags) >= 2).OnlyEnforceIf(w)
+                            windows.append(w)
                     if not windows:
                         continue
                     ds = model.NewBoolVar(f"dsat_{kind}_{target_id}_{owner}_{d}")

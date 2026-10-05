@@ -155,7 +155,7 @@ $backCmd = @(
     "-Command",
     "`$env:PYTHONPATH='$BACK_CWD'; " +
     "Set-Location '$BACK_CWD'; " +
-    "& '$BACK_VENV_PY' -m uvicorn app.main:app --host 127.0.0.1 --port $BACK_PORT"
+    "& '$BACK_VENV_PY' -X utf8 -m uvicorn app.main:app --host 127.0.0.1 --port $BACK_PORT --reload"
 )
 
 $bp = Start-Process -FilePath "powershell.exe" `

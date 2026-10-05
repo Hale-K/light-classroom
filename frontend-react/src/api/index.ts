@@ -430,6 +430,18 @@ export const schedulingApi = {
       evening_periods_even: number
   }) => unwrap<import('@/types').CourseHourPlanInfo>(http.post('/scheduling/course-hours', data)),
   deleteCourseHour: (id: number) => unwrap<null>(http.delete(`/scheduling/course-hours/${id}`)),
+  inheritTermData: (data: { academic_year: string; from_term: string; to_term: string; class_ids?: number[]; copy_course_hours: boolean; copy_assignments: boolean; copy_rules: boolean }) =>
+    unwrap<{
+      academic_year: string
+      from_term: string
+      to_term: string
+      course_hours_created: number
+      course_hours_replaced: number
+      assignments_created: number
+      assignments_updated: number
+      rule_groups_created_or_copied: number
+      rule_groups_replaced: number
+    }>(http.post('/scheduling/inherit-term-data', data)),
   gridConfig: (params: { academic_year: string; term: string }) =>
     unwrap<import('@/types').SchedulingGridConfig>(http.get('/scheduling/grid-config', { params })),
   saveGridConfig: (data: import('@/types').SchedulingGridConfig & { academic_year: string; term: string }) =>
@@ -806,11 +818,14 @@ export interface GaokaoChoiceReview {
 }
 
 export const gaokaoApi = {
+  myStudents: (includeTeaching = false) => unwrap<import('@/types').Student[]>(http.get('/gaokao/my-students', {
+    params: includeTeaching ? { include_teaching: true } : undefined,
+  })),
   overview: (params: { academic_year: string; term: string; grade_id?: number }) =>
     unwrap<GaokaoOverview>(http.get('/gaokao/overview', { params })),
   choicesForReview: (params: { academic_year: string; term: string; grade_id?: number; status_filter?: string }) =>
     unwrap<GaokaoChoiceReview[]>(http.get('/gaokao/choices', { params })),
-  reviewChoice: (choiceId: number, action: 'approve' | 'reject') =>
+  reviewChoice: (choiceId: number, action: 'approve' | 'reject' | 'reopen') =>
     unwrap<GaokaoChoiceReview>(http.patch(`/gaokao/choices/${choiceId}/review`, { action })),
   batchApproveChoices: (choiceIds: number[]) =>
     unwrap<{ updated: number; skipped: number }>(http.post('/gaokao/choices/batch-approve', { choice_ids: choiceIds })),
@@ -844,6 +859,12 @@ export interface StudentLoginResult {
   school: { code: string; name: string; province: string }
 }
 
+export interface StudentSchoolOption {
+  code: string
+  name: string
+  province: string
+}
+
 export interface StudentChoiceOptions {
   scheme: {
     id: number
@@ -863,6 +884,7 @@ export interface StudentChoiceOptions {
 }
 
 export const studentAuthApi = {
+  schools: () => unwrap<StudentSchoolOption[]>(http.get('/student-auth/schools')),
   login: (data: { login_name: string; password: string }) =>
     unwrap<StudentLoginResult>(http.post('/student-auth/login', data)),
   me: () => unwrap<StudentLoginResult['student']>(http.get('/student-auth/me')),
@@ -1307,6 +1329,7 @@ export type OnboardingStatus = {
   total: number
   history_year?: string | null
   dismissed: boolean
+  audience?: 'management' | 'head_teacher' | 'subject_teacher'
 }
 
 export const onboardingApi = {

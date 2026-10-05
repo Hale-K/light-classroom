@@ -3,6 +3,7 @@ import { App, Button, Form, Input, Modal, Select, Switch, Table, Tag } from 'ant
 import type { ColumnsType } from 'antd/es/table'
 import { schedulingApi } from '@/api'
 import type { SubjectInfo } from '@/types'
+import { assertSubjectTaskSubmission } from '@/assistant/subjectTask'
 import './index.css'
 
 type SubjectFormValues = {
@@ -15,6 +16,7 @@ export default function SubjectManagementView() {
   const { message } = App.useApp()
   const [subjects, setSubjects] = useState<SubjectInfo[]>([])
   const [loading, setLoading] = useState(false)
+  const [loaded, setLoaded] = useState(false)
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<SubjectInfo | null>(null)
@@ -27,6 +29,7 @@ export default function SubjectManagementView() {
     setLoading(true)
     try {
       setSubjects(await schedulingApi.subjects())
+      setLoaded(true)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '科目加载失败')
     } finally {
@@ -63,6 +66,7 @@ export default function SubjectManagementView() {
   const submit = async (values: SubjectFormValues) => {
     setSaving(true)
     try {
+      assertSubjectTaskSubmission(values, Boolean(editing))
       if (editing) {
         await schedulingApi.updateSubject(editing.id, values)
         message.success('科目已更新')
@@ -102,7 +106,7 @@ export default function SubjectManagementView() {
   ]
 
   return (
-    <section className="subject-page">
+    <section className="subject-page" data-subject-page-ready={loaded && !loading}>
       <div className="subject-hero">
         <div>
           <div className="subject-kicker">基础资料 / SUBJECTS</div>
@@ -119,7 +123,7 @@ export default function SubjectManagementView() {
             style={{ width: 220 }}
           />
           <Button onClick={() => void load()} loading={loading}>刷新</Button>
-          <Button type="primary" onClick={openCreate}>新增科目</Button>
+          <Button type="primary" data-subject-create onClick={openCreate}>新增科目</Button>
         </div>
       </div>
       <div className="subject-surface">
@@ -135,13 +139,13 @@ export default function SubjectManagementView() {
           locale={{ emptyText: '暂无科目，请新增本校科目' }}
         />
       </div>
-      <Modal title={editing ? '编辑本校科目' : '新增本校科目'} open={open} centered onCancel={close} onOk={() => form.submit()} okText="保存" cancelText="取消" confirmLoading={saving}>
+      <Modal className="subject-agent-form" title={editing ? '编辑本校科目' : '新增本校科目'} open={open} centered onCancel={close} onOk={() => form.submit()} okText="保存" cancelText="取消" confirmLoading={saving}>
         <Form form={form} layout="vertical" onFinish={submit}>
           <Form.Item name="name" label="科目名称" rules={[{ required: true, whitespace: true, message: '请输入科目名称' }, { max: 20, message: '科目名称不能超过 20 个字' }]}>
             <Input placeholder="例如：校本课程、心理" autoFocus />
           </Form.Item>
           <Form.Item name="course_type" label="课程类型" rules={[{ required: true }]} extra="学科课参与教师课量统计；活动课可不绑定教师，班会会自动使用本班班主任。">
-            <Select options={[{ value: 'subject', label: '学科课' }, { value: 'activity', label: '活动课' }]} />
+            <Select classNames={{ popup: { root: 'subject-agent-options' } }} options={[{ value: 'subject', label: '学科课' }, { value: 'activity', label: '活动课' }]} />
           </Form.Item>
           <Form.Item name="evening_study_allowed" label="晚自习资格" valuePropName="checked" extra="这里只定义该科目是否可以被晚自习排课使用，不配置晚自习节数。">
             <Switch checkedChildren="允许" unCheckedChildren="不允许" />

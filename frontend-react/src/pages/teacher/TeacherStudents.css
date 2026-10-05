@@ -1,0 +1,10 @@
+.ts-page { min-height: 100%; padding: 0 0 24px; background: var(--page-bg, #fbfbfa); }
+.ts-body { width: 100%; }
+.ts-review-head { display: flex; justify-content: space-between; gap: 20px; margin: 16px 0; color: var(--text-secondary, #71717a); font-size: 13px; }
+.ts-card-title { display: inline-flex; align-items: center; gap: 10px; }
+.ts-student-cell { display: flex; flex-direction: column; gap: 3px; }
+.ts-student-cell span { color: #8793a5; font-size: 12px; }
+@media (max-width: 800px) {
+  .ts-page { padding: 0 0 24px; }
+  .ts-review-head { flex-direction: column; gap: 6px; margin: 12px 0; }
+}

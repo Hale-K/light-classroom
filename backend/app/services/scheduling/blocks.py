@@ -44,7 +44,23 @@ def repair_consecutive_blocks(
     """逐目标尝试把散课挪成连堂；修不动就保留现状（由评估器如实报告）。"""
     from app.services.scheduling.core import ScheduleItem, _can_place_schedule_item
 
-    def owner_satisfied(owner_idxs: list[int], scope: set[int], min_block: int) -> tuple[int, dict[int, set[int]]]:
+    def day_has_block(owner_idxs: list[int], day: int, min_block: int, class_mode: str) -> bool:
+        day_items = [items[idx] for idx in owner_idxs if items[idx].weekday == day]
+        if class_mode == "same_class":
+            by_class: dict[int, set[int]] = defaultdict(set)
+            for item in day_items:
+                by_class[item.class_id].add(item.period)
+            return any(_longest_block(periods) >= min_block for periods in by_class.values())
+        periods = {item.period for item in day_items}
+        if _longest_block(periods) < min_block:
+            return False
+        for start in range(1, periods_per_day - min_block + 2):
+            window = [item for item in day_items if start <= item.period < start + min_block]
+            if len({item.period for item in window}) == min_block and len({item.class_id for item in window}) >= 2:
+                return True
+        return False
+
+    def owner_satisfied(owner_idxs: list[int], scope: set[int], min_block: int, class_mode: str = "same_class") -> tuple[int, dict[int, set[int]]]:
         by_day: dict[int, set[int]] = defaultdict(set)
         for idx in owner_idxs:
             item = items[idx]
@@ -52,18 +68,18 @@ def repair_consecutive_blocks(
         satisfied = sum(
             1
             for day, periods in by_day.items()
-            if day in scope and _longest_block(periods) >= min_block
+            if day in scope and day_has_block(owner_idxs, day, min_block, class_mode)
         )
         return satisfied, by_day
 
-    def attempt(owner_idxs: list[int], scope: set[int], min_block: int, min_days: int) -> int:
+    def attempt(owner_idxs: list[int], scope: set[int], min_block: int, min_days: int, class_mode: str = "same_class") -> int:
         """返回本次尝试新增的满足天数（0/1）。"""
-        satisfied, by_day = owner_satisfied(owner_idxs, scope, min_block)
+        satisfied, by_day = owner_satisfied(owner_idxs, scope, min_block, class_mode)
         if satisfied >= min_days:
             return 0
         unsatisfied_days = [
             day for day in by_day
-            if day in scope and _longest_block(by_day[day]) < min_block
+            if day in scope and not day_has_block(owner_idxs, day, min_block, class_mode)
         ]
         if not unsatisfied_days:
             return 0
@@ -149,7 +165,7 @@ def repair_consecutive_blocks(
                     continue
                 tried += 1
                 items[idx] = candidate
-            new_satisfied, _ = owner_satisfied(owner_idxs, scope, min_block)
+            new_satisfied, _ = owner_satisfied(owner_idxs, scope, min_block, class_mode)
             if new_satisfied > satisfied:
                 return 1
             return 0
@@ -187,7 +203,7 @@ def repair_consecutive_blocks(
             ]
             if moves_left <= 0:
                 return gained, moves_left
-            used = attempt(owner_idxs, scope, min_block, min_days)
+            used = attempt(owner_idxs, scope, min_block, min_days, str(req.get("class_mode") or "same_class"))
             moves_left -= used
             gained += used
         return gained, moves_left

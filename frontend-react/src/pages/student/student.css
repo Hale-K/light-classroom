@@ -1,0 +1,57 @@
+.student-shell {
+  min-height: 100vh;
+  background: #f3f7fb;
+  color: #172033;
+  padding: 32px 20px 56px;
+}
+
+.student-page { width: min(920px, 100%); margin: 0 auto; }
+.student-login-shell {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: radial-gradient(circle at 50% -10%, #e5f5ff 0, #f3f7fb 55%);
+}
+.student-login-card {
+  width: min(440px, 100%);
+  background: #fff;
+  border: 1px solid #e5ebf2;
+  border-radius: 20px;
+  padding: 32px;
+  box-shadow: 0 16px 40px rgba(36, 86, 126, .08);
+}
+.student-brand-mark {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 20px;
+  color: #0879b8;
+  background: #e5f5ff;
+  border-radius: 12px;
+  font-size: 20px;
+}
+.student-eyebrow { color: #0879b8; font-size: 13px; font-weight: 600; letter-spacing: .04em; }
+.student-login-card h1, .student-page-header h1 { margin: 6px 0 4px; color: #172033; }
+.student-login-lede { margin-bottom: 28px; color: #66758c; }
+.student-primary-button { height: 44px; margin-top: 4px; }
+.student-page-header { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 24px; }
+.student-page-header h1 { font-size: 32px; }
+.student-status-card, .student-choice-card {
+  border: 1px solid #e1eaf2;
+  border-radius: 16px;
+  box-shadow: 0 8px 24px rgba(36, 86, 126, .04);
+}
+.student-status-card { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; background: #f8fbfe; }
+.student-status-card h3 { margin: 4px 0 0; font-size: 19px; }
+.student-choice-card .ant-card-head { min-height: 56px; }
+.student-choice-rule { margin-bottom: 24px; color: #66758c; font-size: 14px; }
+.student-choice-card .ant-form-item { margin-bottom: 22px; }
+.student-actions { padding-top: 2px; }
+.student-empty { padding-top: 120px; }
+@media (max-width: 600px) {
+  .student-shell { padding: 20px 14px 40px; }
+  .student-login-card { padding: 24px 20px; }
+  .student-page-header h1 { font-size: 28px; }
+  .student-status-card { align-items: flex-start; gap: 12px; flex-direction: column; }
+}

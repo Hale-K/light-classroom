@@ -4,12 +4,12 @@ from __future__ import annotations
 from collections import Counter, defaultdict
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.api.deps import get_current_tenant, get_current_user
+from app.api.deps import get_current_tenant, get_current_user, require_head_teacher
 from app.db.session import get_session
 from app.models.gaokao import (
     GaokaoScheme,
@@ -79,7 +79,7 @@ class GenerateWalkScheduleIn(BaseModel):
 
 
 class ChoiceReviewIn(BaseModel):
-    action: str = Field(pattern=r"^(approve|reject)$")
+    action: str = Field(pattern=r"^(approve|reject|reopen)$")
 
 
 class ChoiceBatchReviewIn(BaseModel):
@@ -298,6 +298,38 @@ async def overview(
     )}
 
 
+@router.get("/my-students", summary="查询教师负责的学生")
+async def my_students(
+    include_teaching: bool = Query(default=False),
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    """教师工作台专用学生列表，不开放组织学籍管理能力。"""
+    class_ids = set((await session.execute(select(Class.id).where(
+        Class.tenant_id == tenant_id,
+        or_(Class.head_teacher_id == user.id, Class.deputy_head_teacher_id == user.id),
+    ))).scalars().all())
+    if include_teaching and user.role in {"teacher", "head_teacher", "subject_teacher"}:
+        class_ids.update((await session.execute(select(TeachingAssignment.class_id).where(
+            TeachingAssignment.tenant_id == tenant_id,
+            TeachingAssignment.teacher_id == user.id,
+            TeachingAssignment.class_id.is_not(None),
+        ).distinct())).scalars().all())
+    if not class_ids:
+        return {"code": 0, "message": "ok", "data": []}
+    students = list((await session.execute(select(Student).where(
+        Student.tenant_id == tenant_id,
+        Student.class_id.in_(class_ids),
+    ).order_by(Student.class_id, Student.roster_order, Student.id))).scalars().all())
+    classes = list((await session.execute(select(Class).where(Class.tenant_id == tenant_id, Class.id.in_(class_ids)))).scalars().all())
+    class_names = {item.id: item.name for item in classes}
+    return {"code": 0, "message": "ok", "data": [{
+        **student.model_dump(),
+        "class_name": class_names.get(student.class_id),
+    } for student in students]}
+
+
 @router.get("/choices", summary="查询学生选科审核列表")
 async def choices_for_review(
     academic_year: str,
@@ -305,7 +337,7 @@ async def choices_for_review(
     grade_id: int | None = None,
     status_filter: str | None = "confirmed",
     session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
+    user=Depends(require_head_teacher),
     tenant_id: int = Depends(get_current_tenant),
 ):
     stmt = select(StudentSubjectChoice, Student).join(
@@ -318,7 +350,7 @@ async def choices_for_review(
     )
     if grade_id is not None:
         stmt = stmt.where(Student.grade_id == grade_id)
-    if user.role == "teacher":
+    if user.role in {"teacher", "head_teacher", "subject_teacher"}:
         class_ids = list((await session.execute(select(Class.id).where(
             Class.tenant_id == tenant_id,
             or_(Class.head_teacher_id == user.id, Class.deputy_head_teacher_id == user.id),
@@ -355,20 +387,23 @@ async def review_choice(
     choice_id: int,
     body: ChoiceReviewIn,
     session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
+    user=Depends(require_head_teacher),
     tenant_id: int = Depends(get_current_tenant),
 ):
     choice = await session.get(StudentSubjectChoice, choice_id)
     if choice is None or choice.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="选科记录不存在")
-    if user.role == "teacher":
+    if user.role in {"teacher", "head_teacher", "subject_teacher"}:
         student = await session.get(Student, choice.student_id)
         class_item = await session.get(Class, student.class_id) if student and student.class_id else None
         if class_item is None or user.id not in {class_item.head_teacher_id, class_item.deputy_head_teacher_id}:
             raise HTTPException(status_code=403, detail="只有该学生的班主任或副班主任可以审核")
-    if choice.status == "locked":
+    if choice.status == "locked" and body.action != "reopen":
         raise HTTPException(status_code=409, detail="选科已锁定，不能重复审核")
-    if body.action == "approve":
+    if body.action == "reopen":
+        choice.status = "confirmed"
+        message = "已解除锁定，退回待审核"
+    elif body.action == "approve":
         choice.status = "locked"
         message = "选科审核通过并已锁定"
     else:
@@ -383,7 +418,7 @@ async def review_choice(
 async def batch_approve_choices(
     body: ChoiceBatchReviewIn,
     session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
+    user=Depends(require_head_teacher),
     tenant_id: int = Depends(get_current_tenant),
 ):
     choices = list((await session.execute(select(StudentSubjectChoice).where(
@@ -396,7 +431,7 @@ async def batch_approve_choices(
         Student.tenant_id == tenant_id,
         Student.id.in_([item.student_id for item in choices]),
     ))).scalars().all()}
-    if user.role == "teacher":
+    if user.role in {"teacher", "head_teacher", "subject_teacher"}:
         class_ids = {item.class_id for item in student_by_id.values() if item.class_id}
         classes = list((await session.execute(select(Class).where(
             Class.tenant_id == tenant_id, Class.id.in_(class_ids) if class_ids else False,

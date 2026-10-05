@@ -19,6 +19,7 @@ from app.models.org import Class, CourseHourPlan, Grade, Schedule, TeachingAssig
 from app.models.rbac import Role, UserRole
 from app.models.enums import BaseUserRole, UserStatus
 from app.services.org.cohort import cohort_labels_match, expected_cohort_label
+from app.services.org.staff_roles import get_staff_role_codes
 
 router = APIRouter(prefix="/onboarding", tags=["新手引导"])
 
@@ -242,7 +243,31 @@ async def onboarding_status(
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
-    return await load_onboarding_status(session, tenant_id)
+    result = await load_onboarding_status(session, tenant_id)
+    role_codes = await get_staff_role_codes(session, user.id) if user.role == BaseUserRole.teacher else set()
+    if "head_teacher" in role_codes:
+        source = {step["key"]: step for step in result["data"]["steps"]}
+        result["data"]["audience"] = "head_teacher"
+        result["data"]["steps"] = [
+            {"key": "my_classes", "title": "查看我的班级", "done": source.get("class_planning", {}).get("done", False), "detail": "确认班级和学生范围", "path": "/teacher-classes"},
+            {"key": "my_students", "title": "核对我的学生", "done": False, "detail": "查看本班学生名单与选科状态", "path": "/teacher-students"},
+            {"key": "choice_review", "title": "审核学生选科", "done": False, "detail": "逐个核对或批量通过学生选科意愿", "path": "/teacher-students"},
+            {"key": "class_schedule", "title": "查看班级课表", "done": source.get("generate", {}).get("done", False), "detail": "课表生成后检查本班上课安排", "path": "/teacher-courses"},
+        ]
+    elif "subject_teacher" in role_codes:
+        source = {step["key"]: step for step in result["data"]["steps"]}
+        result["data"]["audience"] = "subject_teacher"
+        result["data"]["steps"] = [
+            {"key": "my_courses", "title": "查看我的课程", "done": source.get("assignments", {}).get("done", False), "detail": "确认任教班级和学科", "path": "/teacher-courses"},
+            {"key": "preparation", "title": "准备教学内容", "done": False, "detail": "进入备课页面整理教学资料", "path": "/teacher-preparation"},
+            {"key": "schedule", "title": "查看我的课表", "done": source.get("generate", {}).get("done", False), "detail": "课表生成后核对上课时间与教室", "path": "/teacher-courses"},
+            {"key": "grades", "title": "登记与查看成绩", "done": False, "detail": "从成绩页面管理授课班级成绩", "path": "/teacher-grades"},
+        ]
+    else:
+        result["data"]["audience"] = "management"
+    result["data"]["done_count"] = sum(1 for step in result["data"]["steps"] if step["done"])
+    result["data"]["total"] = len(result["data"]["steps"])
+    return result
 
 
 async def load_onboarding_status(session: AsyncSession, tenant_id: int) -> dict:

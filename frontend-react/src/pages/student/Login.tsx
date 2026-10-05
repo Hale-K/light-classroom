@@ -1,21 +1,35 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Card, Form, Input, Typography } from 'antd'
+import { App, Button, Form, Input, Select, Spin, Typography } from 'antd'
+import { ApartmentOutlined, ArrowRightOutlined, LockOutlined, UserOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { studentAuthApi } from '@/api'
+import type { StudentSchoolOption } from '@/api'
+import './student.css'
+
+type LoginValues = { school_code: string; login_name: string; password: string }
 
 export default function StudentLogin() {
   const { message } = App.useApp()
   const navigate = useNavigate()
   const [submitting, setSubmitting] = useState(false)
+  const [schools, setSchools] = useState<StudentSchoolOption[]>([])
+  const [loadingSchools, setLoadingSchools] = useState(true)
 
   useEffect(() => {
-    if (localStorage.getItem('zh_student_token')) navigate('/student/choice', { replace: true })
-  }, [navigate])
+    if (localStorage.getItem('zh_student_token')) {
+      navigate('/student/choice', { replace: true })
+      return
+    }
+    studentAuthApi.schools()
+      .then(setSchools)
+      .catch((error) => message.error(error instanceof Error ? error.message : '学校列表加载失败'))
+      .finally(() => setLoadingSchools(false))
+  }, [message, navigate])
 
-  const submit = async (values: { school_code: string; login_name: string; password: string }) => {
+  const submit = async (values: LoginValues) => {
     setSubmitting(true)
     try {
-      localStorage.setItem('zh_school_code', values.school_code.trim())
+      localStorage.setItem('zh_school_code', values.school_code)
       const result = await studentAuthApi.login({ login_name: values.login_name, password: values.password })
       localStorage.setItem('zh_student_token', result.access_token)
       localStorage.setItem('zh_student_user', JSON.stringify(result.student))
@@ -29,24 +43,36 @@ export default function StudentLogin() {
   }
 
   return (
-    <main style={{ minHeight: '100vh', display: 'grid', placeItems: 'center', background: 'linear-gradient(135deg, #eff8ff, #f8fafc)', padding: 24 }}>
-      <Card style={{ width: 'min(440px, 100%)', borderRadius: 20 }}>
-        <Typography.Text type="secondary">LIGHTCLASS · STUDENT PORTAL</Typography.Text>
-        <Typography.Title level={2} style={{ marginTop: 8 }}>学生选科中心</Typography.Title>
-        <Typography.Paragraph type="secondary">登录后提交或修改本学期的 3+1+2 选科意向。</Typography.Paragraph>
-        <Form layout="vertical" onFinish={submit} initialValues={{ school_code: localStorage.getItem('zh_school_code') || 'demo' }}>
-          <Form.Item name="school_code" label="学校代码" rules={[{ required: true, message: '请输入学校代码' }]}>
-            <Input placeholder="例如 demo" />
+    <main className="student-shell student-login-shell">
+      <section className="student-login-card" aria-labelledby="student-login-title">
+        <div className="student-brand-mark" aria-hidden="true"><ApartmentOutlined /></div>
+        <Typography.Text className="student-eyebrow">轻课堂 · 学生端</Typography.Text>
+        <Typography.Title id="student-login-title" level={1}>登录选科中心</Typography.Title>
+        <Typography.Paragraph className="student-login-lede">选择学校后，使用学校开通的学号登录。</Typography.Paragraph>
+
+        <Form layout="vertical" onFinish={submit} initialValues={{ school_code: localStorage.getItem('zh_school_code') || undefined }}>
+          <Form.Item name="school_code" label="学校" rules={[{ required: true, message: '请选择学校' }]}>
+            <Select
+              size="large"
+              showSearch
+              loading={loadingSchools}
+              placeholder={loadingSchools ? '正在加载学校' : '请选择学校'}
+              optionFilterProp="label"
+              options={schools.map((school) => ({ value: school.code, label: school.name }))}
+              notFoundContent={loadingSchools ? <Spin size="small" /> : '暂无可选学校'}
+            />
           </Form.Item>
           <Form.Item name="login_name" label="学生账号" rules={[{ required: true, message: '请输入学生账号' }]}>
-            <Input placeholder="使用学校开通的学生账号" />
+            <Input size="large" prefix={<UserOutlined />} placeholder="请输入学号" autoComplete="username" />
           </Form.Item>
           <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-            <Input.Password placeholder="请输入密码" />
+            <Input.Password size="large" prefix={<LockOutlined />} placeholder="请输入密码" autoComplete="current-password" />
           </Form.Item>
-          <Button type="primary" htmlType="submit" block loading={submitting}>登录选科中心</Button>
+          <Button className="student-primary-button" type="primary" htmlType="submit" block loading={submitting} icon={<ArrowRightOutlined />}>
+            进入选科中心
+          </Button>
         </Form>
-      </Card>
+      </section>
     </main>
   )
 }

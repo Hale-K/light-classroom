@@ -18,11 +18,17 @@ export default function RequireAuth({
   children: ReactNode
 }) {
   const location = useLocation()
+  // 必须同时存在真实 token 和身份信息。
+  // 之前只检查 zh_*_info，token 过期/被清除后页面仍会显示为已登录，
+  // 随后的接口请求只能返回“缺少令牌”。
   const token = admin
+    ? localStorage.getItem('zh_admin_token')
+    : localStorage.getItem('zh_token')
+  const identity = admin
     ? localStorage.getItem('zh_admin_info')
     : localStorage.getItem('zh_user')
 
-  if (!token) {
+  if (!token || !identity) {
     return (
       <Navigate
         to={admin ? '/admin/login' : '/login'}

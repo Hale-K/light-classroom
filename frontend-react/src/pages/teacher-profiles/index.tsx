@@ -416,6 +416,16 @@ export default function TeacherProfilesView() {
             value={subjectId}
             onChange={(v) => { setSubjectId(v ?? null); setPage(1) }}
           />
+          <Select
+            aria-label="学期"
+            style={{ width: 112 }}
+            value={term}
+            options={[
+              { label: '第1学期', value: '1' },
+              { label: '第2学期', value: '2' },
+            ]}
+            onChange={(v) => { setTerm(v); setPage(1) }}
+          />
           <div className="tp-filter-ht-switch">
             <span>仅看班主任</span>
             <Switch
@@ -438,6 +448,7 @@ export default function TeacherProfilesView() {
                 setOnlyHeadTeacher(false)
                 setSubjectId(null)
                 setGradeId(null)
+                setTerm(filtersMeta?.defaults?.term || '1')
                 setPage(1)
               }}
             >

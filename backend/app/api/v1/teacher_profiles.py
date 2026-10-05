@@ -294,7 +294,7 @@ async def list_teacher_profiles(
     for appt, org in (await session.execute(appts_stmt)).all():
         staff_orgs[appt.staff_id].append((appt, org))
 
-    # 4) TeachingAssignment —— 先按学年学期精确匹配，找不到就放宽条件
+    # 4) TeachingAssignment —— 任课关系严格按学年、学期隔离
     def _ta_where(base_where: list, ay: str | None, tm: str | None):
         w = list(base_where)
         if ay:
@@ -315,32 +315,11 @@ async def list_teacher_profiles(
     tas: dict[int, list[tuple[TeachingAssignment, Class, Subject]]] = defaultdict(list)
     teacher_class_ids: dict[int, set[int]] = defaultdict(set)
     ta_results = (await session.execute(ta_stmt)).all()
-    # 精确匹配覆盖不到的老师，直接回退：不限制学年学期，取全部任教关系
-    # （移除对 (academic_year or term != "1") 的门控，避免配置缺失时fallback被锁死）
-    matched_teachers_with_ta = {ta.teacher_id for ta, _, _ in ta_results}
-    fallback_teachers = teacher_ids - matched_teachers_with_ta
-    if fallback_teachers:
-        fb_stmt = select(TeachingAssignment, Class, Subject).join(
-            Class, TeachingAssignment.class_id == Class.id,
-        ).join(Subject, TeachingAssignment.subject_id == Subject.id).where(
-            and_(
-                TeachingAssignment.tenant_id == tenant_id,
-                TeachingAssignment.teacher_id.in_(fallback_teachers),
-            )
-        ).order_by(TeachingAssignment.id.desc())
-        fb_results = (await session.execute(fb_stmt)).all()
-        seen: set[tuple[int, int, int]] = set()
-        for ta, cls, subj in fb_results:
-            k = (ta.teacher_id, ta.class_id, ta.subject_id)
-            if k in seen:
-                continue
-            seen.add(k)
-            ta_results.append((ta, cls, subj))
     for ta, cls, subj in ta_results:
         tas[ta.teacher_id].append((ta, cls, subj))
         teacher_class_ids[ta.teacher_id].add(cls.id)
 
-    # 5) Schedule 已排课时 —— 同样先精确匹配，找不到就回退（不区分学年学期或只按tenant+teacher）
+    # 5) Schedule 已排课时 —— 同样严格按学年、学期统计
     scheduled_counts: dict[int, float] = defaultdict(float)
     if teacher_ids:
         sched_base = [Schedule.tenant_id == tenant_id, Schedule.teacher_id.in_(teacher_ids)]
@@ -356,19 +335,8 @@ async def list_teacher_profiles(
             if tid is None:
                 continue
             exact_counts[tid] = float(cnt or 0)
-        zero_tids = [tid for tid in teacher_ids if exact_counts.get(tid, 0) == 0]
-        fallback_counts: dict[int, float] = {}
-        if zero_tids:
-            fb_sched_stmt = select(Schedule.teacher_id, _SCHEDULE_UNIT).where(
-                Schedule.tenant_id == tenant_id,
-                Schedule.teacher_id.in_(zero_tids),
-            ).group_by(Schedule.teacher_id)
-            for tid, cnt in (await session.execute(fb_sched_stmt)).fetchall():
-                if tid is None:
-                    continue
-                fallback_counts[tid] = float(cnt or 0)
         for tid in teacher_ids:
-            scheduled_counts[tid] = exact_counts.get(tid, 0) or fallback_counts.get(tid, 0)
+            scheduled_counts[tid] = exact_counts.get(tid, 0)
 
     plan_stmt = select(CourseHourPlan).where(CourseHourPlan.tenant_id == tenant_id)
     if academic_year:

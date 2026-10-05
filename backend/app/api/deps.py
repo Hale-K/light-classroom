@@ -157,3 +157,16 @@ async def require_management_user(
     if user.role not in ("director", "teacher"):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅教务管理人员可访问此模块")
     return user
+
+
+async def require_head_teacher(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """选科审核只开放给实际承担班主任岗位的教师。"""
+    from app.services.org.staff_roles import get_staff_role_codes
+
+    role_codes = await get_staff_role_codes(session, user.id)
+    if user.role != "head_teacher" and "head_teacher" not in role_codes:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="只有班主任可以审核学生选科")
+    return user

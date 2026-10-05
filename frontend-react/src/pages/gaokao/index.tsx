@@ -1,9 +1,18 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Alert, App, Button, Card, Popconfirm, Select, Space, Table, Tag } from 'antd'
+import {
+  ApartmentOutlined,
+  CheckCircleFilled,
+  ClockCircleOutlined,
+  ReadOutlined,
+  TeamOutlined,
+  ThunderboltFilled,
+} from '@ant-design/icons'
 import { authApi, gaokaoApi } from '@/api'
 import type { GaokaoOverview } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
+import { useAuthStore } from '@/store/auth'
 import './index.css'
 
 type GaokaoMode = '3+1+2' | '3+3' | 'traditional'
@@ -22,6 +31,7 @@ const WORKFLOW_STEPS = [
 
 export default function GaokaoView() {
   const { message } = App.useApp()
+  const user = useAuthStore((state) => state.user)
 
   const [academicYear, setAcademicYear] = useState('2026-2027')
   const [term, setTerm] = useState('1')
@@ -35,6 +45,8 @@ export default function GaokaoView() {
   const [selectedReviewIds, setSelectedReviewIds] = useState<number[]>([])
 
   const isWalkClass = mode !== 'traditional'
+  const userRoles = user?.roles || (user?.role ? [user.role] : [])
+  const canReviewChoices = userRoles.includes('head_teacher')
   const workflow = overview?.workflow
 
   const load = async () => {
@@ -47,12 +59,14 @@ export default function GaokaoView() {
       })
       setOverview(data)
       setGradeId((prev) => prev ?? data.grades[0]?.id)
-      const reviews = await gaokaoApi.choicesForReview({
-        academic_year: academicYear,
-        term,
-        grade_id: gradeId,
-        status_filter: 'confirmed',
-      }).catch(() => [])
+      const reviews = canReviewChoices
+        ? await gaokaoApi.choicesForReview({
+            academic_year: academicYear,
+            term,
+            grade_id: gradeId,
+            status_filter: 'confirmed',
+          }).catch(() => [])
+        : []
       setReviewChoices(reviews)
       setSelectedReviewIds([])
     } catch (e) {
@@ -76,7 +90,7 @@ export default function GaokaoView() {
   useEffect(() => {
     void load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [academicYear, term])
+  }, [academicYear, term, canReviewChoices])
 
   // 年级变化时重新拉取（gradeId 首次由 overview 回填后再触发一次）
   useEffect(() => {
@@ -167,11 +181,11 @@ export default function GaokaoView() {
   )
 
   return (
-    <div className="gk-page">
+    <div className="gk-page gk-workbench">
       <PageHeader
-        title={MODE_TITLE[mode]}
+        title={canReviewChoices ? '班级选科审核' : '选科与走班工作台'}
         extra={
-          isWalkClass ? (
+          isWalkClass && !canReviewChoices ? (
             <>
               <Button
                 loading={generating === 'classes'}
@@ -194,9 +208,14 @@ export default function GaokaoView() {
           ) : undefined
         }
       />
-      <div className="gk-filters">
-        <div className="gk-field">
-          <span>年级</span>
+      <div className="gk-contextbar">
+        <div className="gk-context-copy">
+          <span className="gk-kicker">ACADEMIC PLANNING / {academicYear}</span>
+          <strong>{MODE_TITLE[mode]}</strong>
+        </div>
+        <div className="gk-context-controls">
+          <div className="gk-field">
+            <span>当前年级</span>
           <Select
             value={gradeId}
             onChange={setGradeId}
@@ -204,18 +223,25 @@ export default function GaokaoView() {
             placeholder="选择年级"
             options={(overview?.grades ?? []).map((g) => ({ label: g.name, value: g.id }))}
           />
+          </div>
+          <span className="gk-scheme-chip"><ReadOutlined /> {overview?.scheme?.name || '尚未建立届别方案'}</span>
         </div>
-        <span className="gk-chip">{overview?.scheme?.name || '尚未建立届别方案'}</span>
       </div>
 
-      {isWalkClass && (
+      {isWalkClass && !canReviewChoices && (
         <section className="gk-workflow" aria-label="选科实施流程">
           <div className="gk-workflow-head">
-            <div>
+            <div className="gk-stage-title">
+              <span className="gk-stage-icon"><ThunderboltFilled /></span>
+              <div>
               <span>当前阶段</span>
               <strong>{workflow?.label || '等待年级数据'}</strong>
+              </div>
             </div>
-            <p>{workflow?.description || '选择年级和学期后判断选科所处阶段。'}</p>
+            <div className="gk-stage-description">
+              <ClockCircleOutlined />
+              <p>{workflow?.description || '选择年级和学期后判断选科所处阶段。'}</p>
+            </div>
           </div>
           <div className="gk-workflow-track">
             {WORKFLOW_STEPS.map((step, index) => {
@@ -243,31 +269,30 @@ export default function GaokaoView() {
       ) : null}
 
       <div className="gk-metrics">
-        <div>
-          <span>年级学生</span>
-          <strong>{stats.students}</strong>
+        <div className="gk-metric metric-blue">
+          <span className="gk-metric-icon"><TeamOutlined /></span>
+          <div><span>年级学生</span><strong>{stats.students}</strong><small>全部在籍学生</small></div>
         </div>
-        <div>
-          <span>{isWalkClass ? '已确认选科' : '已确认分科'}</span>
-          <strong>{stats.confirmed}</strong>
+        <div className="gk-metric metric-green">
+          <span className="gk-metric-icon"><CheckCircleFilled /></span>
+          <div><span>{isWalkClass ? '已确认选科' : '已确认分科'}</span><strong>{stats.confirmed}</strong><small>等待审核或已锁定</small></div>
         </div>
-        <div>
-          <span>确认覆盖率</span>
-          <strong>{stats.coverage}%</strong>
+        <div className="gk-metric metric-orange">
+          <span className="gk-metric-icon"><ApartmentOutlined /></span>
+          <div><span>确认覆盖率</span><strong>{stats.coverage}%</strong><small className="gk-progress"><i style={{ width: `${Math.min(stats.coverage, 100)}%` }} /></small></div>
         </div>
-        <div>
-          <span>{isWalkClass ? '教学班' : '科类'}</span>
-          <strong>{isWalkClass ? stats.teaching : stats.combos}</strong>
+        <div className="gk-metric metric-purple">
+          <span className="gk-metric-icon"><ReadOutlined /></span>
+          <div><span>{isWalkClass ? '已生成教学班' : '科类组合'}</span><strong>{isWalkClass ? stats.teaching : stats.combos}</strong><small>{isWalkClass ? '可继续生成走班课表' : '按当前模式统计'}</small></div>
         </div>
       </div>
 
-      <Card
-        className="gk-card"
-        title={`班级选科审核（待审 ${reviewChoices.length} 人）`}
+      {canReviewChoices && <Card
+        className="gk-card gk-review-card"
+        title={<div className="gk-card-title"><span>班级选科审核</span><Tag color={reviewChoices.length ? 'orange' : 'default'}>待审 {reviewChoices.length} 人</Tag></div>}
         style={{ marginBottom: 18 }}
         extra={
           <Space>
-            <span style={{ color: '#718096', fontSize: 12 }}>登录班主任账号后，仅显示本人所带班级</span>
             <Popconfirm title={`确认通过选中的 ${selectedReviewIds.length} 人？`} onConfirm={() => void batchApproveChoices()} okText="通过并锁定" cancelText="取消">
               <Button type="primary" size="small" disabled={!selectedReviewIds.length} loading={generating === 'review-batch'}>
                 批量通过并锁定
@@ -295,7 +320,7 @@ export default function GaokaoView() {
               render: (_: unknown, row: import('@/api').GaokaoChoiceReview) => (
                 <span>
                   <Popconfirm title="确认通过并锁定该学生选科？" onConfirm={() => void reviewChoice(row.id, 'approve')} okText="通过" cancelText="取消">
-                    <Button type="link" size="small" loading={reviewingId === row.id}>通过并锁定</Button>
+                  <Button type="link" size="small" loading={reviewingId === row.id}>通过并锁定</Button>
                   </Popconfirm>
                   <Popconfirm title="确认驳回该学生选科？" onConfirm={() => void reviewChoice(row.id, 'reject')} okText="驳回" cancelText="取消">
                     <Button type="link" danger size="small" disabled={reviewingId === row.id}>驳回</Button>
@@ -305,12 +330,12 @@ export default function GaokaoView() {
             },
           ]}
         />
-      </Card>
+      </Card>}
 
       <div className="gk-grid">
         <Card
-          className="gk-card"
-          title={isWalkClass ? '选科组合分布' : '文理分科分布'}
+          className="gk-card gk-combination-card"
+          title={<div className="gk-card-title"><span>{isWalkClass ? '选科组合分布' : '文理分科分布'}</span></div>}
           styles={{ body: { padding: 0 } }}
         >
           <Table
@@ -326,7 +351,7 @@ export default function GaokaoView() {
               ),
             }}
             columns={[
-              { title: '组合', dataIndex: 'label', key: 'label' },
+              { title: '组合', dataIndex: 'label', key: 'label', width: 280 },
               {
                 title: '人数',
                 dataIndex: 'count',
@@ -340,8 +365,8 @@ export default function GaokaoView() {
 
         {isWalkClass ? (
           <Card
-            className="gk-card"
-            title="学科资源需求"
+            className="gk-card gk-demand-card"
+            title={<div className="gk-card-title"><span>学科资源需求</span></div>}
             styles={{ body: { padding: 0 } }}
           >
             <Table
@@ -362,7 +387,7 @@ export default function GaokaoView() {
                 ),
               }}
               columns={[
-                { title: '学科', dataIndex: 'subject_name', key: 'subject_name' },
+                { title: '学科', dataIndex: 'subject_name', key: 'subject_name', width: 120 },
                 {
                   title: '授课轨道',
                   dataIndex: 'delivery_mode',

@@ -1,0 +1,15 @@
+.tm-page { min-height: 100%; padding: 24px 0; background: var(--page-bg, #fbfbfa); }
+.tm-title-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 20px; }
+.tm-eyebrow { color: #2485c4; font-size: 13px; font-weight: 600; letter-spacing: .04em; }
+.tm-title-row h1 { margin: 6px 0 4px; color: var(--text-primary, #18181b); font-size: 28px; line-height: 1.2; }
+.tm-title-row p { margin: 0; color: var(--text-secondary, #71717a); font-size: 13px; }
+.tm-total { display: inline-flex; align-items: center; gap: 8px; color: #4f6b85; font-size: 14px; white-space: nowrap; }
+.tm-card-title { display: inline-flex; align-items: center; gap: 10px; }
+.tm-student-cell { display: flex; flex-direction: column; gap: 3px; }
+.tm-student-cell span { color: #8793a5; font-size: 12px; }
+.tm-loading { display: flex; min-height: 220px; align-items: center; justify-content: center; }
+@media (max-width: 800px) {
+  .tm-page { padding: 16px 0 24px; }
+  .tm-title-row { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .tm-title-row h1 { font-size: 24px; }
+}

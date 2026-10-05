@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { onboardingApi, type OnboardingStep } from '@/api'
+import { onboardingApi, type OnboardingStep, type OnboardingStatus } from '@/api'
 import Icon from '@/components/Icon'
 import './onboarding.css'
 
@@ -11,6 +11,7 @@ export default function OnboardingView() {
   const [historyYear, setHistoryYear] = useState<string | null>(null)
   const [dismissed, setDismissed] = useState(false)
   const [loaded, setLoaded] = useState(false)
+  const [audience, setAudience] = useState<OnboardingStatus['audience']>('management')
 
   const refresh = useCallback(() => {
     onboardingApi.status()
@@ -18,6 +19,7 @@ export default function OnboardingView() {
         setSteps(data.steps || [])
         setHistoryYear(data.history_year ?? null)
         setDismissed(Boolean(data.dismissed))
+        setAudience(data.audience || 'management')
         setLoaded(true)
       })
       .catch(() => setLoaded(true))
@@ -51,8 +53,8 @@ export default function OnboardingView() {
     <div className="ob-page">
       <section className="ob-banner">
         <div className="ob-banner-copy">
-          <h1>按步骤准备排课基础数据</h1>
-          <p>核对学年学期，准备教师人员，建全空间并完成资源分配与班级划分，再配置课位、课时、任教和规则，最后生成课表。</p>
+          <h1>{audience === 'head_teacher' ? '班主任工作引导' : audience === 'subject_teacher' ? '任课教师工作引导' : '按步骤准备排课基础数据'}</h1>
+          <p>{audience === 'head_teacher' ? '从班级、学生到选科审核，快速完成班主任日常工作。' : audience === 'subject_teacher' ? '从课程、备课到课表和成绩，快速进入任课教师工作流程。' : '核对学年学期，准备教师人员，建全空间并完成资源分配与班级划分，再配置课位、课时、任教和规则，最后生成课表。'}</p>
           <div className="ob-banner-tips">
             <span>✓ 建议按顺序完成</span>
             {historyYear && !allDone && (

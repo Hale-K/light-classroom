@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><title>科目助手 · 隔离演示</title></head>
+<body><div id="root"></div><script type="module">
+import RefreshRuntime from '/@react-refresh';
+RefreshRuntime.injectIntoGlobalHook(window);
+window.$RefreshReg$ = () => {};
+window.$RefreshSig$ = () => type => type;
+window.__vite_plugin_react_preamble_installed__ = true;
+await import('/tests/page-subject-agent.harness.tsx');
+</script></body></html>

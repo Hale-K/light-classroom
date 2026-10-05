@@ -13,6 +13,8 @@ import { runAssistantTool, type JumpLink, type ToolExtra } from '@/assistant/run
 import { assistLog, newMsgId } from '@/assistant/trace'
 import { hereOf, jumpLabel, placeLabel, samePlace } from '@/assistant/place'
 import { decideJumpReply } from '@/assistant/jump-intent'
+import { executeSubjectPageTask, prepareSubject } from '@/assistant/pageSubjectAgent'
+import { isSubjectCreationRequest, isSubjectChoiceReply, isSubjectTaskCancellation, readExplicitSubjectName, readPendingSubjectDraft, type SubjectDraft } from '@/assistant/subjectTask'
 import { pageSnapshot, type AssistantTask } from '@/assistant/skills'
 import './assistant-dock.css'
 
@@ -298,6 +300,7 @@ export default function AssistantDock() {
   const userId = useAuthStore((s) => s.user?.id)
   const threadStorageKey = `lc-assistant-thread:${schoolCode}:${userId ?? 'anonymous'}`
   const runStorageKey = `lc-assistant-run:${schoolCode}:${userId ?? 'anonymous'}`
+  const subjectStorageKey = `lc-assistant-subject:v2:${schoolCode}:${userId ?? 'anonymous'}`
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(DOCK_KEY) === '1')
   const [panel, setPanel] = useState<Panel>(null)
   const [noticeUnread, setNoticeUnread] = useState(true)
@@ -329,6 +332,8 @@ export default function AssistantDock() {
   const forcedRef = useRef<{ tool: AssistantTask['tool']; path?: string; extra?: ToolExtra } | null>(null)
   const midRef = useRef('')
   const agentConversationRef = useRef(false)
+  const subjectDraftRef = useRef<SubjectDraft | null>(null)
+  const subjectRunningRef = useRef(false)
   const activeRunRef = useRef<string | null>(null)
   const epochRef = useRef(0)
   const [runProgress, setRunProgress] = useState<AssistantRun | null>(null)
@@ -365,6 +370,10 @@ export default function AssistantDock() {
   const abortedRef = useRef(false)
 
   const stopTurn = () => {
+    if (subjectRunningRef.current) {
+      abortRef.current?.abort()
+      return
+    }
     if (activeRunRef.current) {
       setConnectionNote('正在请求取消，等待后台确认…')
       void assistantApi.cancelRun(activeRunRef.current).catch(() => {
@@ -627,6 +636,11 @@ export default function AssistantDock() {
   }
 
   useEffect(() => {
+    abortRef.current?.abort()
+    subjectDraftRef.current = readPendingSubjectDraft(sessionStorage.getItem(subjectStorageKey))
+    subjectRunningRef.current = false
+    epochRef.current++
+    busyRef.current = false
     activeRunRef.current = null
     agentConversationRef.current = false
     forcedRef.current = null
@@ -689,6 +703,51 @@ export default function AssistantDock() {
     return () => window.clearTimeout(timer)
   }, [conversationReady, thread])
 
+  const runSubjectConversation = async (content: string, mid: string) => {
+    const epoch = epochRef.current
+    const controller = new AbortController()
+    abortRef.current = controller
+    subjectRunningRef.current = true
+    busyRef.current = true
+    setChatting(true)
+    const progress = (message: string) => {
+      if (epoch === epochRef.current) commitThread(prev => upsertThink(prev, message))
+    }
+    try {
+      // Keep explicit user input even if preparation fails, so the next reply
+      // stays in the subject workflow instead of becoming an ordinary chat.
+      const explicitName = readExplicitSubjectName(content)
+      if (explicitName) {
+        subjectDraftRef.current = { ...subjectDraftRef.current, name: explicitName,
+          course_type: subjectDraftRef.current?.course_type ?? null,
+          evening_study_allowed: subjectDraftRef.current?.evening_study_allowed ?? null }
+        sessionStorage.setItem(subjectStorageKey, JSON.stringify(subjectDraftRef.current))
+      }
+      const prepared = await prepareSubject(content, subjectDraftRef.current, controller.signal)
+      controller.signal.throwIfAborted()
+      subjectDraftRef.current = prepared.status === 'needs_input' ? prepared.draft : null
+      if (subjectDraftRef.current) sessionStorage.setItem(subjectStorageKey, JSON.stringify(subjectDraftRef.current))
+      else sessionStorage.removeItem(subjectStorageKey)
+      const text = prepared.status === 'ready'
+        ? await executeSubjectPageTask(prepared, navigate, controller.signal, progress)
+        : prepared.text
+      if (epoch === epochRef.current) commitThread(prev => replaceThinkBot(prev, { role: 'bot', text, mid }))
+    } catch (error) {
+      if (epoch === epochRef.current) commitThread(prev => replaceThinkBot(prev, {
+        role: 'bot', mid, modelVisible: false,
+        text: controller.signal.aborted ? '已停止页面操作。已提交的保存可能仍会完成，请核对科目列表。'
+          : error instanceof Error ? error.message : '页面操作失败，请重试。',
+      }))
+    } finally {
+      if (epoch === epochRef.current) {
+        subjectRunningRef.current = false
+        busyRef.current = false
+        setChatting(false)
+        abortRef.current = null
+      }
+    }
+  }
+
   const send = (text?: string) => {
     const content = (text ?? draft).trim()
     if (!content) return
@@ -697,6 +756,27 @@ export default function AssistantDock() {
     setPanel('home')
     if (!busyRef.current) midRef.current = newMsgId()
     const mid = busyRef.current ? newMsgId() : midRef.current
+    if (subjectRunningRef.current) {
+      if (isSubjectTaskCancellation(content)) stopTurn()
+      else commitThread(prev => [...prev, { role: 'bot', text: '科目操作正在进行，请先停止当前操作，再提供新的要求。', modelVisible: false }])
+      return
+    }
+    if (!busyRef.current && !subjectDraftRef.current && isSubjectChoiceReply(content)) {
+      const lastUser = [...threadRef.current].reverse().find(item => item.role === 'user')
+      const name = lastUser && isSubjectCreationRequest(lastUser.text) ? readExplicitSubjectName(lastUser.text) : null
+      if (name) subjectDraftRef.current = { name, course_type: null, evening_study_allowed: null }
+    }
+    if (!busyRef.current && (subjectDraftRef.current || isSubjectCreationRequest(content))) {
+      if (isSubjectTaskCancellation(content)) {
+        subjectDraftRef.current = null
+        sessionStorage.removeItem(subjectStorageKey)
+        commitThread(prev => [...prev, { role: 'user', text: content, mid }, { role: 'bot', text: '已取消新增科目。', mid }])
+        return
+      }
+      commitThread(prev => upsertThink([...prev, { role: 'user', text: content, mid }], '正在校验科目数据'))
+      void runSubjectConversation(content, mid)
+      return
+    }
     assistLog(mid, busyRef.current ? 'steer' : 'followup', content.slice(0, 80))
     if (busyRef.current) {
       const runId = activeRunRef.current
@@ -762,6 +842,9 @@ export default function AssistantDock() {
   const newChat = () => {
     if (activeRunRef.current) void assistantApi.cancelRun(activeRunRef.current).catch(() => undefined)
     epochRef.current++
+    subjectDraftRef.current = null
+    sessionStorage.removeItem(subjectStorageKey)
+    subjectRunningRef.current = false
     abortRef.current?.abort()
     activeRunRef.current = null
     sessionStorage.removeItem(runStorageKey)
@@ -1230,7 +1313,7 @@ export default function AssistantDock() {
                 ref={composerRef}
                 rows={1}
                 value={draft}
-                placeholder={chatting ? '随心输入新的处理方向' : '随心输入'}
+                placeholder={chatting ? subjectRunningRef.current ? '科目操作进行中，可点击停止' : '随心输入新的处理方向' : '随心输入'}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1251,7 +1334,7 @@ export default function AssistantDock() {
               </button>
             </div>
           </div>
-          <p className="assist-here">{chatting ? '当前任务进行中 · 可调整方向' : `当前页 · ${pageName}`}</p>
+          <p className="assist-here">{chatting ? subjectRunningRef.current ? '正在操作科目页面 · 可随时停止' : '当前任务进行中 · 可调整方向' : `当前页 · ${pageName}`}</p>
           {recoverable && (
             <button
               type="button"

@@ -989,6 +989,9 @@ def generation_consecutive_requirements(group: RuleGroupDocument) -> dict[str, l
                 "min_days": int(rule.params["minimum_days"]),
                 "weekdays": list(rule.weekdays),
             }
+            if kind == "teachers":
+                # 同班连堂与跨班连堂是两种不同的排课语义；旧规则默认同班。
+                entry["class_mode"] = str(rule.params.get("class_mode") or "same_class")
             key = (kind, entry["target_id"], tuple(entry["weekdays"]), entry["min_block"], entry["min_days"])
             if key in seen:
                 continue
@@ -1102,6 +1105,10 @@ def _missing_parameter(rule: RuleDefinition) -> str | None:
                 if rule.code == "subject_consecutive"
                 else "教师连堂必须作用于教师"
             )
+        if rule.code == "teacher_consecutive" and rule.params.get("class_mode", "same_class") not in {
+            "same_class", "cross_class"
+        }:
+            return "教师连堂 class_mode 必须为 same_class 或 cross_class"
     if rule.code == "teacher_gap_free" and rule.target.type not in {"teacher", "subject"}:
         return "教师无空节规则必须作用于教师或学科"
     if rule.code == "class_gap_free" and rule.target.type not in {"class", "global"}:
@@ -1666,17 +1673,37 @@ def _teacher_multi_class_evening_adjacent(
 def _consecutive(rule: RuleDefinition, rows: list[ScheduleItem], *, by_subject: bool) -> RuleEvaluationResult:
     block_length = int(rule.params["minimum_block_length"])
     minimum_days = int(rule.params["minimum_days"])
-    grouped: dict[tuple[int, int], set[int]] = defaultdict(set)
+    grouped: dict[tuple[int, int], list[ScheduleItem]] = defaultdict(list)
     for item in rows:
         if not _target_match(rule, item) or not _time_match(rule, item):
             continue
         owner = item.class_id if by_subject else (item.teacher_id or 0)
-        grouped[(owner, item.weekday)].add(item.period)
+        grouped[(owner, item.weekday)].append(item)
     owners = {key[0] for key in grouped}
-    satisfied_days = {
-        owner: sum(_longest_block(periods) >= block_length for (candidate, _), periods in grouped.items() if candidate == owner)
-        for owner in owners
-    }
+    class_mode = str(rule.params.get("class_mode") or "same_class") if not by_subject else "same_class"
+    satisfied_days: dict[int, int] = {}
+    for owner in owners:
+        days_satisfied = 0
+        for (candidate, weekday), day_items in grouped.items():
+            if candidate != owner:
+                continue
+            periods = sorted({item.period for item in day_items})
+            if class_mode == "same_class":
+                by_class: dict[int, set[int]] = defaultdict(set)
+                for item in day_items:
+                    by_class[item.class_id].add(item.period)
+                ok = any(_longest_block(class_periods) >= block_length for class_periods in by_class.values())
+            else:
+                ok = _longest_block(set(periods)) >= block_length
+                if ok:
+                    for start in range(min(periods), max(periods) - block_length + 2):
+                        window = [item for item in day_items if start <= item.period < start + block_length]
+                        if len({item.class_id for item in window}) >= 2 and len({item.period for item in window}) == block_length:
+                            break
+                    else:
+                        ok = False
+            days_satisfied += int(ok)
+        satisfied_days[owner] = days_satisfied
     if not satisfied_days:
         satisfied_days = {0: 0}
     violations = sum(days < minimum_days for days in satisfied_days.values())
@@ -1685,6 +1712,7 @@ def _consecutive(rule: RuleDefinition, rows: list[ScheduleItem], *, by_subject: 
         "minimum_days": minimum_days,
         "satisfied_days": max(satisfied_days.values(), default=0),
         "checked_targets": len(satisfied_days),
+        "class_mode": class_mode,
     }, f"达到连续 {block_length} 节要求的目标数：{len(satisfied_days) - violations}/{len(satisfied_days)}")
 
 
@@ -1810,7 +1838,7 @@ def _subject_daily_spread(rule: RuleDefinition, rows: list[ScheduleItem]) -> Rul
     """均匀分布：同一学科同一班级每天最多 1 节。
 
     数据例外：学科周课时 > 教学天数（5 天）时，允许某天 2 节
-    （如数学周 6 节），其中连堂由 subject_consecutive 规则另行要求。
+    （如某学科每周 6 节），其中连堂由 subject_consecutive 规则另行要求。
     """
     by_csd: dict[tuple[int, int, int], list[ScheduleItem]] = defaultdict(list)
     weekly_by_cs: dict[tuple[int, int], float] = defaultdict(float)
@@ -2120,7 +2148,7 @@ def _teacher_period_minimum(
 def _class_slot_pattern(rule: RuleDefinition, rows: list[ScheduleItem]) -> RuleEvaluationResult:
     """Check one of several exact slot combinations for every matching class.
 
-    The rule target is normally a subject (for example 体育). Each class must
+    The rule target is normally a subject (for example 体育或实验课). Each class must
     match one complete alternative. This models "周二上午+周四下午" OR
     "周二下午+周四上午" without relying on a natural-language summary.
     """

@@ -15,6 +15,7 @@ const GUIDES: PageGuidance[] = [
   { match: '/campus-buildings', title: '空间资源', summary: '建立空间、分配届别资源并据此规划行政班。', steps: ['建立校区、楼宇和场室', '创建并执行资源分配规则', '按已分配教室生成或绑定行政班'] },
   { match: '/students', title: '学生档案', summary: '维护学生基础资料和年级、班级归属。', steps: ['导入或新增学生', '处理未分班学生', '核对年级关联和档案状态'] },
   { match: '/classes', title: '行政班管理', summary: '维护班级、班主任和学生名单。', steps: ['选择年级并核对班级', '分配班主任和教室', '完成学生分班'] },
+  { match: '/teacher-students', title: '选课审核', summary: '班主任查看本班学生并审核 3+1+2 选课意愿。', steps: ['按班级和状态筛选', '核对学生选课组合', '通过并锁定或退回修改'] },
   { match: '/subjects', title: '科目管理', summary: '维护排课、考试和成绩共用的科目。', steps: ['检查是否已有同名科目', '新增或调整科目类型', '确认启用状态'] },
   { match: '/teacher-profiles', title: '教师档案', summary: '核对教师任教学科、班级和课时完成度。', steps: ['选择学年学期和学科', '查看任教与目标课时', '回到任教关系补齐缺项'] },
   { match: '/scheduling', title: '排课管理', summary: '从课时、课位、任教和规则生成课表。', steps: ['填班级课时并保存课位结构', '补齐任教关系和规则组', '校验后生成并检查课表'] },

@@ -1624,7 +1624,7 @@ def ensure_teacher_evening_daytime_anchors(
                         if len(occupants) > 1:
                             continue
                         other = occupants[0]
-                        # 不要拆同日连堂（如数学 6-7），否则会打爆 R05。
+                        # 不要拆同日学科连堂（如第 6-7 节），否则会打爆 R05。
                         if any(
                             row.class_id == other.class_id
                             and row.subject_id == other.subject_id

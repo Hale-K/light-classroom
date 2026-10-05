@@ -1467,6 +1467,7 @@ export default function SchedulingView() {
                 classId={selectedClassId}
                 onClassChange={setSelectedClassId}
                 classOptions={resources.classes.map(classOption)}
+                onInherited={loadResources}
               />
             ),
           },

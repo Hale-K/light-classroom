@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { App, Button, Form, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
+import { App, Button, Checkbox, Form, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { schedulingApi } from '@/api'
 import type { ClassInfo, CourseHourPlanInfo, EveningParity, SubjectInfo, WeekParity } from '@/types'
@@ -13,6 +13,7 @@ interface CourseHoursPanelProps {
   classId?: number
   onClassChange?: (classId?: number) => void
   classOptions?: Array<{ label: string; value: number }>
+  onInherited?: () => Promise<void> | void
 }
 
 type EveningParityChoice = EveningParity
@@ -41,6 +42,7 @@ export default function CourseHoursPanel({
   classId,
   onClassChange,
   classOptions,
+  onInherited,
 }: CourseHoursPanelProps) {
   const { message } = App.useApp()
   const [rows, setRows] = useState<CourseHourPlanInfo[]>([])
@@ -50,6 +52,9 @@ export default function CourseHoursPanel({
   const [editing, setEditing] = useState<CourseHourPlanInfo>()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
+  const [inheritOpen, setInheritOpen] = useState(false)
+  const [inheriting, setInheriting] = useState(false)
+  const [inheritTypes, setInheritTypes] = useState(['course_hours', 'assignments'])
   const [form] = Form.useForm<CourseHourFormValues>()
   const weekdayPeriods = Form.useWatch('weekday_periods', form) ?? 0
   const saturdayPeriods = Form.useWatch('saturday_periods', form) ?? 0
@@ -188,6 +193,37 @@ export default function CourseHoursPanel({
     }
   }
 
+  const inheritFromPreviousTerm = async () => {
+    if (!inheritTypes.length) {
+      message.warning('至少选择一种要沿用的数据')
+      return
+    }
+    setInheriting(true)
+    try {
+      const currentGradeId = classes.find((item) => item.id === classId)?.grade_id ?? classes[0]?.grade_id
+      const gradeClassIds = currentGradeId == null
+        ? classes.map((item) => item.id)
+        : classes.filter((item) => item.grade_id === currentGradeId).map((item) => item.id)
+      const result = await schedulingApi.inheritTermData({
+        academic_year: academicYear,
+        from_term: term === '2' ? '1' : '2',
+        to_term: term,
+        class_ids: gradeClassIds.length ? gradeClassIds : undefined,
+        copy_course_hours: inheritTypes.includes('course_hours'),
+        copy_assignments: inheritTypes.includes('assignments'),
+        copy_rules: inheritTypes.includes('rules'),
+      })
+      message.success(`已沿用：课时方案 ${result.course_hours_created} 条，任教关系新增 ${result.assignments_created} 条、更新 ${result.assignments_updated} 条，排课规则 ${result.rule_groups_created_or_copied} 组`)
+      setInheritOpen(false)
+      await load()
+      await onInherited?.()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '学期配置沿用失败')
+    } finally {
+      setInheriting(false)
+    }
+  }
+
   const columns: ColumnsType<CourseHourPlanInfo> = [
     { title: '班级', dataIndex: 'class_name', key: 'class_name', width: 180, render: (value) => <strong>{value || '未知班级'}</strong> },
     { title: '科目', dataIndex: 'subject_name', key: 'subject_name', width: 140 },
@@ -244,6 +280,9 @@ export default function CourseHoursPanel({
               : classes.map((item) => ({ label: item.name, value: item.id }))}
           />
           <Button onClick={() => void load()} loading={loading}>刷新</Button>
+          {term === '2' && (
+            <Button onClick={() => setInheritOpen(true)}>沿用第 1 学期年级配置</Button>
+          )}
           <Button type="primary" onClick={openCreate}>新增课时</Button>
         </Space>
       </div>
@@ -318,6 +357,31 @@ export default function CourseHoursPanel({
           </div>
           <div className="sk-rule-info-card"><strong>配置范围说明</strong><span>白天隔周类型只控制工作日和周六课时；晚课课时及晚课单双周安排单独控制晚自习。每个晚上只有 1 节：语数外通常填 1，其他科目通常填 0.5，并可选择单周、双周或无规定。</span></div>
         </Form>
+      </Modal>
+      <Modal
+        title="沿用上学期年级配置"
+        open={inheritOpen}
+        centered
+        onCancel={() => setInheritOpen(false)}
+        onOk={() => void inheritFromPreviousTerm()}
+        okText="确认沿用"
+        cancelText="取消"
+        confirmLoading={inheriting}
+      >
+        <p>将第 1 学期的配置沿用到第 2 学期，范围为当前高一年级的全部班级。</p>
+        <p>目标学期对应班级和学科已有配置会被上学期配置替换，其他数据不会删除；班级下拉框只影响查看，不影响沿用范围。</p>
+        <p>此操作可以重复执行，不会产生重复数据。</p>
+        <p>排课规则是学期级配置，勾选后会作用于第 2 学期全部班级；目标学期独有的规则组会保留。</p>
+        <Checkbox.Group
+          value={inheritTypes}
+          onChange={(values) => setInheritTypes(values as string[])}
+          options={[
+            { label: '课时方案（工作日、周六、晚课、单双周）', value: 'course_hours' },
+            { label: '任教关系（教师、班级、学科、周课时）', value: 'assignments' },
+            { label: '排课规则（硬约束、软目标、启用状态）', value: 'rules' },
+          ]}
+          style={{ display: 'grid', gap: 12 }}
+        />
       </Modal>
     </section>
   )

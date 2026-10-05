@@ -54,6 +54,8 @@ interface DistributionSpec {
   morningPeriods?: number[];
   /** 下午节次集合 */
   afternoonPeriods?: number[];
+  /** 教师连堂：同班连堂或跨班连堂 */
+  teacherClassMode?: "same_class" | "cross_class";
 }
 
 const RULE_FAMILY_LABELS: Record<RuleFamily, string> = {
@@ -93,7 +95,7 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     operator: "仅允许指定课位",
     label: "学科课位限制",
     description:
-      "只限制「能排在哪些课位」。若要体育上下午对开，请用「体艺课上下午分布」一条搞定，不必再加本规则。",
+      "只限制「能排在哪些课位」。若要安排学科的上下午分布，请用「学科上下午分布」一条搞定，不必再重复添加本规则。",
   },
   {
     id: "teacher_forbidden_slots",
@@ -121,7 +123,7 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     scope: "教师",
     operator: "要求连堂",
     label: "教师连堂",
-    description: "要求教师在指定范围内形成连续课节。",
+    description: "要求教师在指定范围内形成连续课节，可选择同一班连堂或跨班连堂。",
   },
   {
     id: "teacher_preferred_weekdays",
@@ -176,9 +178,9 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "subject",
     scope: "学科",
     operator: "均衡分布",
-    label: "体艺课上下午分布",
+    label: "学科上下午分布",
     description:
-      "通用上下午对开：自选星期与上午/下午节次；每班两种方向二选一。适合体育等体艺课。",
+      "通用上下午对开：选择任意学科、星期与上午/下午节次；每班两种方向二选一。适合体育、实验课等需要错开时段的学科。",
   },
   {
     id: "class_allowed_subjects",
@@ -714,8 +716,8 @@ const DEFAULT_RULES: GenericScheduleRule[] = [
     },
     priority: "hard",
     status: "pass",
-    title: "数学连堂规则",
-    note: "数学课程每周至少有1天安排连续2节，周课时数量以课时管理配置为准。",
+    title: "学科连堂",
+    note: "所选学科每周至少有1天安排连续2节，周课时数量以课时管理配置为准。",
   }),
   makeRule({
     id: "R06",
@@ -773,7 +775,7 @@ const DEFAULT_RULES: GenericScheduleRule[] = [
     },
     priority: "hard",
     status: "pass",
-    title: "体育上下午分布",
+    title: "学科上下午分布",
     note: "允许课位 = 所选星期 × 上午/下午节次；每班两种交叉方向二选一。周课时从课时管理读取。",
     rule_code: "class_slot_pattern",
   }),
@@ -1183,8 +1185,8 @@ const DEFAULT_RULES: GenericScheduleRule[] = [
     quantity: "单物双史或单史双物",
     priority: "hard",
     status: "pass",
-    title: "物理历史晚课单双周配对",
-    note: "同一晚课格内物理与历史对课：可以单周物理、双周历史，也可以单周历史、双周物理。",
+    title: "学科晚课单双周配对",
+    note: "同一晚课格内的两组学科按单双周配对；单周/双周对应关系可按配置调整。",
     rule_code: "subject_evening_parity_pair",
   }),
   makeRule({
@@ -1785,7 +1787,7 @@ const RULE_SCOPE_OPTIONS_BY_FAMILY: Record<RuleFamily, RuleScope[]> = {
   combination: ["全局", "课位", "学科", "教师", "班级"],
 };
 
-/** 每日课时上限：可选教师，或按学科覆盖该学科全部任课教师（便于排除体育等）。 */
+/** 每日课时上限：可选教师，或按学科覆盖该学科全部任课教师。 */
 const scopeOptionsForRule = (
   family: RuleFamily,
   code: SchedulingRuleCode,
@@ -1798,6 +1800,7 @@ const scopeOptionsForRule = (
   if (code === "teacher_period_minimum") return ["教师"];
   if (code === "subject_consecutive" || code === "class_slot_pattern")
     return ["学科"];
+  if (code === "teacher_consecutive") return ["教师"];
   if (code === "subject_daytime_parity_pair") return ["学科"];
   return RULE_SCOPE_OPTIONS_BY_FAMILY[family];
 };
@@ -2021,6 +2024,169 @@ const buildRuleSummary = (
     : "";
   return `${base}${timeText}${distributionText}${quantityText}${cycle}。`;
 };
+
+type RulePreviewMark = "blocked" | "allowed" | "fixed" | "preferred" | "scope";
+
+const rulePreviewModel = (rule: GenericScheduleRule) => {
+  const code = ruleCodeForRule(rule);
+  const target = shortenTargetLabel(rule.target || "");
+  const days = weekdaySelections(rule.weekday);
+  const periods = periodSelections(rule.period);
+  const isEvening = textMeansEvening(rule) || code === "subject_evening_parity_pair";
+  const effectivePeriods = periods.length
+    ? periods
+    : code === "class_evening_self_study_day"
+      ? ["第8节", "第9节"]
+      : isEvening
+        ? ["第10节"]
+        : code === "subject_consecutive" || code === "teacher_consecutive" || code === "class_gap_free"
+          ? PERIOD_ENUMS.slice(0, 7)
+          : [];
+  const effectiveDays = days.length ? days : WEEKDAY_ENUMS;
+  let mark: RulePreviewMark = "scope";
+  let headline = "这条规则会参与排课求解";
+  let detail = "当前没有锁定具体课位，算法会按规则对象和作用范围处理。";
+
+  if (
+    code === "slot_forbidden" ||
+    code === "teacher_forbidden_slots" ||
+    (code === "class_allowed_subjects" && (rule.id === "R18-b" || rule.quantity === "不排课"))
+  ) {
+    mark = "blocked";
+    headline = `${target}在指定课位不可排课`;
+    detail = "网格中的红色单元表示会被排课算法排除的候选课位。";
+  } else if (code === "subject_allowed_slots" || code === "class_allowed_subjects") {
+    mark = "allowed";
+    headline = `${target}只允许落在指定课位`;
+    detail = rule.allowedSubjects?.length
+      ? `如果这些课位安排课程，只能使用：${rule.allowedSubjects.join("、")}。`
+      : "只有高亮课位会进入候选集合，未高亮课位不会安排该对象。";
+  } else if (code === "slot_teacher_role_required" || rule.operator === "固定到指定课位" || rule.operator === "必须安排") {
+    mark = "fixed";
+    headline = `${target}必须在指定课位完成安排`;
+    detail = "网格中的蓝色单元是固定/必须满足的课位，排课时会优先保护。";
+  } else if (code === "subject_consecutive") {
+    mark = "preferred";
+    const length = rule.distributionSpec?.consecutiveLength || 2;
+    const count = rule.distributionSpec?.minimumDays || 1;
+    headline = `${target}每周至少 ${count} 天形成连续 ${length} 节`;
+    detail = "橙色区域表示连堂作用范围；具体从哪一组连续节次开始由排课算法结合其它约束决定。";
+  } else if (code === "teacher_consecutive") {
+    mark = "preferred";
+    const length = rule.distributionSpec?.consecutiveLength || 2;
+    const count = rule.distributionSpec?.minimumDays || 1;
+    const mode = rule.distributionSpec?.teacherClassMode === "cross_class" ? "跨班" : "同一班";
+    headline = `${target}${mode}连堂：每周至少 ${count} 天连续 ${length} 节`;
+    detail = "连续课节按教师的全部任教班级统计；跨班模式要求连续课节至少覆盖两个班。";
+  } else if (code === "teacher_daily_limit" || code === "teacher_gap_free") {
+    mark = "preferred";
+    headline = `${target}工作日每天最多 ${teacherDailyLimitCap(rule)} 节，并保持白天课位连续`;
+    detail = "这是教师负荷与空节控制规则，不会把某一门课钉死在单个课位。";
+  } else if (code === "subject_daytime_parity_pair" || code === "subject_evening_parity_pair") {
+    mark = "fixed";
+    headline = `${target}按单双周在同一课位配对`;
+    detail = "同一网格位置由单周/双周分别承载不同学科，避免两组课位错开。";
+  } else if (code === "class_gap_free") {
+    mark = "fixed";
+    headline = `${target}白天第 1～7 节尽量不留空堂`;
+    detail = "网格表示白天必排范围；第 8、9 节自习位不计入这条规则。";
+  } else if (code === "subject_prefer_early_periods") {
+    mark = "preferred";
+    headline = `${target}优先安排在靠前节次`;
+    detail = `允许最多 ${rule.maxOutsidePreferred ?? rule.quantitySpec?.amount ?? 0} 节落在偏好节次之外。`;
+  } else if (code === "subject_gap_fill_late_periods") {
+    mark = "preferred";
+    headline = `${target}优先填补第 8、9 节活动课位`;
+    detail = "只有前面出现空节时，才会把活动课补进第 1～7 节。";
+  } else if (code === "class_evening_self_study_day") {
+    mark = "allowed";
+    headline = `${target}从候选日期中选择 ${rule.choiceCount || 1} 天保持第 8、9 节自习`;
+    detail = "高亮的是可选自习日，不代表这些日期都会被排成自习。";
+  } else if (code === "teacher_period_minimum") {
+    mark = "fixed";
+    headline = `${target}在选定节次中全周至少安排 ${rule.quantitySpec?.amount || 2} 节`;
+    detail = "这是全周累计下限，不要求集中在同一天。";
+  } else if (code === "slot_teacher_balance") {
+    mark = "preferred";
+    headline = `指定节次由不同教师均衡分担`;
+    detail = `每名教师每周最多承担 ${slotTeacherBalanceCap(rule)} 节，不会锁定某一名教师。`;
+  }
+
+  return { mark, headline, detail, days: effectiveDays, periods: effectivePeriods, isEvening };
+};
+
+function RuleImpactPreview({
+  rule,
+  compact = false,
+}: {
+  rule: GenericScheduleRule;
+  compact?: boolean;
+}) {
+  const model = rulePreviewModel(rule);
+  const daySet = new Set(model.days);
+  const periodSet = new Set(model.periods);
+  const parityPair = ["subject_daytime_parity_pair", "subject_evening_parity_pair"].includes(
+    ruleCodeForRule(rule),
+  ) || rule.cycle === "单周 / 双周";
+  const basePeriods = parityPair && model.periods.length === 0
+    ? (model.isEvening ? ["第10节"] : PERIOD_ENUMS.slice(0, 7))
+    : [...new Set([
+        ...PERIOD_ENUMS.slice(0, model.isEvening ? 10 : 9),
+        ...model.periods,
+      ])];
+  const previewRows = parityPair
+    ? basePeriods.flatMap((period) => [
+        { label: `${model.isEvening && model.periods.length === 0 ? "晚自习" : period} · 单周`, period, parity: "odd" as const },
+        { label: `${model.isEvening && model.periods.length === 0 ? "晚自习" : period} · 双周`, period, parity: "even" as const },
+      ])
+    : basePeriods.map((period) => ({ label: period, period, parity: null }));
+  const markText: Record<RulePreviewMark, string> = {
+    blocked: "禁",
+    allowed: "可",
+    fixed: "定",
+    preferred: "优",
+    scope: "·",
+  };
+  return (
+    <div className={`rule-group-impact-preview${compact ? " is-compact" : ""}`}>
+      <div className="rule-group-impact-head">
+        <div>
+          <span className="rule-group-field-label">规则影响预览</span>
+          <strong>{model.headline}</strong>
+        </div>
+        <Tag color={model.mark === "blocked" ? "red" : model.mark === "fixed" ? "blue" : "gold"}>
+          {rule.priority === "hard" ? "硬约束" : "软目标"}
+        </Tag>
+      </div>
+      <p className="rule-group-impact-detail">{model.detail}</p>
+      {!compact && (
+        <div className="rule-group-impact-grid" aria-label="规则作用课位预览">
+          <div className="rule-group-impact-grid-row is-head">
+            <span>节次</span>
+            {WEEKDAY_ENUMS.map((day) => <span key={day}>{day}</span>)}
+          </div>
+          {previewRows.map((row) => (
+            <div className="rule-group-impact-grid-row" key={row.label}>
+              <span>{row.label}</span>
+              {WEEKDAY_ENUMS.map((day) => {
+                const active = daySet.has(day) && periodSet.has(row.period);
+                return (
+                  <span
+                    key={`${day}-${row.label}`}
+                    className={`rule-group-impact-cell ${active ? `is-${model.mark}` : ""}`}
+                  >
+                    {active ? (row.parity === "odd" ? "单" : row.parity === "even" ? "双" : markText[model.mark]) : ""}
+                  </span>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+      <small>配置影响预览 · 保存后参与排课；最终课表仍需运行排课算法生成。</small>
+    </div>
+  );
+}
 
 function DistributionTargetEditor({
   family,
@@ -2297,7 +2463,7 @@ const migrateLegacyGroup = (group: RuleGroup): RuleGroup => {
             ...rules.slice(sportsIndex + 1),
           ];
   }
-  // 体育：允许课位 + 组合分布合并为一条展示（R08-02）
+  // 学科上下午分布：允许课位 + 组合分布合并为一条展示（R08-02）
   if (rules.some((rule) => rule.id === "R08-02")) {
     const bundled = DEFAULT_RULES.find((rule) => rule.id === "R08-02");
     rules = rules
@@ -2459,6 +2625,24 @@ const migrateLegacyGroup = (group: RuleGroup): RuleGroup => {
           rule_code: "teacher_forbidden_slots" as SchedulingRuleCode,
           title: "本班第五节不排班主任",
           note: "硬约束、白天课：班主任只禁自己当班主任的那个班的第5节（含周六）；在其它班当科任可以排第5节，用来分担科任第5节压力。晚自习不管。",
+        }
+      : rule,
+  );
+  rules = rules.map((rule) =>
+    rule.id === "R05" && rule.title === "数学连堂规则"
+      ? {
+          ...rule,
+          title: "学科连堂",
+          note: "所选学科每周至少有1天安排连续2节，周课时数量以课时管理配置为准。",
+        }
+      : rule,
+  );
+  rules = rules.map((rule) =>
+    rule.id === "R22" && rule.title === "物理历史晚课单双周配对"
+      ? {
+          ...rule,
+          title: "学科晚课单双周配对",
+          note: "同一晚课格内的两组学科按单双周配对；单周/双周对应关系可按配置调整。",
         }
       : rule,
   );
@@ -2641,12 +2825,12 @@ const isMultiNameTargetRule = (rule: GenericScheduleRule) => {
   ) {
     return rule.scope === "学科";
   }
+  if (code === "teacher_consecutive") return rule.scope === "教师";
   if (
     code === "teacher_period_minimum" ||
     code === "teacher_multi_class_evening_adjacent" ||
     code === "teacher_evening_daytime_link" ||
-    code === "teacher_preferred_weekdays" ||
-    code === "teacher_consecutive"
+    code === "teacher_preferred_weekdays"
   ) {
     return rule.scope === "教师";
   }
@@ -2758,8 +2942,9 @@ const canonicalRule = (
         : ("regular" as const),
     week_parity: "all" as const,
   };
-  if (originalCode === "subject_consecutive") {
-    if (targetType !== "subject" || !ids.length) return [fallback()];
+  if (originalCode === "subject_consecutive" || originalCode === "teacher_consecutive") {
+    if ((originalCode === "subject_consecutive" && targetType !== "subject") ||
+      (originalCode === "teacher_consecutive" && targetType !== "teacher") || !ids.length) return [fallback()];
     const blockLength = rule.distributionSpec?.consecutiveLength || 2;
     const minimumDays = rule.distributionSpec?.minimumDays || 1;
     if (blockLength < 2 || minimumDays < 1) return [fallback()];
@@ -2774,6 +2959,9 @@ const canonicalRule = (
         params: {
           minimum_block_length: blockLength,
           minimum_days: minimumDays,
+          ...(originalCode === "teacher_consecutive"
+            ? { class_mode: rule.distributionSpec?.teacherClassMode || "same_class" }
+            : {}),
         },
       },
     ];
@@ -3346,7 +3534,7 @@ const hydrateGroupFromApi = (
       used.add("R04-continuity");
       continue;
     }
-    // 体艺课上下午分布：配套的「允许课位」不单独展示（已绑在一条 UI 规则里）
+    // 学科上下午分布：配套的「允许课位」不单独展示（已绑在一条 UI 规则里）
     if (apiRule.code === "subject_allowed_slots") {
       const allowSubjectIds = apiRule.target?.ids || [];
       const bundledFrom = String(apiRule.params?.bundled_from || "");
@@ -3480,6 +3668,8 @@ const hydrateGroupFromApi = (
               ? "节次课时下限"
               : apiRule.code === "subject_consecutive"
                 ? "要求连堂"
+                : apiRule.code === "teacher_consecutive"
+                  ? "要求连堂"
                 : apiRule.code === "class_slot_pattern"
                   ? "均衡分布"
                   : apiRule.code === "subject_daytime_parity_pair"
@@ -3518,12 +3708,20 @@ const hydrateGroupFromApi = (
             }
           : undefined;
     const distributionSpecForCode =
-      apiRule.code === "subject_consecutive"
+      apiRule.code === "subject_consecutive" || apiRule.code === "teacher_consecutive"
         ? {
             target: "consecutive" as DistributionTarget,
             consecutiveLength:
               Number(apiRule.params?.minimum_block_length) || 2,
             minimumDays: Number(apiRule.params?.minimum_days) || 1,
+            ...(apiRule.code === "teacher_consecutive"
+              ? {
+                  teacherClassMode:
+                    apiRule.params?.class_mode === "cross_class"
+                      ? ("cross_class" as const)
+                      : ("same_class" as const),
+                }
+              : {}),
           }
         : apiRule.code === "class_slot_pattern"
           ? parseSlotPatternFromApi(apiRule)
@@ -3846,12 +4044,14 @@ export default function RuleGroupWorkbench({
   const showSlotTeacherBalanceCap = draftCode === "slot_teacher_balance";
   const showPeriodMinimumAmount = draftCode === "teacher_period_minimum";
   const showSubjectConsecutive = draftCode === "subject_consecutive";
+  const showTeacherConsecutive = draftCode === "teacher_consecutive";
+  const showConsecutive = showSubjectConsecutive || showTeacherConsecutive;
   const showSlotPattern = draftCode === "class_slot_pattern";
   const showPreferEarly = draftCode === "subject_prefer_early_periods";
   const showDistribution =
     !showSlotTeacherBalanceCap &&
     !showPeriodMinimumAmount &&
-    !showSubjectConsecutive &&
+    !showConsecutive &&
     !showSlotPattern &&
     !showPreferEarly &&
     (draftFamily === "distribution" ||
@@ -3866,7 +4066,7 @@ export default function RuleGroupWorkbench({
   const showDaytimeParityLegs = draftCode === "subject_daytime_parity_pair";
   const showWeekdayFields = !showSlotPattern && !showPreferEarly;
   const showPeriodField =
-    !showSelfStudyDayConfig && !showSubjectConsecutive && !showSlotPattern;
+    !showSelfStudyDayConfig && !showConsecutive && !showSlotPattern;
   const configuredWeekdayOptions = useMemo(() => {
     const values = WEEKDAY_OPTIONS.filter((day) =>
       slotOptions.some((slot) => slot.startsWith(`${day} ·`)),
@@ -4008,6 +4208,24 @@ export default function RuleGroupWorkbench({
           minimumDays: 1,
         },
         note: "勾选学科；可限制星期。每周至少 M 天出现连续 L 节该学科（默认 2 节×1 天）。",
+      });
+    }
+    if (template.id === "teacher_consecutive") {
+      Object.assign(next, {
+        scope: "教师" as RuleScope,
+        target: "",
+        weekday: "周一至周五",
+        period: UNRESOLVED_PERIOD,
+        quantity: "不限定",
+        priority: "hard" as RulePriority,
+        status: "unresolved" as RuleStatus,
+        distributionSpec: {
+          target: "consecutive" as DistributionTarget,
+          consecutiveLength: 2,
+          minimumDays: 1,
+          teacherClassMode: "same_class" as const,
+        },
+        note: "勾选教师；可选择同一班连堂或跨班连堂。每周至少 M 天出现连续 L 节。",
       });
     }
     if (template.id === "teacher_period_minimum") {
@@ -4393,9 +4611,9 @@ export default function RuleGroupWorkbench({
         return;
       }
     }
-    if (savingCode === "subject_consecutive") {
+    if (savingCode === "subject_consecutive" || savingCode === "teacher_consecutive") {
       if (!draft.target.trim()) {
-        message.warning("请至少选择一个学科");
+        message.warning(savingCode === "teacher_consecutive" ? "请至少选择一位教师" : "请至少选择一个学科");
         return;
       }
       if (!weekdaySelections(draft.weekday).length) {
@@ -4487,6 +4705,7 @@ export default function RuleGroupWorkbench({
         savingCode === "slot_teacher_role_required" ||
         (savingCode === "teacher_period_minimum" && draft.target.trim()) ||
         (savingCode === "subject_consecutive" && draft.target.trim()) ||
+        (savingCode === "teacher_consecutive" && draft.target.trim()) ||
         (savingCode === "class_slot_pattern" && draft.target.trim()) ||
         (savingCode === "subject_daytime_parity_pair" &&
           Boolean(
@@ -4743,11 +4962,12 @@ export default function RuleGroupWorkbench({
       </Modal>
 
       <Modal
+        className="rule-type-picker-modal"
         title="选择内部规则类型"
         open={typePickerOpen}
         onCancel={() => setTypePickerOpen(false)}
         footer={null}
-        width={760}
+        width={1080}
         destroyOnClose
         zIndex={5000}
         getContainer={() => document.body}
@@ -4934,7 +5154,7 @@ export default function RuleGroupWorkbench({
               <label>
                 <span className="rule-group-field-label">
                   规则名称
-                  <Tooltip title="给这条规则起一个便于识别的名称，例如：数学连堂规则">
+                  <Tooltip title="给这条规则起一个便于识别的名称，例如：学科连堂">
                     <span className="rule-group-help">?</span>
                   </Tooltip>
                 </span>
@@ -5004,6 +5224,7 @@ export default function RuleGroupWorkbench({
                       ? "选择教师"
                       : draftCode === "subject_allowed_slots" ||
                           draftCode === "subject_consecutive" ||
+                          draftCode === "teacher_consecutive" ||
                           draftCode === "class_slot_pattern" ||
                           (draftCode === "slot_forbidden" &&
                             draftScope === "学科")
@@ -5022,6 +5243,8 @@ export default function RuleGroupWorkbench({
                             ? "可多选教师；也可选「多班教师」覆盖教多个班的老师。"
                             : draftCode === "subject_consecutive"
                               ? "可多选学科；每个学科各自要求每周至少 M 天连堂。"
+                              : draftCode === "teacher_consecutive"
+                                ? "可多选教师；每位教师各自要求每周至少 M 天连堂。"
                               : draftCode === "class_slot_pattern"
                                 ? "可多选；保存时每个学科拆成一条课位组合规则。"
                                 : draftCode === "subject_allowed_slots"
@@ -5067,6 +5290,7 @@ export default function RuleGroupWorkbench({
                             draftScope === "班级"
                           ? "请选择班级（可多选）"
                           : draftCode === "subject_consecutive" ||
+                              draftCode === "teacher_consecutive" ||
                               draftCode === "class_slot_pattern" ||
                               draftCode === "subject_allowed_slots" ||
                               isMultiNameTargetRule(draft)
@@ -5462,15 +5686,35 @@ export default function RuleGroupWorkbench({
                   </Space.Compact>
                 </label>
               )}
-              {showSubjectConsecutive && (
+              {showConsecutive && (
                 <div className="rule-group-form-field">
                   <span className="rule-group-field-label">
-                    连堂要求
-                    <Tooltip title="每周至少有多少天出现连续若干节该学科；节次按整天白天课统计，无需再选具体节次">
+                    {showTeacherConsecutive ? "教师连堂要求" : "学科连堂要求"}
+                    <Tooltip title={showTeacherConsecutive ? "教师连堂可以选择同一班连续授课，或在相邻课节切换到另一个班。" : "每周至少有多少天出现连续若干节该学科；节次按整天白天课统计，无需再选具体节次"}>
                       <span className="rule-group-help">?</span>
                     </Tooltip>
                   </span>
                   <div className="rule-group-distribution-grid">
+                    {showTeacherConsecutive && (
+                      <label>
+                        <span>连堂范围</span>
+                        <Select
+                          value={draft.distributionSpec?.teacherClassMode || "same_class"}
+                          options={[
+                            { value: "same_class", label: "同一班连堂" },
+                            { value: "cross_class", label: "跨班连堂" },
+                          ]}
+                          onChange={(value) =>
+                            handleDistributionChange({
+                              target: "consecutive",
+                              teacherClassMode: value,
+                              consecutiveLength: draft.distributionSpec?.consecutiveLength || 2,
+                              minimumDays: draft.distributionSpec?.minimumDays || 1,
+                            })
+                          }
+                        />
+                      </label>
+                    )}
                     <label>
                       <span>连续长度</span>
                       <Space.Compact block>
@@ -5561,6 +5805,7 @@ export default function RuleGroupWorkbench({
                 </small>
               </div>
               )}
+              {!showSlotPattern && <RuleImpactPreview rule={draft} />}
             </div>
             <div className="rule-group-priority">
               <span>优先级</span>

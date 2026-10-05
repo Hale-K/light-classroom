@@ -67,7 +67,7 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-School-Code", "X-Trace-Id"],
+    allow_headers=["Authorization", "Content-Type", "X-School-Code", "X-Trace-Id", "X-Page-Task"],
     expose_headers=[TRACE_HEADER],
 )
 
@@ -146,6 +146,8 @@ app.include_router(student_import.router, prefix="/api/v1")
 app.include_router(file_center.router, prefix="/api/v1")
 app.include_router(ai_provider.router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")
+from app.api.v1.page_agent import router as page_agent_router
+app.include_router(page_agent_router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
 # from app.api.v1 import exam, grading, ...

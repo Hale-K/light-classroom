@@ -30,6 +30,10 @@ const MENU_PATH_OVERRIDE: Record<string, string> = {
   'teacher-classes': '/teacher-classes',
   'teacher-students': '/teacher-students',
 }
+const MENU_NAME_OVERRIDE: Record<string, string> = {
+  'teacher-classes': '学生管理',
+  'teacher-students': '选课审核',
+}
 function requiredMenuPath(pathname: string): string | null {
   if (pathname === '/' || pathname === '/onboarding') return null
   if (pathname.startsWith('/grading/') || pathname.startsWith('/stats/')) return '/exams'
@@ -115,6 +119,7 @@ export default function MainLayout() {
           ...group,
           children: (group.children || []).map((item) => ({
             ...item,
+            title: MENU_NAME_OVERRIDE[item.key] || item.title,
             path: MENU_PATH_OVERRIDE[item.key] || item.path,
           })),
         }))

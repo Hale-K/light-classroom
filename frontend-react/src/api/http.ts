@@ -72,8 +72,12 @@ function isAdminUrl(url?: string): boolean {
   return !!url && url.startsWith('/admin')
 }
 
-function isStudentUrl(url?: string): boolean {
-  return !!url && url.startsWith('/student-auth')
+/**
+ * 学生端会话接口与学校管理端的学生账号管理接口共用 `/student-auth` 前缀，
+ * 不能只按前缀判断，否则管理端开通账号时会误带学生 token，并在 401 后跳到学生登录页。
+ */
+function isStudentSessionUrl(url?: string): boolean {
+  return !!url && /^\/student-auth\/(login|schools|me|context|choice)(?:\/|$)/.test(url)
 }
 
 function newTraceId(): string {
@@ -103,7 +107,7 @@ function createHttp(baseURL: string): AxiosInstance {
   http.interceptors.request.use((config) => {
     const token = isAdminUrl(config.url)
       ? resolver.getAdminToken()
-      : isStudentUrl(config.url)
+      : isStudentSessionUrl(config.url)
         ? localStorage.getItem('zh_student_token')
         : resolver.getToken()
     if (token) config.headers.Authorization = `Bearer ${token}`
@@ -126,7 +130,7 @@ function createHttp(baseURL: string): AxiosInstance {
         || error?.config?.headers?.['X-Trace-Id']
       if (status === 401) {
         const detail = normalizeErrorDetail(error?.response?.data?.detail)
-        if (isStudentUrl(error?.config?.url)) {
+        if (isStudentSessionUrl(error?.config?.url)) {
           localStorage.removeItem('zh_student_token')
           localStorage.removeItem('zh_student_user')
           window.location.href = '/student/login'

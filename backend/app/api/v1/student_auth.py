@@ -11,7 +11,7 @@ from app.api.v1.gaokao import _selected_subject_ids
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db.session import AsyncSessionLocal, get_session
 from app.models.gaokao import GaokaoScheme, StudentCredential, StudentSubjectChoice
-from app.models.org import Grade, Student, Subject, Tenant
+from app.models.org import Grade, Student, Subject, Tenant, TenantConfig
 from app.services.org.cohort import current_academic_year
 
 router = APIRouter(prefix="/student-auth", tags=["学生端"])
@@ -72,6 +72,16 @@ async def _ensure_default_scheme(session: AsyncSession, tenant_id: int) -> Gaoka
 class StudentLoginIn(BaseModel):
     login_name: str = Field(min_length=1, max_length=50)
     password: str = Field(min_length=1)
+
+
+@router.get("/schools", summary="学生端可登录学校列表")
+async def public_schools(session: AsyncSession = Depends(_public_session)):
+    """给学生登录页提供可选学校，避免学生记忆学校代码。"""
+    rows = (await session.execute(select(Tenant).order_by(Tenant.name, Tenant.id))).scalars().all()
+    return {"code": 0, "message": "ok", "data": [
+        {"code": school.code, "name": school.name, "province": school.province}
+        for school in rows
+    ]}
 
 
 class ProvisionStudentAccountsIn(BaseModel):
@@ -137,6 +147,8 @@ async def provision_accounts(
         StudentCredential.tenant_id == tenant_id,
         StudentCredential.student_id.in_(student_ids) if student_ids else False,
     ))).scalars().all()}
+    # 同一批次使用同一个初始密码；只生成一次 bcrypt 哈希，避免 474 名学生逐个重复计算导致请求超时。
+    password_hash = get_password_hash(body.initial_password)
     created = 0
     reset = 0
     for student in students:
@@ -146,12 +158,12 @@ async def provision_accounts(
         if credential is None:
             session.add(StudentCredential(
                 tenant_id=tenant_id, student_id=student.id,
-                login_name=student.student_no, password_hash=get_password_hash(body.initial_password),
+                login_name=student.student_no, password_hash=password_hash,
             ))
             created += 1
         else:
             credential.status = "active"
-            credential.password_hash = get_password_hash(body.initial_password)
+            credential.password_hash = password_hash
             reset += 1
     await session.commit()
     return {"code": 0, "message": "ok", "data": {
@@ -175,9 +187,14 @@ async def context(
     student: Student = Depends(get_current_student),
     session: AsyncSession = Depends(get_session),
 ):
+    config = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == student.tenant_id,
+        TenantConfig.config_key == "academic_years",
+    ))).scalars().first()
+    config_value = config.config_value if config and isinstance(config.config_value, dict) else {}
     return {"code": 0, "message": "ok", "data": {
         "academic_year": await current_academic_year(session, student.tenant_id),
-        "term": "1",
+        "term": str(config_value.get("current_term", "1")),
         "student": {"id": student.id, "name": student.name, "student_no": student.student_no,
                     "grade_id": student.grade_id, "class_id": student.class_id},
     }}
