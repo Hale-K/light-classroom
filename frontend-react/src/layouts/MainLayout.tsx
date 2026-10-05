@@ -1,7 +1,7 @@
 ﻿import { App, Button, Dropdown, Result, Segmented, Spin } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
-import { authApi } from '@/api'
+import { authApi, type AcademicYearsSettings } from '@/api'
 import AssistantDock from '@/components/AssistantDock'
 import Icon from '@/components/Icon'
 import OnboardingGuide from '@/components/OnboardingGuide'
@@ -44,14 +44,9 @@ function requiredMenuPath(pathname: string): string | null {
   return MENU_GATED_PATHS.has(pathname) ? pathname : null
 }
 
-/** 当前学年·学期（8 月前后切换） */
-function academicTerm(): string {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
-  const startYear = month >= 8 ? year : year - 1
-  const term = month >= 2 && month < 8 ? 2 : 1
-  return `${startYear}—${startYear + 1} 学年 · 第 ${term} 学期`
+function academicTerm(settings: AcademicYearsSettings | null): string {
+  if (!settings?.current_academic_year) return '学年学期读取中'
+  return `${settings.current_academic_year} 学年 · 第 ${settings.current_term} 学期`
 }
 
 /** 角色展示名：优先用当前生效角色（activeRole），否则回退 user.role */
@@ -102,6 +97,7 @@ export default function MainLayout() {
   const activeRole = useAuthStore((s) => s.activeRole)
   const setActiveRole = useAuthStore((s) => s.setActiveRole)
   const [menus, setMenus] = useState<MenuNode[]>([])
+  const [academicSettings, setAcademicSettings] = useState<AcademicYearsSettings | null>(null)
   const [menusLoaded, setMenusLoaded] = useState(false)
   const [menusError, setMenusError] = useState(false)
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => readCollapsedGroups())
@@ -132,6 +128,20 @@ export default function MainLayout() {
       })
       .finally(() => setMenusLoaded(true))
   }, [activeRole])
+
+  useEffect(() => {
+    let active = true
+    authApi.academicYears()
+      .then((settings) => {
+        if (active) setAcademicSettings(settings)
+      })
+      .catch(() => {
+        if (active) setAcademicSettings(null)
+      })
+    return () => {
+      active = false
+    }
+  }, [])
 
   const effectiveRole = activeRole || user?.role
   // 教师工作台模式：任课教师视角，不显示教导主任+的高级菜单
@@ -293,7 +303,7 @@ export default function MainLayout() {
               <span className="breadcrumb-sep">/</span>
               <strong>{currentTitle}</strong>
             </div>
-            <span className="header-context">{academicTerm()}</span>
+            <span className="header-context">{academicTerm(academicSettings)}</span>
           </div>
           <div className="header-right">
             {teacherMode &&
