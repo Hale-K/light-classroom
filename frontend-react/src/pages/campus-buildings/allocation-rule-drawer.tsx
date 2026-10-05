@@ -34,6 +34,8 @@ export default function AllocationRuleDrawer({
   buildings,
   rooms = [],
   viewRule,
+  currentAcademicYear,
+  currentTerm,
   onClose,
   onChanged,
 }: {
@@ -42,6 +44,8 @@ export default function AllocationRuleDrawer({
   buildings: Building[]
   rooms?: RoomResource[]
   viewRule?: ResourceAllocationRule
+  currentAcademicYear: string
+  currentTerm: '1' | '2'
   onClose: () => void
   onChanged: () => Promise<void>
 }) {
@@ -78,10 +82,11 @@ export default function AllocationRuleDrawer({
         const firstYear = current ? Object.values(current.grade_years)[0] : undefined
         if (firstYear) form.setFieldValue('academic_year', firstYear)
       }
+      form.setFieldsValue({ academic_year: currentAcademicYear, term: currentTerm })
     }).catch(() => {
       setGradeUnitOptions([])
     })
-  }, [form, open, viewRule])
+  }, [currentAcademicYear, currentTerm, form, open, viewRule])
   const campusId = Form.useWatch('campus_id', form)
   const normalizedValues = async () => {
     const values = await form.validateFields()
@@ -181,7 +186,7 @@ export default function AllocationRuleDrawer({
     <Form
       form={form}
       layout="vertical"
-      initialValues={{ term: '1', allocation_mode: 'shared' }}
+      initialValues={{ term: currentTerm, academic_year: currentAcademicYear, allocation_mode: 'shared' }}
       requiredMark
     >
       <div className="facility-form-grid">

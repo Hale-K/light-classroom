@@ -617,7 +617,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
         {!!filteredResourceRooms.length && <div className="facility-resource-pagination"><span>共 {filteredResourceRooms.length} 间教室</span><Pagination current={resourcePage} pageSize={resourcePageSize} total={filteredResourceRooms.length} showTotal={(total, range) => `${range[0]}-${range[1]} / 共 ${total} 间`} showSizeChanger pageSizeOptions={[12, 24, 36, 48]} onChange={(nextPage, nextPageSize) => { const normalizedPageSize = nextPageSize || resourcePageSize; setResourcePageSize(normalizedPageSize); setResourcePage(normalizedPageSize !== resourcePageSize ? 1 : nextPage) }} /></div>}
       </div>}
     </section>}
-    <AllocationRuleDrawer open={ruleOpen} viewRule={viewAllocationRule} rooms={rooms} campuses={data?.campuses || []} buildings={data?.buildings || []} onClose={() => { setRuleOpen(false); setViewAllocationRule(undefined) }} onChanged={load} />
+    <AllocationRuleDrawer open={ruleOpen} viewRule={viewAllocationRule} currentAcademicYear={resourceAcademicYear} currentTerm={resourceTerm} rooms={rooms} campuses={data?.campuses || []} buildings={data?.buildings || []} onClose={() => { setRuleOpen(false); setViewAllocationRule(undefined) }} onChanged={load} />
     <Modal title="新增校区" open={campusOpen} onCancel={() => setCampusOpen(false)} onOk={() => campusForm.submit()} confirmLoading={saving} okText="创建">
       <Form form={campusForm} layout="vertical" requiredMark={false} onFinish={createCampus}>
         <Form.Item name="name" label="校区名称" rules={[{ required: true, message: '请输入校区名称' }]}><Input placeholder="例如：本部校区" /></Form.Item>
