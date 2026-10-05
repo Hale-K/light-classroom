@@ -13,8 +13,8 @@ import { runAssistantTool, type JumpLink, type ToolExtra } from '@/assistant/run
 import { assistLog, newMsgId } from '@/assistant/trace'
 import { hereOf, jumpLabel, placeLabel, samePlace } from '@/assistant/place'
 import { decideJumpReply } from '@/assistant/jump-intent'
-import { executeSubjectPageTask, prepareSubject } from '@/assistant/pageSubjectAgent'
-import { isSubjectCreationRequest, isSubjectChoiceReply, isSubjectTaskCancellation, readExplicitSubjectName, readPendingSubjectDraft, type SubjectDraft } from '@/assistant/subjectTask'
+import { classifyPageIntent, executeSubjectPageTask, prepareSubject } from '@/assistant/pageSubjectAgent'
+import { isSubjectCreationRequest, isSubjectChoiceReply, isSubjectTaskCancellation, mayRequestPageAction, readExplicitSubjectName, readPendingSubjectDraft, type SubjectDraft } from '@/assistant/subjectTask'
 import { pageSnapshot, type AssistantTask } from '@/assistant/skills'
 import './assistant-dock.css'
 
@@ -748,6 +748,34 @@ export default function AssistantDock() {
     }
   }
 
+  const runPageIntentConversation = async (content: string, mid: string) => {
+    const controller = new AbortController()
+    abortRef.current = controller
+    busyRef.current = true
+    setChatting(true)
+    try {
+      const intent = await classifyPageIntent(content, controller.signal)
+      if (controller.signal.aborted) return
+      if (intent === 'create_subject') {
+        void runSubjectConversation(content, mid)
+        return
+      }
+      commitThread(prev => replaceThinkBot(prev, { role: 'bot', text: '', mid }))
+      abortRef.current = null
+      busyRef.current = false
+      setChatting(false)
+      void runLoop()
+    } catch {
+      if (controller.signal.aborted) return
+      // Keep existing chat available if intent detection/model routing fails.
+      commitThread(prev => replaceThinkBot(prev, { role: 'bot', text: '', mid }))
+      abortRef.current = null
+      busyRef.current = false
+      setChatting(false)
+      void runLoop()
+    }
+  }
+
   const send = (text?: string) => {
     const content = (text ?? draft).trim()
     if (!content) return
@@ -766,7 +794,7 @@ export default function AssistantDock() {
       const name = lastUser && isSubjectCreationRequest(lastUser.text) ? readExplicitSubjectName(lastUser.text) : null
       if (name) subjectDraftRef.current = { name, course_type: null, evening_study_allowed: null }
     }
-    if (!busyRef.current && (subjectDraftRef.current || isSubjectCreationRequest(content))) {
+    if (!busyRef.current && subjectDraftRef.current) {
       if (isSubjectTaskCancellation(content)) {
         subjectDraftRef.current = null
         sessionStorage.removeItem(subjectStorageKey)
@@ -775,6 +803,11 @@ export default function AssistantDock() {
       }
       commitThread(prev => upsertThink([...prev, { role: 'user', text: content, mid }], '正在校验科目数据'))
       void runSubjectConversation(content, mid)
+      return
+    }
+    if (!busyRef.current && mayRequestPageAction(content)) {
+      commitThread(prev => upsertThink([...prev, { role: 'user', text: content, mid }], '正在识别操作意图'))
+      void runPageIntentConversation(content, mid)
       return
     }
     assistLog(mid, busyRef.current ? 'steer' : 'followup', content.slice(0, 80))
