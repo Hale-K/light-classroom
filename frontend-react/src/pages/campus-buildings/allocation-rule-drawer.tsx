@@ -68,6 +68,8 @@ export default function AllocationRuleDrawer({
   )
   useEffect(() => {
     if (!open || viewRule) return
+    // 规则的适用范围跟随系统当前学年学期，避免在不同页面上下文间误存错期次。
+    form.setFieldsValue({ academic_year: currentAcademicYear, term: currentTerm })
     void Promise.all([authApi.academicYears(), organizationApi.tree()]).then(([settings, tree]) => {
       const units = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'grade_group' && item.status === 'active' && item.cohort_label)
       setGradeUnits(units)
@@ -230,8 +232,8 @@ export default function AllocationRuleDrawer({
         </Form.Item>
       </div>
       <div className="facility-form-grid">
-        <Form.Item name="academic_year" label="适用学年" rules={[{ required: true, message: '请选择适用学年' }]}><Select options={academicYearOptions} placeholder="选择学年" /></Form.Item>
-        <Form.Item name="term" label="适用学期" rules={[{ required: true, message: '请选择适用学期' }]}><Select options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} /></Form.Item>
+        <Form.Item name="academic_year" label="适用学年" extra="来自系统设置" rules={[{ required: true, message: '未读取到当前学年' }]}><Select disabled options={academicYearOptions} placeholder="读取当前学年" /></Form.Item>
+        <Form.Item name="term" label="适用学期" extra="来自系统设置" rules={[{ required: true, message: '未读取到当前学期' }]}><Select disabled options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} placeholder="读取当前学期" /></Form.Item>
       </div>
       <div className="facility-form-grid">
         <Form.Item name="campus_id" label="校区" rules={[{ required: true, message: '请选择校区' }]}><Select options={campuses.map((item) => ({ value: item.id, label: item.name }))} /></Form.Item>
