@@ -1,6 +1,17 @@
 from app.ai.conversations.projector import project_messages, project_summary, project_state
 
 
+def test_repeated_greeting_remains_latest_user_turn():
+    messages = [
+        {"role": "user", "content": "检查排课准备情况"},
+        {"role": "user", "content": "你好"},
+        {"role": "assistant", "content": "你好，有什么能帮到你"},
+        {"role": "user", "content": "你好"},
+    ]
+    assert project_messages(messages) == messages
+    assert project_messages(project_messages(messages)) == messages
+
+
 def test_project_messages_excludes_operational_and_degraded_assistant_bubbles():
     messages = [
         {"role": "user", "content": "帮我检查排课准备"},

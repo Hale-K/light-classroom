@@ -75,7 +75,9 @@ def project_messages(
         candidate = {**item, "role": role, "content": content}
         if is_model_visible(candidate):
             compact = {"role": role, "content": content}
-            if not any(existing == compact for existing in projected):
+            # Repeated user messages are new turns, not duplicate transport results.
+            # Dropping one can leave an old assistant answer as the latest message.
+            if role == "user" or not any(existing == compact for existing in projected):
                 projected.append(compact)
     if limit is not None:
         projected = projected[-limit:]
