@@ -1,6 +1,6 @@
 ﻿import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { App, Button, Checkbox, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd'
+import { App, Button, Checkbox, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Segmented, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd'
 import type { TableProps, MenuProps } from 'antd'
 import dayjs from 'dayjs'
 import { authApi, fileCenterApi, orgApi, schedulingApi } from '@/api'
@@ -25,15 +25,16 @@ import type {
 } from '@/types'
 import RuleDesigner from './RuleDesigner'
 import { setAssistantContext, clearAssistantContext } from '@/assistant/context'
+import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 import RuleGroupWorkbench, {
   ruleGroupScopeLabel,
   type RuleGroup,
 } from './RuleGroupWorkbench'
 import GenerationDiagnosisDrawer from './GenerationDiagnosisDrawer'
-import GenerationWorkspace from './GenerationWorkspace'
-import CourseHoursPanel from './course-hours'
-import ScheduleVerifyWorkbench from './ScheduleVerifyWorkbench'
+import CourseHoursPanel from './hours-management'
 import SlotStructurePanel from './SlotStructurePanel'
+import WalkSchedulePanel from './WalkSchedulePanel'
+import WalkTeachingAssignments from './walk-teaching-assignments'
 import {
   BUILTIN_PERIOD_PLANS,
   DEFAULT_GRID_CONFIG,
@@ -79,6 +80,7 @@ export default function SchedulingView() {
   const [genSummary, setGenSummary] = useState('')
   const [genPercent, setGenPercent] = useState(0)
   const [genElapsed, setGenElapsed] = useState(0)
+  const [genElapsedLabel, setGenElapsedLabel] = useState('已用时间')
   const [genSolutions, setGenSolutions] = useState(0)
   const [genDiagnosis, setGenDiagnosis] = useState<GenerationDiagnosis | null>(null)
   const [genTrace, setGenTrace] = useState<GenTraceEvent[]>([])
@@ -87,14 +89,12 @@ export default function SchedulingView() {
     token: number
   } | null>(null)
   const [diagOpen, setDiagOpen] = useState(false)
-  const [generationWorkspaceOpen, setGenerationWorkspaceOpen] = useState(false)
   const [ruleCatalogEpoch, setRuleCatalogEpoch] = useState(0)
   useEffect(() => {
     const refreshRules = () => setRuleCatalogEpoch((n) => n + 1)
     window.addEventListener('lc-assistant-rules-saved', refreshRules)
     return () => window.removeEventListener('lc-assistant-rules-saved', refreshRules)
   }, [])
-  const [verifyVisible, setVerifyVisible] = useState(false)
   const lastGenerateRef = useRef<{ classIds?: number[]; ruleGroupId?: string }>({})
   const genWallClockRef = useRef<number | null>(null)
 
@@ -120,8 +120,20 @@ export default function SchedulingView() {
 
   const [activeTab, setActiveTab] = useState<'hours' | 'slots' | 'rules' | 'assignments' | 'schedule'>('slots')
   const [searchParams, setSearchParams] = useSearchParams()
+  const assignmentMode = searchParams.get('assignmentMode') === 'walk' ? 'walk' : 'admin'
+  const [timetableMode, setTimetableMode] = useState<'administrative' | 'walk_class'>('administrative')
+  const [scheduleViewMode, setScheduleViewMode] = useState<'administrative' | 'walk'>('administrative')
+  const [gridGradeId, setGridGradeId] = useState<number | undefined>(Number(searchParams.get('grade')) || undefined)
+  const [loadingGrid, setLoadingGrid] = useState(false)
   useEffect(() => {
     const tab = searchParams.get('tab')
+    if (tab === 'walk') {
+      const next = new URLSearchParams(searchParams)
+      next.set('tab', 'slots')
+      next.delete('slotMode')
+      setSearchParams(next, { replace: true })
+      return
+    }
     if (tab === 'hours' || tab === 'slots' || tab === 'rules' || tab === 'assignments' || tab === 'schedule') {
       setActiveTab(tab)
       return
@@ -130,6 +142,13 @@ export default function SchedulingView() {
     next.set('tab', 'slots')
     setSearchParams(next, { replace: true })
   }, [searchParams, setSearchParams])
+
+  useEffect(() => {
+    if (timetableMode !== 'administrative' || assignmentMode !== 'walk') return
+    const next = new URLSearchParams(searchParams)
+    next.delete('assignmentMode')
+    setSearchParams(next, { replace: true })
+  }, [assignmentMode, searchParams, setSearchParams, timetableMode])
 
   const [resources, setResources] = useState<SchedulingResources>({
     teachers: [],
@@ -153,8 +172,9 @@ export default function SchedulingView() {
   const [appliedAssignKeyword, setAppliedAssignKeyword] = useState('')
   const [assignPage, setAssignPage] = useState(1)
   const [assignPageSize, setAssignPageSize] = useState(10)
+  const [refreshingAssignments, setRefreshingAssignments] = useState(false)
   const [academicYear, setAcademicYear] = useState(`${SCHOOL_YEAR}-${SCHOOL_YEAR + 1}`)
-  const [term, setTerm] = useState(NOW.getMonth() >= 1 && NOW.getMonth() < 7 ? '2' : '1')
+  const [term, setTerm] = useState<'1' | '2'>(NOW.getMonth() >= 1 && NOW.getMonth() < 7 ? '2' : '1')
   const [weekStart] = useState<string>(localDateValue(MONDAY))
   const [gridConfigVisible, setGridConfigVisible] = useState(false)
   const [savingGridConfig, setSavingGridConfig] = useState(false)
@@ -320,9 +340,18 @@ export default function SchedulingView() {
     () => filteredAssignments.slice((assignPage - 1) * assignPageSize, assignPage * assignPageSize),
     [filteredAssignments, assignPage, assignPageSize],
   )
-  const handleSearchAssignment = () => {
+  const handleSearchAssignment = async () => {
     setAppliedAssignKeyword(assignKeyword)
     setAssignPage(1)
+    setRefreshingAssignments(true)
+    try {
+      const data = await schedulingApi.resources({ academic_year: academicYear, term })
+      setResources(data)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '任教关系刷新失败')
+    } finally {
+      setRefreshingAssignments(false)
+    }
   }
   const resetAssignmentFilters = () => {
     setAssignKeyword('')
@@ -398,19 +427,29 @@ export default function SchedulingView() {
     return `${className}需要 ${issue.requested} 节，当前条件最多可排 ${issue.capacity} 节`
   }
 
-  const loadResources = async () => {
-    const [data, strategyOptions, academicSettings, gradeList] = await Promise.all([
-      schedulingApi.resources(),
+  const loadResources = async (scope?: { academicYear: string; term: '1' | '2' }) => {
+    const [strategyOptions, academicSettings, gradeList, schoolSettings] = await Promise.all([
       schedulingApi.strategies(),
       authApi.academicYears(),
       orgApi.grades().catch(() => [] as Grade[]),
+      authApi.school(),
     ])
+    const scopedYear = scope?.academicYear || academicSettings.current_academic_year || academicYear
+    const scopedTerm = scope?.term || academicSettings.current_term || term
+    const data = await schedulingApi.resources({ academic_year: scopedYear, term: scopedTerm })
     setResources(data)
+    setTimetableMode(schoolSettings.timetable_mode || 'administrative')
     setStrategies(strategyOptions)
     setGrades(gradeList)
-    if (academicSettings.current_academic_year) setAcademicYear(academicSettings.current_academic_year)
-    if (academicSettings.current_term) setTerm(academicSettings.current_term)
-    setSelectedClassId((prev) => prev ?? data.classes[0]?.id)
+    setGridGradeId((id) => gradeList.some((grade) => grade.id === id) ? id : data.classes[0]?.grade_id ?? gradeList[0]?.id)
+    if (scope) {
+      setAcademicYear(scopedYear)
+      setTerm(scopedTerm)
+    } else {
+      if (academicSettings.current_academic_year) setAcademicYear(academicSettings.current_academic_year)
+      if (academicSettings.current_term) setTerm(academicSettings.current_term)
+    }
+    setSelectedClassId((prev) => data.classes.some((cls) => cls.id === prev) ? prev : data.classes[0]?.id)
   }
 
   const loadScopeRules = async () => {
@@ -744,10 +783,11 @@ export default function SchedulingView() {
   }
 
   const saveGridConfig = async () => {
+    if (!gridGradeId) { message.warning('请先选择年级'); return }
     setSavingGridConfig(true)
     try {
       const payload = normalizeGridConfig(gridConfig)
-      const saved = await schedulingApi.saveGridConfig({ ...payload, academic_year: academicYear, term })
+      const saved = await schedulingApi.saveGridConfig({ ...payload, academic_year: academicYear, term, grade_id: gridGradeId })
       setGridConfig(normalizeGridConfig({ ...saved, configured: true }))
       setGridConfigured(true)
       setGridConfigVisible(false)
@@ -761,6 +801,12 @@ export default function SchedulingView() {
 
   useEffect(() => {
     void loadResources()
+  }, [])
+
+  useEffect(() => {
+    const refreshScope = () => { void loadResources() }
+    window.addEventListener(ACADEMIC_CONTEXT_CHANGED, refreshScope)
+    return () => window.removeEventListener(ACADEMIC_CONTEXT_CHANGED, refreshScope)
   }, [])
 
   useEffect(() => {
@@ -778,14 +824,26 @@ export default function SchedulingView() {
   }, [])
 
   useEffect(() => {
-    void schedulingApi.gridConfig({ academic_year: academicYear, term })
+    if (!gridGradeId) return
+    let active = true
+    setLoadingGrid(true)
+    setGridConfigured(false)
+    setGridConfig(DEFAULT_GRID_CONFIG)
+    void schedulingApi.gridConfig({ academic_year: academicYear, term, grade_id: gridGradeId })
       .then((config) => {
+        if (!active) return
         setGridConfig(normalizeGridConfig(config))
         setGridConfigured(Boolean(config.configured))
-        if (!config.configured) setActiveTab('slots')
       })
-      .catch(() => undefined)
-  }, [academicYear, term])
+      .catch((error) => { if (active) message.error(error instanceof Error ? error.message : '课位结构加载失败') })
+      .finally(() => { if (active) setLoadingGrid(false) })
+    return () => { active = false }
+  }, [academicYear, term, gridGradeId, message])
+
+  useEffect(() => {
+    const grade = resources.classes.find((item) => item.id === selectedClassId)?.grade_id
+    if (grade) setGridGradeId(grade)
+  }, [selectedClassId, resources.classes])
 
   useEffect(() => {
     if (activeTab !== 'schedule') return
@@ -816,6 +874,7 @@ export default function SchedulingView() {
       const signature = payloadSignature()
       const savedGrid = await schedulingApi.saveGridConfig({
         ...normalizeGridConfig(ruleGridConfig(conditions)),
+        grade_id: gridGradeId,
         academic_year: academicYear,
         term,
       })
@@ -964,6 +1023,7 @@ export default function SchedulingView() {
     const generationConfig = activeRuleTemplate?.config || conditions
     lastGenerateRef.current = { classIds, ruleGroupId }
     genWallClockRef.current = Date.now()
+    setGenElapsedLabel('已用时间')
     setGenerating(true)
     setGenStage('validating')
     setFailedStageIndex(0)
@@ -974,7 +1034,6 @@ export default function SchedulingView() {
     setGenElapsed(0)
     setGenSolutions(0)
     setGenSummary('已提交生成任务，等待进度…')
-    setGenerationWorkspaceOpen(true)
     setDiagOpen(true)
     try {
       const payload = {
@@ -1001,7 +1060,11 @@ export default function SchedulingView() {
     void schedulingApi.activeGenerateJob({ academic_year: academicYear, term })
       .then(async (job) => {
         if (!job || controller.signal.aborted) return
-        genWallClockRef.current = Date.parse(job.created_at) || Date.now()
+        // created_at includes queueing and time before a service restart; it is not solve duration.
+        // Rebase the visible timer when this page attaches to a task already in progress.
+        genWallClockRef.current = Date.now()
+        setGenElapsed(0)
+        setGenElapsedLabel('接入后计时')
         setGenerating(true)
         setGenStage(
           job.stage === 'generating' || job.stage === 'refreshing'
@@ -1025,14 +1088,6 @@ export default function SchedulingView() {
     // 当前学年学期变化时重新寻找该范围内的活动任务。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [academicYear, term])
-
-  const openVerifyWorkbench = () => {
-    if (!calendar.length) {
-      message.warning('请先生成课表后再做反向校验')
-      return
-    }
-    setVerifyVisible(true)
-  }
 
   const openGenerationRulePreview = async () => {
     try {
@@ -1261,34 +1316,10 @@ export default function SchedulingView() {
 
   return (
     <div className="sk-page">
-      <GenerationWorkspace
-        open={generationWorkspaceOpen}
-        generating={generating}
-        stage={genStage}
-        percent={genPercent}
-        elapsed={genElapsed}
-        solutions={genSolutions}
-        summary={genSummary}
-        trace={genTrace}
-        assignments={resources.assignments.filter((item) => item.academic_year === academicYear && item.term === term)}
-        subjects={resources.subjects.map((item) => ({ id: item.id, name: item.name }))}
-        calendar={calendar}
-        gridConfig={gridConfig}
-        academicYear={academicYear}
-        term={term}
-        classes={resources.classes.map((item) => ({ id: item.id, name: item.name }))}
-        selectedClassId={selectedClassId}
-        selectedClassName={selectedClassName}
-        onClassChange={(classId) => {
-          setSelectedClassId(classId)
-          if (!generating) void loadTable(classId)
-        }}
-        onClose={() => setGenerationWorkspaceOpen(false)}
-      />
       <PageHeader
         title="排课管理"
         extra={
-          activeTab === 'assignments' ? (
+          activeTab === 'assignments' && assignmentMode === 'admin' ? (
             <Button
               type="primary"
               size="large"
@@ -1300,49 +1331,48 @@ export default function SchedulingView() {
           ) : undefined
         }
       />
-      <p className="zh-page-desc">先配置班级课时，再确定任教关系和排课规则，最后生成日课表；每一步都可以独立调整。</p>
-
       {genStage !== 'idle' && (
         <section
-          className={`sk-status${genStage === 'blocked' || genStage === 'error' ? ' sk-status-fail' : ''}`}
+          className={`sk-status${genStage === 'blocked' || genStage === 'error' ? ' sk-status-fail' : genStage === 'done' ? ' sk-status-done' : ''}`}
           role="status"
           aria-live="polite"
+          aria-atomic="false"
         >
-          <div className="sk-status-copy">
-            <div>
+          <div className="sk-status-head">
+            <span className="sk-status-mark" aria-hidden="true">
+              {genStage === 'done' ? '✓' : genStage === 'blocked' || genStage === 'error' ? '!' : '↻'}
+            </span>
+            <div className="sk-status-copy">
               <strong>{genStateCopy}</strong>
-              <span>{genSummary}</span>
-              {(generating || genPercent > 0) && (
-                <div className="sk-status-meta">
-                  <span>进度 {Math.round(genPercent)}%</span>
-                  <span>已用时 {Math.max(0, Math.floor(genElapsed))}s</span>
-                  {genSolutions > 0 ? <span>可行解 {genSolutions} 个</span> : null}
-                </div>
+              <span>{genSummary || '正在准备排课任务…'}</span>
+            </div>
+            {(generating || genPercent > 0) && (
+              <div className="sk-status-meta" aria-label="生成统计">
+                <span><b>{Math.round(genPercent)}%</b><small>总体进度</small></span>
+                <span><b>{Math.max(0, Math.floor(genElapsed))}s</b><small>{genElapsedLabel}</small></span>
+                {genSolutions > 0 ? <span><b>{genSolutions}</b><small>个可行解</small></span> : null}
+              </div>
+            )}
+            <div className="sk-status-actions">
+              {!generating && (
+                <Button
+                  type="link"
+                  size="small"
+                  onClick={() => {
+                    setGenStage('idle')
+                    setGenDiagnosis(null)
+                    setGenTrace([])
+                  }}
+                >
+                  收起
+                </Button>
+              )}
+              {(generating || genStage === 'error') && (
+                <Button type="link" size="small" onClick={() => setDiagOpen(true)}>
+                  排课诊断
+                </Button>
               )}
             </div>
-            {(generating || genStage === 'done' || genPercent > 0) && (
-              <Button type="primary" size="small" onClick={() => setGenerationWorkspaceOpen(true)}>
-                打开数字孪生
-              </Button>
-            )}
-            {!generating && (
-              <Button
-                type="link"
-                size="small"
-                onClick={() => {
-                  setGenStage('idle')
-                  setGenDiagnosis(null)
-                  setGenTrace([])
-                }}
-              >
-                收起
-              </Button>
-            )}
-            {(generating || genStage === 'error') && (
-              <Button type="link" size="small" onClick={() => setDiagOpen(true)}>
-                排课诊断
-              </Button>
-            )}
           </div>
           {(generating || genStage === 'done' || genPercent > 0) && (
             <Progress
@@ -1355,7 +1385,7 @@ export default function SchedulingView() {
                     ? 'success'
                     : 'active'
               }
-              showInfo
+              showInfo={false}
               strokeColor={genStage === 'done' ? undefined : { from: '#4c6fff', to: '#7aa2ff' }}
             />
           )}
@@ -1382,28 +1412,19 @@ export default function SchedulingView() {
                     .filter(Boolean)
                     .join(' ')}
                 >
-                  <div className="sk-step-node">
-                    <i aria-hidden="true">{isDone ? '✓' : ''}</i>
-                    {index < GEN_STEPS.length - 1 ? (
-                      <b
-                        className={[
-                          'sk-step-connector',
-                          isDone ? 'done' : '',
-                          isActive ? 'active' : '',
-                        ]
-                          .filter(Boolean)
-                          .join(' ')}
-                        aria-hidden="true"
-                      />
-                    ) : null}
+                  <div className="sk-step-node" aria-hidden="true">
+                    <i>{isDone ? '✓' : isFailed ? '!' : index + 1}</i>
                   </div>
-                  <span>{step.label}</span>
+                  <span aria-current={isActive || isFailed ? 'step' : undefined}>{step.label}</span>
                 </li>
               )
             })}
           </ol>
           {genStage === 'error' && (
             <div className="sk-diagnosis">
+              <p className="sk-diagnosis-hint">
+                本次尝试没有保存新课表；如果下方仍有课表，显示的是上一次成功保存的版本。
+              </p>
               <p className="sk-diagnosis-hint" style={{ marginTop: 0 }}>
                 {genDiagnosis?.stuck_label || '生成未完成。'}
                 详细过程与优化建议在右侧「排课诊断」中查看，改规则请进独立的规则工作台。
@@ -1462,6 +1483,7 @@ export default function SchedulingView() {
               <CourseHoursPanel
                 classes={resources.classes}
                 subjects={resources.subjects}
+                timetableMode={timetableMode}
                 academicYear={academicYear}
                 term={term}
                 classId={selectedClassId}
@@ -1474,20 +1496,29 @@ export default function SchedulingView() {
           {
             key: 'slots',
             label: '课位结构',
-            children: (
-              <SlotStructurePanel
+            children: <SlotStructurePanel
                 config={gridConfig}
                 academicYear={academicYear}
                 term={term}
                 saving={savingGridConfig}
+                loading={loadingGrid}
+                gradeId={gridGradeId}
+                grades={grades}
+                configured={gridConfigured}
+                onGradeChange={(id) => {
+                  setGridGradeId(id)
+                  setSelectedClassId(resources.classes.find((item) => item.grade_id === id)?.id)
+                  const next = new URLSearchParams(searchParams)
+                  next.set('grade', String(id))
+                  setSearchParams(next, { replace: true })
+                }}
                 onChange={setGridConfig}
                 onSave={() => void saveGridConfig()}
-              />
-            ),
+              />,
           },
           {
             key: 'rules',
-            label: '建立规则',
+            label: '规则',
             disabled: !gridConfigured,
             children: (
               <div className="st-rules">
@@ -1650,6 +1681,11 @@ export default function SchedulingView() {
             key: 'assignments',
             label: '任教关系',
             children: (
+              <>
+              {timetableMode === 'walk_class' && <Segmented style={{ marginBottom: 16 }} value={assignmentMode} options={[{ label: '行政班任教', value: 'admin' }, { label: '教学班任教', value: 'walk' }]}
+                onChange={(value) => { const next = new URLSearchParams(searchParams); next.set('assignmentMode', String(value)); setSearchParams(next, { replace: true }) }} />}
+              {timetableMode === 'walk_class' && assignmentMode === 'walk' ? <WalkTeachingAssignments academicYear={academicYear} term={term}
+                initialGradeId={Number(searchParams.get('grade')) || undefined} /> :
               <section className="sk-assign">
                 <div className="zh-filter-row sk-assign-filters">
                   <div className="sk-assign-query">
@@ -1672,7 +1708,7 @@ export default function SchedulingView() {
                       allowClear
                       placeholder="搜索学科、教师、班级或教室"
                     />
-                    <Button type="primary" onClick={handleSearchAssignment}>查询</Button>
+                    <Button type="primary" loading={refreshingAssignments} onClick={() => void handleSearchAssignment()}>查询</Button>
                     <Button onClick={resetAssignmentFilters}>重置</Button>
                     <span className="zh-filter-count">当前 {filteredAssignments.length} 条</span>
                   </div>
@@ -1708,7 +1744,8 @@ export default function SchedulingView() {
                     }}
                   />
                 </TableCard>
-              </section>
+              </section>}
+              </>
             ),
           },
           {
@@ -1716,23 +1753,27 @@ export default function SchedulingView() {
             label: '课表',
             disabled: !gridConfigured,
             children: (
+              <>
+              {timetableMode === 'walk_class' && (
+                <Segmented
+                  value={scheduleViewMode}
+                  options={[{ label: '行政班课表', value: 'administrative' }, { label: '走班课表', value: 'walk' }]}
+                  onChange={(value) => setScheduleViewMode(value as 'administrative' | 'walk')}
+                  style={{ marginBottom: 16 }}
+                />
+              )}
+              {timetableMode === 'walk_class' && scheduleViewMode === 'walk' ? (
+                <WalkSchedulePanel
+                  academicYear={academicYear}
+                  term={term}
+                  grades={grades}
+                  initialGradeId={gridGradeId}
+                />
+              ) : (
               <div className="sk-schedule-workspace">
               <section className="sk-surface sk-schedule-surface">
                 <div className="sk-surface-head">
-                  <div>
-                    <div className="sk-surface-head-row">
-                      <span className="sk-class-pill">{gradeScheduleLabel}</span>
-                      <Tag className="sk-schedule-term-tag">{academicYear} 学年 · 第 {term} 学期</Tag>
-                      <Tag className="sk-schedule-count-tag" style={{ whiteSpace: 'nowrap' }}>
-                        {resources.classes.length} 个班
-                      </Tag>
-                    </div>
-                    <h2>
-                      {selectedClassName === '全部班级'
-                        ? `${gradeScheduleLabel} · 年级日课表`
-                        : `${selectedClassName} · 日课表`}
-                    </h2>
-                  </div>
+                  <h2>日课表</h2>
                   <div className="sk-calendar-actions">
                     <Select
                       showSearch
@@ -1785,21 +1826,6 @@ export default function SchedulingView() {
                       {generating ? '正在生成' : '生成课表'}
                     </Button>
                     <Button
-                      disabled={generating || calendar.length === 0}
-                      title={
-                        calendar.length === 0
-                          ? '请先生成课表后再做反向校验'
-                          : '打开工作台：选择综合规则后逐条校验课表'
-                      }
-                      onClick={openVerifyWorkbench}
-                    >
-                      结果反向校验
-                    </Button>
-                    <Button onClick={() => window.print()}>
-                      <Icon name="printer" size={14} />
-                      打印
-                    </Button>
-                    <Button
                       disabled={generating}
                       title="选择班级或全部后导出课表"
                       onClick={() => {
@@ -1827,11 +1853,6 @@ export default function SchedulingView() {
                   </div>
                 </div>
                 <div className="sk-schedule-overview">
-                  <div className="sk-schedule-overview-copy">
-                    <span className="sk-schedule-overview-label">WEEKLY RHYTHM</span>
-                    <strong>班级课程节奏</strong>
-                    <span>生成按年级整批排课；这里下拉切换班级查看课表。</span>
-                  </div>
                   <div className="sk-schedule-legend" aria-label="学科颜色图例">
                     <span><i className="sk-legend-swatch language" />语言</span>
                     <span><i className="sk-legend-swatch math" />数学</span>
@@ -1895,6 +1916,8 @@ export default function SchedulingView() {
                 })()}
               </section>
               </div>
+              )}
+              </>
             ),
           },
         ].sort((left, right) => {
@@ -2437,16 +2460,6 @@ export default function SchedulingView() {
           openRuleWorkbenchForGroup(groupId)
         }}
         onSuggestionApplied={() => setRuleCatalogEpoch((n) => n + 1)}
-      />
-
-      <ScheduleVerifyWorkbench
-        open={verifyVisible}
-        onClose={() => setVerifyVisible(false)}
-        academicYear={academicYear}
-        term={term}
-        classId={selectedClassId ?? resources.classes[0]?.id}
-        grades={grades}
-        classes={resources.classes}
       />
 
       <Modal

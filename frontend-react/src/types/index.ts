@@ -130,7 +130,6 @@ export interface RoomResource {
   features: string[] | Record<string, unknown> | null;
   is_schedulable: boolean;
   is_exam_enabled: boolean;
-  is_meeting_enabled: boolean;
   status: string;
   cohort_allocations?: Array<{
     rule_id: number;
@@ -175,22 +174,11 @@ export interface AllocationPreviewResult {
   occupied_count: number;
   student_count: number | null;
   available_capacity: number;
+  resource_allocation_mode: 'cohort_capacity' | 'shared_pool';
   capacity_sufficient: boolean;
   capacity_gap: number | null;
   recommended_room_count: number | null;
   rooms: RoomAllocationPreview[];
-}
-export interface MeetingRecord {
-  id: number;
-  title: string;
-  room_id: number;
-  room_name: string;
-  organizer_id: number;
-  start_at: string;
-  end_at: string;
-  participant_ids: number[];
-  agenda: string | null;
-  status: string;
 }
 
 /** 年级 */
@@ -206,8 +194,12 @@ export interface Grade {
 
 /** 班级 */
 export interface ClassInfo {
+  /** 根据本学年学期班内学生的已确认首选科目汇总。 */
+  subject_track?: 'physics' | 'history' | 'mixed' | 'pending';
   id: number;
   grade_id: number;
+  academic_year?: string;
+  term?: string;
   campus_id?: number | null;
   home_room_id?: number | null;
   resource_assigned?: boolean;
@@ -228,19 +220,16 @@ export interface AutoClassAssignmentClassResult {
   student_count: number;
   male_count: number;
   female_count: number;
-  average_score: number | null;
   students: Array<{
     id: number;
     name: string;
     student_no?: string | null;
     gender: string;
-    score?: number | null;
   }>;
 }
 
 export interface AutoClassAssignmentResult {
   grade_id: number;
-  paper_id?: number | null;
   strategy: string;
   classes: AutoClassAssignmentClassResult[];
   assignments: Array<{ student_id: number; class_id: number }>;
@@ -455,7 +444,14 @@ export interface ScheduleEntry {
   lesson_date?: string;
 }
 
+export interface SchedulingGridSlot {
+  weekday: number
+  period: number
+  week_parity: 'odd' | 'even'
+  slot_type: 'daytime' | 'evening' | 'disabled'
+}
 export interface SchedulingGridConfig {
+  slot_overrides?: SchedulingGridSlot[]
   configured?: boolean;
   days: number;
   periods_per_day: number;
@@ -630,8 +626,6 @@ export interface SeatArrangement {
 export interface ExamScheduleEntry {
   id: number;
   exam_id: number;
-  paper_id: number;
-  paper_title?: string;
   grade_id: number;
   grade_name?: string;
   subject_id: number;
@@ -775,136 +769,9 @@ export interface Exam {
   status: ExamStatus | string;
   exam_type?: string;
   academic_year?: string;
+  term?: string;
   created_by?: number;
   created_at?: string;
-  paper_count?: number;
-}
-
-/** 试卷状态 */
-export const PAPER_STATUS = {
-  BUILDING: "building",
-  FINALIZED: "finalized",
-} as const;
-export const PAPER_STATUS_LABEL: Record<string, string> = {
-  building: "建卷中",
-  finalized: "已定稿",
-};
-
-/** 试卷 */
-export interface Paper {
-  id: number;
-  exam_id?: number;
-  subject_id?: number;
-  grade_id?: number;
-  teacher_id?: number;
-  title: string;
-  total_score?: number;
-  status?: string;
-  created_at?: string;
-  delivered_at?: string;
-  questions?: Question[];
-  actual_score?: number;
-}
-
-/** 题目难度 */
-export const DIFFICULTY = {
-  BASIC: "basic",
-  MEDIUM: "medium",
-  HARD: "hard",
-} as const;
-export const DIFFICULTY_LABEL: Record<string, string> = {
-  basic: "基础",
-  medium: "中档",
-  hard: "拔高",
-};
-
-/** 题目 */
-export interface Question {
-  id: number;
-  paper_id: number;
-  question_no: number;
-  score: number;
-  knowledge_point_id?: number | null;
-  difficulty?: string;
-  content?: string | null;
-  question_type?: string | null;
-  source_type?: string | null;
-  created_at?: string;
-}
-
-/** 扫描批次状态 */
-export const SCAN_BATCH_STATUS = {
-  UPLOADED: "uploaded",
-  SPLIT: "split",
-  ASSIGNED: "assigned",
-  CONFIRMED: "confirmed",
-} as const;
-export const SCAN_BATCH_STATUS_LABEL: Record<string, string> = {
-  uploaded: "已上传",
-  split: "已切分",
-  assigned: "已分配",
-  confirmed: "已确认",
-};
-
-/** 扫描批次 */
-export interface ScanBatch {
-  id: number;
-  paper_id: number;
-  file_name?: string | null;
-  page_count?: number;
-  status?: string;
-  created_by?: number;
-  created_at?: string;
-}
-
-/** 作答（一生一卷，阅卷队列项） */
-export interface Submission {
-  id: number;
-  paper_id: number;
-  student_id: number;
-  student_name?: string | null;
-  total_score?: number;
-  status?: string;
-  scored_questions?: number;
-}
-
-/** 作答详情（含每题状态） */
-export interface SubmissionDetail {
-  submission: Submission;
-  student_name?: string | null;
-  questions: Array<{
-    question_id: number;
-    question_no: number;
-    score: number;
-    difficulty?: string | null;
-    content?: string | null;
-    given_score: number | null;
-    ai_score: number | null;
-    ai_confidence: number | null;
-    confirm_status: string | null;
-  }>;
-}
-
-/** 每题得分（服务端 upsert 返回） */
-export interface AnswerScore {
-  id?: number;
-  submission_id: number;
-  question_id: number;
-  score: number;
-  ai_score?: number | null;
-  ai_confidence?: number | null;
-  grading_mode?: string;
-  confirm_status?: string;
-}
-
-/** 成绩汇总（按卷） */
-export interface PaperSummary {
-  paper_id: number;
-  count: number;
-  mean: number;
-  max: number;
-  min: number;
-  distribution?: Array<{ label: string; count: number }>;
 }
 
 /** 菜单节点（后端 /auth/menus 返回，available=false 渲染为"待开放"） */

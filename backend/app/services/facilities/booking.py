@@ -1,4 +1,4 @@
-"""Shared conflict rules for teaching, exam and meeting room occupation."""
+"""Shared conflict rules for teaching and exam room occupation."""
 from datetime import datetime
 
 

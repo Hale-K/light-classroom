@@ -1,6 +1,4 @@
-"""Campus, building, room and meeting resources."""
-from datetime import datetime
-
+"""Campus, building and room resources."""
 from sqlalchemy import JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
@@ -38,7 +36,6 @@ class Room(TimestampMixin, TenantMixin, SQLModel, table=True):
     features: list[str] = Field(default_factory=list, sa_type=JSON)
     is_schedulable: bool = Field(default=True)
     is_exam_enabled: bool = Field(default=False)
-    is_meeting_enabled: bool = Field(default=False)
     status: str = Field(default="available", max_length=20, index=True)
 
 
@@ -72,28 +69,4 @@ class RoomCohortAllocation(TimestampMixin, TenantMixin, SQLModel, table=True):
     academic_year: str = Field(default="2026-2027", max_length=20, index=True)
     term: str = Field(default="1", max_length=20, index=True)
     allocation_mode: str = Field(default="shared", max_length=20, index=True)
-    status: str = Field(default="active", max_length=20, index=True)
-
-
-class Meeting(TimestampMixin, TenantMixin, SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    title: str = Field(max_length=200)
-    room_id: int = Field(index=True)
-    organizer_id: int = Field(index=True)
-    start_at: datetime = Field(index=True)
-    end_at: datetime = Field(index=True)
-    participant_ids: list[int] = Field(default_factory=list, sa_type=JSON)
-    agenda: str | None = Field(default=None, max_length=2000)
-    minutes: str | None = Field(default=None, max_length=5000)
-    status: str = Field(default="scheduled", max_length=20, index=True)
-
-
-class RoomBooking(TimestampMixin, TenantMixin, SQLModel, table=True):
-    id: int | None = Field(default=None, primary_key=True)
-    room_id: int = Field(index=True)
-    source_type: str = Field(max_length=30, index=True)
-    source_id: int = Field(index=True)
-    title: str = Field(max_length=200)
-    start_at: datetime = Field(index=True)
-    end_at: datetime = Field(index=True)
     status: str = Field(default="active", max_length=20, index=True)

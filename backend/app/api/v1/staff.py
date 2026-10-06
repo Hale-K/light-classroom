@@ -11,6 +11,7 @@ from app.models.enums import BaseUserRole, UserStatus
 from app.models.org import OrganizationUnit, StaffAppointment, User
 from app.models.rbac import Role, UserRole
 from app.services.org.staff_roles import ASSIGNABLE_STAFF_ROLES, normalize_staff_roles, replace_staff_roles
+from app.services.org.organization import current_organization_units
 
 router = APIRouter(prefix="/staff", tags=["人员与权限"])
 
@@ -120,12 +121,19 @@ async def create_staff(
         raise HTTPException(status_code=422, detail="教师职级不合法")
     unit_ids = list(dict.fromkeys(body.unit_ids))
     if unit_ids:
+        all_units = list((await session.execute(select(OrganizationUnit).where(
+            OrganizationUnit.tenant_id == tenant_id,
+        ))).scalars().all())
+        current_unit_ids = {
+            int(item["id"])
+            for item in current_organization_units([unit.model_dump() for unit in all_units])
+        }
         units = list((await session.execute(select(OrganizationUnit).where(
             OrganizationUnit.id.in_(unit_ids),
             OrganizationUnit.tenant_id == tenant_id,
             OrganizationUnit.status == "active",
         ))).scalars().all())
-        if len(units) != len(unit_ids):
+        if len(units) != len(unit_ids) or not set(unit_ids).issubset(current_unit_ids):
             raise HTTPException(status_code=422, detail="所选组织不存在、已归档或不属于本校")
         if sum(unit.unit_type == "grade_group" for unit in units) > 1:
             raise HTTPException(status_code=422, detail="同一人员只能同时归属一个年级部")

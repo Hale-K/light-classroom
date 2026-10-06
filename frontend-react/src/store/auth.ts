@@ -62,6 +62,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     const activeRole = resolveActiveRole(data.user)
     if (activeRole) localStorage.setItem(ACTIVE_ROLE_KEY, activeRole)
     set({ token: data.access_token, user: data.user, schoolCode, activeRole })
+    // Prime tenant-scoped system configuration after credentials and school code
+    // are available, so later views share one consistent academic context.
+    await Promise.all([
+      authApi.school(true),
+      authApi.academicYears(true),
+    ]).catch(() => undefined)
   },
   async fetchMe() {
     try {

@@ -9,9 +9,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.enums import SeatLayout, SeatRule, SeatStatus, StudentStatus
-from app.models.exam import Paper
 from app.models.org import Class, SeatArrangement, Student
-from app.models.scan import Submission
 from app.services.scheduling import arrange_students
 
 router = APIRouter(prefix="/seating", tags=["排座管理"])
@@ -87,28 +85,10 @@ async def generate_arrangement(
     ).order_by(Student.roster_order, Student.id))).scalars().all())
     if not students:
         raise HTTPException(status_code=422, detail="该班级没有在读学生")
-    if body.order.value == "score" and body.exam_id is None:
-        raise HTTPException(status_code=422, detail="按考试成绩排序时，请选择一场考试")
+    if body.order.value == "score":
+        raise HTTPException(status_code=422, detail="成绩排序已随阅卷功能下线，请选择名册或随机排序")
 
     student_dicts = [item.model_dump() for item in students]
-    if body.exam_id is not None:
-        paper_ids = list((await session.execute(
-            select(Paper.id).where(Paper.exam_id == body.exam_id),
-        )).scalars().all())
-        student_ids = [item.id for item in students]
-        exam_totals: dict[int, float] = {}
-        if paper_ids:
-            subs = list((await session.execute(select(Submission).where(
-                Submission.paper_id.in_(paper_ids),
-                Submission.student_id.in_(student_ids),
-            ))).scalars().all())
-            agg: dict[int, float] = {}
-            for sub in subs:
-                agg[sub.student_id] = agg.get(sub.student_id, 0.0) + float(sub.total_score)
-            exam_totals = agg
-        for item in student_dicts:
-            item["exam_score"] = exam_totals.get(item["id"])
-
     try:
         seats = arrange_students(
             student_dicts,

@@ -103,13 +103,6 @@ class PaperStatus(str, Enum):
     published = "published"       # 已发布
 
 
-class ScanBatchStatus(str, Enum):
-    uploaded = "uploaded"         # 已上传
-    split = "split"               # 已切分
-    assigned = "assigned"         # 已分配
-    confirmed = "confirmed"       # 已确认
-
-
 class SubmissionStatus(str, Enum):
     absent = "absent"             # 缺考
     scanned = "scanned"           # 已扫描

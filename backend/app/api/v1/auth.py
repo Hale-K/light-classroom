@@ -58,6 +58,7 @@ class UserOut(BaseModel):
 class SchoolSettingsIn(BaseModel):
     province: str | None = Field(default=None, min_length=2, max_length=50)
     gaokao_mode: str | None = Field(default=None, pattern=r"^(3\+1\+2|3\+3|traditional)$")
+    timetable_mode: str | None = Field(default=None, pattern=r"^(administrative|walk_class)$")
 
 
 class AcademicYearEntry(BaseModel):
@@ -85,6 +86,19 @@ async def _academic_year_config(session: AsyncSession, tenant_id: int) -> Tenant
         TenantConfig.tenant_id == tenant_id,
         TenantConfig.config_key == "academic_years",
     ))).scalars().first()
+
+
+async def _timetable_mode_config(session: AsyncSession, tenant_id: int) -> TenantConfig | None:
+    return (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == "timetable_mode",
+    ))).scalars().first()
+
+
+def _timetable_mode(config: TenantConfig | None) -> str:
+    value = config.config_value if config and isinstance(config.config_value, dict) else {}
+    mode = value.get("mode")
+    return mode if mode in {"administrative", "walk_class"} else "administrative"
 
 
 def _academic_year_row(entry_year: int, status: str = "active") -> dict:
@@ -197,12 +211,14 @@ async def school_settings(
     tenant = await session.get(Tenant, user.tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="学校不存在")
+    timetable_config = await _timetable_mode_config(session, user.tenant_id)
     return {"code": 0, "message": "ok", "data": {
         "id": tenant.id,
         "code": tenant.code,
         "name": tenant.name,
         "province": tenant.province,
         "gaokao_mode": tenant.gaokao_mode,
+        "timetable_mode": _timetable_mode(timetable_config),
     }}
 
 
@@ -218,16 +234,31 @@ async def update_school_settings(
     if tenant is None:
         raise HTTPException(status_code=404, detail="学校不存在")
     values = body.model_dump(exclude_none=True)
+    timetable_mode = values.pop("timetable_mode", None)
     for key, value in values.items():
         setattr(tenant, key, value)
+    if timetable_mode is not None:
+        timetable_config = await _timetable_mode_config(session, user.tenant_id)
+        if timetable_config is None:
+            session.add(TenantConfig(
+                tenant_id=user.tenant_id,
+                config_key="timetable_mode",
+                config_value={"mode": timetable_mode},
+                updated_by=user.id,
+            ))
+        else:
+            timetable_config.config_value = {"mode": timetable_mode}
+            timetable_config.updated_by = user.id
     await session.commit()
     await session.refresh(tenant)
+    timetable_config = await _timetable_mode_config(session, user.tenant_id)
     return {"code": 0, "message": "ok", "data": {
         "id": tenant.id,
         "code": tenant.code,
         "name": tenant.name,
         "province": tenant.province,
         "gaokao_mode": tenant.gaokao_mode,
+        "timetable_mode": _timetable_mode(timetable_config),
     }}
 
 
@@ -303,6 +334,8 @@ async def preview_academic_year_rollover(
     classes = (await session.execute(select(Class).where(
         Class.tenant_id == user.tenant_id,
         Class.cohort_label == source_label,
+        Class.academic_year == plan.source_academic_year,
+        Class.term == "1",
     ))).scalars().all()
     students = (await session.execute(select(Student).where(
         Student.tenant_id == user.tenant_id,
@@ -361,7 +394,10 @@ async def commit_academic_year_rollover(
         raise HTTPException(status_code=409, detail="该学年已经滚动过，不能重复执行")
 
     old_classes = (await session.execute(select(Class).where(
-        Class.tenant_id == user.tenant_id, Class.cohort_label == source_label,
+        Class.tenant_id == user.tenant_id,
+        Class.cohort_label == source_label,
+        Class.academic_year == plan.source_academic_year,
+        Class.term == "1",
     ))).scalars().all()
     old_class_ids = {item.id for item in old_classes}
     students = (await session.execute(select(Student).where(
@@ -380,7 +416,10 @@ async def commit_academic_year_rollover(
             continue
         existing = (await session.execute(select(Class).where(
             Class.tenant_id == user.tenant_id, Class.grade_id == target_grade_id,
-            Class.cohort_label == str(plan.target_entry_year), Class.name == promoted_class_name(old.name, level),
+            Class.cohort_label == str(plan.target_entry_year),
+            Class.academic_year == plan.target_academic_year,
+            Class.term == "1",
+            Class.name == promoted_class_name(old.name, level),
         ))).scalars().first()
         new_class = existing or Class(
             tenant_id=user.tenant_id, grade_id=target_grade_id, campus_id=old.campus_id,
@@ -388,6 +427,7 @@ async def commit_academic_year_rollover(
             planned_student_count=old.planned_student_count, name=promoted_class_name(old.name, level),
             cohort_label=str(plan.target_entry_year), head_teacher_id=old.head_teacher_id,
             deputy_head_teacher_id=old.deputy_head_teacher_id,
+            academic_year=plan.target_academic_year, term="1",
         )
         if existing is None:
             session.add(new_class)

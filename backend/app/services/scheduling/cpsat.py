@@ -47,6 +47,7 @@ def solve_daytime_cpsat(
     days: int,
     periods_per_day: int,
     forbidden_slots: set[tuple[int, int]] | None = None,
+    allowed_slots_by_parity: Mapping[str, set[tuple[int, int]]] | None = None,
     max_class_lessons_per_day: int | None = None,
     max_teacher_lessons_per_day: int | None = None,
     max_class_lessons_on_saturday: int | None = None,
@@ -145,6 +146,8 @@ def solve_daytime_cpsat(
             for (d, p) in slots:
                 if count_target > 0:
                     y[(a_idx, d, p)] = model.NewBoolVar(f"y_{a_idx}_{d}_{p}")
+                    if allowed_slots_by_parity is not None and any((d, p) not in allowed_slots_by_parity.get(leg, set()) for leg in ('odd', 'even')):
+                        model.Add(y[(a_idx, d, p)] == 0)
                     class_by_slot.setdefault((meta[a_idx]["class_id"], d, p), []).append(a_idx)
                     class_slot_occ[(meta[a_idx]["class_id"], d, p)].append(y[(a_idx, d, p)])
                     if meta[a_idx]["teacher_id"] is not None:
@@ -163,10 +166,14 @@ def solve_daytime_cpsat(
                 for (d, p) in slots:
                     if allow_odd:
                         ho[(a_idx, d, p)] = model.NewBoolVar(f"ho_{a_idx}_{d}_{p}")
+                        if allowed_slots_by_parity is not None and (d, p) not in allowed_slots_by_parity.get('odd', set()):
+                            model.Add(ho[(a_idx, d, p)] == 0)
                         if count_target >= 0 and (meta[a_idx]["class_id"], d, p) in class_slot_occ:
                             class_slot_occ[(meta[a_idx]["class_id"], d, p)].append(ho[(a_idx, d, p)])
                     if allow_even:
                         he[(a_idx, d, p)] = model.NewBoolVar(f"he_{a_idx}_{d}_{p}")
+                        if allowed_slots_by_parity is not None and (d, p) not in allowed_slots_by_parity.get('even', set()):
+                            model.Add(he[(a_idx, d, p)] == 0)
                         if count_target >= 0 and (meta[a_idx]["class_id"], d, p) in class_slot_occ:
                             class_slot_occ[(meta[a_idx]["class_id"], d, p)].append(he[(a_idx, d, p)])
                 leg_vars = (

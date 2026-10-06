@@ -143,7 +143,7 @@ async def propose_rules(session, tenant_id: int, user_id: int, proposal: RulesPr
     if len(matches) != 1:
         raise ValueError("规则组名称不存在或重名，请先查询并选择一个明确的规则组；没有规则组请先在排课页创建")
     group = matches[0]
-    grid = await _load_grid_config(session, tenant_id, year, term)
+    grid = await _load_grid_config(session, tenant_id, year, term, group.grade_id if group else None)
     if not grid.get("configured"):
         raise ValueError("请先保存本学期课位结构，再配置规则")
     rules = []

@@ -1,10 +1,39 @@
 """New-gaokao scheme, subject choice, teaching class, and walk schedule models."""
 from datetime import datetime
 
-from sqlalchemy import JSON, UniqueConstraint
+from sqlalchemy import CheckConstraint, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.db.base import TimestampMixin, TenantMixin
+
+
+class WalkSchedulingPlan(TimestampMixin, TenantMixin, SQLModel, table=True):
+    __tablename__ = "walk_scheduling_plan"
+    __table_args__ = (UniqueConstraint("tenant_id", "grade_id", "academic_year", "term", name="uq_walk_plan_scope"),
+                     CheckConstraint("term IN ('1', '2')", name="ck_walk_plan_term"))
+    id: int | None = Field(default=None, primary_key=True)
+    grade_id: int = Field(foreign_key="grade.id", ondelete="RESTRICT")
+    academic_year: str = Field(max_length=20)
+    term: str = Field(max_length=1)
+    revision: int = Field(default=1)
+
+
+class WalkSchedulingSlot(SQLModel, table=True):
+    __tablename__ = "walk_scheduling_slot"
+    __table_args__ = (UniqueConstraint("plan_id", "weekday", "period", name="uq_walk_plan_slot"),
+                     CheckConstraint("weekday BETWEEN 1 AND 7 AND period BETWEEN 1 AND 12", name="ck_walk_slot_range"))
+    id: int | None = Field(default=None, primary_key=True)
+    plan_id: int = Field(foreign_key="walk_scheduling_plan.id", ondelete="CASCADE", index=True)
+    weekday: int
+    period: int
+
+
+class WalkSchedulingRoom(SQLModel, table=True):
+    __tablename__ = "walk_scheduling_room"
+    __table_args__ = (UniqueConstraint("plan_id", "room_id", name="uq_walk_plan_room"),)
+    id: int | None = Field(default=None, primary_key=True)
+    plan_id: int = Field(foreign_key="walk_scheduling_plan.id", ondelete="CASCADE", index=True)
+    room_id: int = Field(foreign_key="room.id", ondelete="RESTRICT")
 
 
 class GaokaoScheme(TimestampMixin, TenantMixin, SQLModel, table=True):
@@ -61,6 +90,24 @@ class StudentCredential(TimestampMixin, TenantMixin, SQLModel, table=True):
     last_login_at: datetime | None = Field(default=None)
 
 
+class TeachingSubjectHourPlan(TimestampMixin, TenantMixin, SQLModel, table=True):
+    """A subject's default weekly hours for one grade and semester."""
+    __tablename__ = "teaching_subject_hour_plan"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "grade_id", "academic_year", "term", "subject_id",
+                         name="uq_teaching_subject_hour_plan_scope"),
+        CheckConstraint("weekly_periods BETWEEN 1 AND 12", name="ck_teaching_subject_hours_range"),
+        CheckConstraint("term IN ('1', '2')", name="ck_teaching_subject_hours_term"),
+        {"comment": "走班科目课时方案：先定科目课时，再生成教学班"},
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    grade_id: int = Field(foreign_key="grade.id", ondelete="RESTRICT", index=True)
+    subject_id: int = Field(foreign_key="subject.id", ondelete="RESTRICT", index=True)
+    academic_year: str = Field(max_length=20, index=True)
+    term: str = Field(max_length=20)
+    weekly_periods: int = Field(ge=1, le=12)
+
+
 class TeachingClass(TimestampMixin, TenantMixin, SQLModel, table=True):
     __table_args__ = (
         UniqueConstraint(
@@ -78,6 +125,10 @@ class TeachingClass(TimestampMixin, TenantMixin, SQLModel, table=True):
     sequence: int = Field(default=1)
     capacity: int = Field(default=40)
     weekly_periods: int = Field(default=3)
+    hour_plan_id: int | None = Field(default=None, foreign_key="teaching_subject_hour_plan.id",
+                                     ondelete="SET NULL", index=True)
+    hours_overridden: bool = Field(default=False, nullable=False,
+                                    description="是否单独调整课时；weekly_periods为教学班实际课时")
     teacher_id: int | None = Field(default=None, index=True)
     room: str | None = Field(default=None, max_length=100)
     source: str = Field(default="selection", max_length=20)

@@ -12,8 +12,8 @@ import AdminLogin from '@/pages/admin/Login'
 import AdminSchools from '@/pages/admin/Schools'
 import Dashboard from '@/pages/dashboard'
 import ExamManage from '@/pages/exam'
-import ScanManage from '@/pages/scan'
 import SchedulingView from '@/pages/scheduling'
+import SpaceResourcesView from '@/pages/space-resources'
 import OnboardingView from '@/pages/onboarding'
 import StudentsView from '@/pages/students'
 import ClassesView from '@/pages/classes'
@@ -31,10 +31,6 @@ import ExamCalendarView from '@/pages/exam-calendar'
 import ExamInvigilatorsView from '@/pages/exam-invigilators'
 import SchoolSettingsView from '@/pages/settings'
 import SubjectManagementView from '@/pages/subjects'
-import SpaceResourcesView from '@/pages/space-resources'
-import MeetingsView from '@/pages/meetings'
-import GradingWorkbench from '@/pages/grading'
-import StatsView from '@/pages/stats'
 import TeacherProfilesView from '@/pages/teacher-profiles'
 import FileCenterView from '@/pages/file-center'
 import AiProvidersView from '@/pages/ai-providers'
@@ -115,8 +111,9 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="/dashboard" replace /> },
           { path: 'dashboard', element: <Dashboard /> },
           { path: 'exams', element: <ExamManage /> },
-          { path: 'scans', element: <ScanManage /> },
+          { path: 'scans', element: <Navigate to="/dashboard" replace /> },
           { path: 'scheduling', element: <SchedulingView /> },
+          { path: 'scheduling/class-planning', element: <Navigate to="/scheduling" replace /> },
           { path: 'teacher-courses', element: <TeacherCourses /> },
           { path: 'teacher-preparation', element: <TeacherPreparation /> },
           { path: 'teacher-classes', element: <TeacherClasses /> },
@@ -144,9 +141,7 @@ export const router = createBrowserRouter([
           { path: 'subjects', element: <SubjectManagementView /> },
           { path: 'campus-buildings', element: <SpaceResourcesView /> },
           { path: 'rooms', element: <Navigate to="/campus-buildings?tab=rooms" replace /> },
-          { path: 'meetings', element: <MeetingsView /> },
-          { path: 'grading/:paperId', element: <GradingWorkbench /> },
-          { path: 'stats/:paperId', element: <StatsView /> },
+          { path: 'meetings', element: <Navigate to="/dashboard" replace /> },
           { path: 'teacher-profiles', element: <TeacherProfilesView /> },
           { path: 'teacher-grades', element: <TeacherModulePlaceholder icon="chart" title="成绩" description="成绩汇总功能正在接入，阅卷成绩仍可从作业与试卷页面查看。" /> },
           { path: 'teacher-notices', element: <TeacherModulePlaceholder icon="message" title="通知" description="当前暂无新的教学通知。" /> },

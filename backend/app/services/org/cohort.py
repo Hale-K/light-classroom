@@ -27,6 +27,19 @@ async def current_academic_year(session: AsyncSession, tenant_id: int) -> str:
     return f"{start}-{start + 1}"
 
 
+async def current_term(session: AsyncSession, tenant_id: int) -> str:
+    """当前学期，统一读取系统设置；缺省为第一学期。"""
+    row = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == "academic_years",
+    ))).scalars().first()
+    if row is not None and isinstance(row.config_value, dict):
+        term = str(row.config_value.get("current_term") or "1")
+        if term in {"1", "2"}:
+            return term
+    return "1"
+
+
 def expected_cohort_label(academic_year: str, grade_level: int) -> str:
     start = int(academic_year.split("-")[0])
     return str(start - grade_level + 1)

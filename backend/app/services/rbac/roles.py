@@ -4,7 +4,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.models.org import Tenant, User
 from app.models.rbac import Permission, Role, RolePermission, UserRole
-from app.services.rbac.catalog import ensure_permissions
+from app.services.rbac.catalog import RETIRED_PERMISSION_PREFIXES, ensure_permissions
 from app.services.rbac.seed import BUILTIN_ROLE_PERMISSION_SEED, BUILTIN_ROLE_SEED
 
 # 内置角色（编码保留，不允许删除/改名）
@@ -161,6 +161,7 @@ async def list_role_permissions(session: AsyncSession, role_id: int, tenant_id: 
         select(Permission.code)
         .join(RolePermission, RolePermission.permission_id == Permission.id)
         .where(RolePermission.role_id == role_id)
+        .where(*[~Permission.code.startswith(prefix) for prefix in RETIRED_PERMISSION_PREFIXES])
     )
     return set(result.scalars().all())
 
@@ -174,7 +175,10 @@ async def set_role_permissions(
     """整量替换角色的权限点集合。"""
     await _tenant_role(session, role_id, tenant_id)
     all_perms = list((await session.execute(select(Permission.code, Permission.id))).all())
-    code_to_id = {code: pid for code, pid in all_perms}
+    code_to_id = {
+        code: pid for code, pid in all_perms
+        if not code.startswith(RETIRED_PERMISSION_PREFIXES)
+    }
     unknown = [c for c in codes if c not in code_to_id]
     if unknown:
         raise ValueError(f"未知权限点：{', '.join(unknown)}")

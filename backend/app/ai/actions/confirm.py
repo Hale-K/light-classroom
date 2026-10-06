@@ -63,7 +63,7 @@ async def decide_action(session, tenant_id: int, user_id: int, action_id: str, d
     scope = f"{year}:{term}"
     groups, active_id = parse_stored_rule_groups(config[scope]) if scope in config else ([], None)
     group = next((g for g in groups if g.id == payload["group_id"]), None)
-    grid = await _load_grid_config(session, tenant_id, year, term)
+    grid = await _load_grid_config(session, tenant_id, year, term, group.grade_id if group else None)
     if group is None or fingerprint(group.model_dump(mode="json")) != payload["group_hash"] or fingerprint(grid) != payload["grid_hash"]:
         raise HTTPException(409, "规则组或课位已被修改，请重新预览，避免覆盖其他老师的修改")
     requests = RulesProposal.model_validate(payload["request"])

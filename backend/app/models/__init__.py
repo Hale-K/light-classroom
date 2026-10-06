@@ -8,7 +8,6 @@ from app.models.org import *  # noqa: F401,F403
 from app.models.facility import *  # noqa: F401,F403
 from app.models.exam import *  # noqa: F401,F403
 from app.models.gaokao import *  # noqa: F401,F403
-from app.models.scan import *  # noqa: F401,F403
 from app.models.analysis import *  # noqa: F401,F403
 from app.models.practice import *  # noqa: F401,F403
 from app.models.prediction import *  # noqa: F401,F403
@@ -27,3 +26,5 @@ try:
     from app.ai.intent.models import AiIntentExample  # noqa: F401
 except ImportError:
     pass
+
+from app.models.scheduling_grid import *  # noqa: F401,F403

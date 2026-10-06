@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     db_pool_size: int = 10
     db_max_overflow: int = 20
     db_echo: bool = False  # 开发期临时查SQL才打开，否则终端日志2分钟刷200KB+，容易被杀/缓冲区撑死
+    db_sql_log: bool = False  # 写入不含绑定参数的 SQL 与耗时，便于排查且避免记录学生数据
 
     # Redis
     redis_url: str

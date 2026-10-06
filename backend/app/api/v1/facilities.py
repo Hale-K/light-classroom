@@ -1,4 +1,4 @@
-"""School-wide campuses, buildings, rooms and meeting bookings."""
+"""School-wide campuses, buildings and room resources."""
 from datetime import datetime
 from math import ceil
 import random
@@ -11,17 +11,17 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.deps import get_current_tenant, get_current_user, require_management_user
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
-from app.models.facility import (
-    Building, Campus, Meeting, ResourceAllocationRule, Room, RoomBooking,
-    RoomCohortAllocation,
+from app.models.facility import Building, Campus, ResourceAllocationRule, Room, RoomCohortAllocation
+from app.models.org import (
+    Class, Grade, OrganizationUnit, Student, StudentClassMembership,
+    TeachingAssignment, TenantConfig, User,
 )
-from app.models.org import Class, Grade, OrganizationUnit, Student, User
 from app.services.facilities.allocation import room_matches_rule
 from app.services.org.staff_roles import get_staff_role_codes
 from app.services.org.naming import normalize_entity_name
 from app.services.org.cohort import current_academic_year, expected_cohort_label, normalize_cohort_label
 
-router = APIRouter(tags=["校区场室与会议"], dependencies=[Depends(require_management_user)])
+router = APIRouter(tags=["校区场室资源"], dependencies=[Depends(require_management_user)])
 
 
 class CampusIn(BaseModel):
@@ -51,7 +51,6 @@ class RoomIn(BaseModel):
     features: list[str] = Field(default_factory=list)
     is_schedulable: bool = True
     is_exam_enabled: bool = False
-    is_meeting_enabled: bool = False
 
 
 class BatchRoomIn(BaseModel):
@@ -93,21 +92,6 @@ class ResourceAllocationRuleIn(BaseModel):
     def validate_floor_range(self):
         if self.floor_from is not None and self.floor_to is not None and self.floor_from > self.floor_to:
             raise ValueError("起始楼层不能高于结束楼层")
-        return self
-
-
-class MeetingIn(BaseModel):
-    title: str = Field(min_length=1, max_length=200)
-    room_id: int
-    start_at: datetime
-    end_at: datetime
-    participant_ids: list[int] = Field(default_factory=list)
-    agenda: str | None = Field(default=None, max_length=2000)
-
-    @model_validator(mode="after")
-    def validate_period(self):
-        if self.end_at <= self.start_at:
-            raise ValueError("会议结束时间必须晚于开始时间")
         return self
 
 
@@ -201,6 +185,10 @@ async def list_rooms(building_id: int | None = None, room_type: str | None = Non
     allocations_by_room: dict[int, list[RoomCohortAllocation]] = {}
     for allocation in allocations:
         allocations_by_room.setdefault(allocation.room_id, []).append(allocation)
+    allocation_cohorts_by_room = {
+        room_id: {item.cohort_label for item in room_allocations}
+        for room_id, room_allocations in allocations_by_room.items()
+    }
     class_assignments: dict[int, list[dict]] = {}
     if items:
         class_rows = (await session.execute(select(Class, Grade.name).join(
@@ -208,8 +196,15 @@ async def list_rooms(building_id: int | None = None, room_type: str | None = Non
         ).where(
             Class.tenant_id == tenant_id,
             Class.home_room_id.in_([item.id for item in items]),
+            Class.academic_year == academic_year,
+            Class.term == term,
         ))).all()
         for class_item, grade_name in class_rows:
+            # 资源已按当前学年/学期隔离；班级回显也必须匹配当前资源届别，
+            # 避免历史届别通过同一个 home_room_id 串入当前页面。
+            room_cohorts = allocation_cohorts_by_room.get(class_item.home_room_id, set())
+            if not class_item.cohort_label or class_item.cohort_label not in room_cohorts:
+                continue
             class_assignments.setdefault(class_item.home_room_id, []).append({
                 "id": class_item.id,
                 "name": class_item.name,
@@ -303,7 +298,7 @@ async def matching_rooms(
 ) -> list[Room]:
     rooms = await scoped_rooms(session, tenant_id, body)
     matched = [room for room in rooms if room_matches_rule(room.model_dump(), body.model_dump())]
-    if body.allocation_mode == "exclusive" and matched:
+    if matched:
         allocated_room_ids = set((await session.execute(select(RoomCohortAllocation.room_id).where(
             RoomCohortAllocation.tenant_id == tenant_id,
             RoomCohortAllocation.status == "active",
@@ -372,7 +367,9 @@ async def allocation_preview(
     for room in rooms:
         active_allocations = allocations_by_room.get(room.id, [])
         other_cohorts = sorted({item.cohort_label for item in active_allocations if item.cohort_label != body.cohort_label})
-        current_cohort = any(item.cohort_label == body.cohort_label for item in active_allocations)
+        current_allocations = [item for item in active_allocations if item.cohort_label == body.cohort_label]
+        current_cohort = bool(current_allocations)
+        current_has_exclusive = any(item.allocation_mode == "exclusive" for item in current_allocations)
         matches = room_matches_rule(room.model_dump(), body.model_dump())
         if room.status != "available":
             state = "unavailable"
@@ -388,20 +385,36 @@ async def allocation_preview(
             **room.model_dump(),
             "building_name": building_names.get(room.building_id, ""),
             "state": state,
-            "selectable": state == "available",
+            # 可复用只允许同一学年、同一学期、同一届别内重复使用；
+            # 已有独占规则的教室不能再被同届规则复用。
+            "selectable": state == "available" or (
+                state == "current"
+                and body.allocation_mode == "shared"
+                and not current_has_exclusive
+            ),
             "occupied_by": other_cohorts,
             "matches_rule": matches,
         })
     selectable = [item for item in preview if item["selectable"]]
     student_count = await target_student_count(session, tenant_id, body.campus_id, body.cohort_label)
+    timetable_config = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == "timetable_mode",
+    ))).scalars().first()
+    timetable_mode = timetable_config.config_value.get("mode") if timetable_config and isinstance(timetable_config.config_value, dict) else "administrative"
+    # 走班制的教室是跨教学班、跨课位复用的共享池，不能把全年级学生人数
+    # 直接相加后要求教室容量覆盖 474、800 等总人数。教学班生成接口会
+    # 再按每个教学班的实际人数校验单间容量和课位冲突。
+    resource_allocation_mode = "shared_pool" if timetable_mode == "walk_class" else "cohort_capacity"
     available_capacity = sum(item["capacity"] for item in selectable)
     return {
         "rooms": preview,
         "student_count": student_count,
         "available_capacity": available_capacity,
-        "capacity_sufficient": student_count is None or available_capacity >= student_count,
-        "capacity_gap": None if student_count is None else available_capacity - student_count,
-        "recommended_room_count": None if student_count is None else ceil(student_count / 45),
+        "resource_allocation_mode": resource_allocation_mode,
+        "capacity_sufficient": bool(selectable) if resource_allocation_mode == "shared_pool" else (student_count is None or available_capacity >= student_count),
+        "capacity_gap": None if resource_allocation_mode == "shared_pool" or student_count is None else available_capacity - student_count,
+        "recommended_room_count": len(selectable) if resource_allocation_mode == "shared_pool" else (None if student_count is None else ceil(student_count / 45)),
     }
 
 
@@ -426,6 +439,7 @@ async def preview_allocation_rule(
 
 @router.get("/facilities/allocation-rules")
 async def list_allocation_rules(
+    academic_year: str | None = None,
     term: str = "1",
     tenant_id: int = Depends(get_current_tenant),
     session: AsyncSession = Depends(get_session),
@@ -436,6 +450,7 @@ async def list_allocation_rules(
     rules = list((await session.execute(select(ResourceAllocationRule).where(
         ResourceAllocationRule.tenant_id == tenant_id,
         ResourceAllocationRule.status == "active",
+        *([ResourceAllocationRule.academic_year == academic_year] if academic_year else []),
         ResourceAllocationRule.term == term,
     ).order_by(ResourceAllocationRule.id.desc()))).scalars().all())
     counts = dict((await session.execute(select(
@@ -443,6 +458,7 @@ async def list_allocation_rules(
     ).where(
         RoomCohortAllocation.tenant_id == tenant_id,
         RoomCohortAllocation.status == "active",
+        *([RoomCohortAllocation.academic_year == academic_year] if academic_year else []),
         RoomCohortAllocation.term == term,
     ).group_by(RoomCohortAllocation.rule_id))).all())
     return {"code": 0, "message": "ok", "data": [
@@ -472,7 +488,25 @@ async def create_allocation_rule(
     else:
         rooms = [await session.get(Room, room_id) for room_id in matched_by_id]
         rooms = [room for room in rooms if room is not None]
-    if preview_data["student_count"] is not None:
+    if body.allocation_mode == "exclusive" and rooms:
+        occupied_rows = list((await session.execute(select(
+            RoomCohortAllocation.room_id,
+            RoomCohortAllocation.rule_id,
+        ).where(
+            RoomCohortAllocation.tenant_id == tenant_id,
+            RoomCohortAllocation.room_id.in_([room.id for room in rooms]),
+            RoomCohortAllocation.academic_year == body.academic_year,
+            RoomCohortAllocation.term == body.term,
+            RoomCohortAllocation.status == "active",
+            RoomCohortAllocation.allocation_mode == "exclusive",
+        ))).all())
+        if occupied_rows:
+            occupied_room_ids = {room_id for room_id, _rule_id in occupied_rows}
+            raise HTTPException(
+                status_code=409,
+                detail=f"有 {len(occupied_room_ids)} 间教室已被其他独占规则占用，请先释放原规则后再分配",
+            )
+    if preview_data["resource_allocation_mode"] == "cohort_capacity" and preview_data["student_count"] is not None:
         selected_capacity = sum(room.capacity for room in rooms)
         if selected_capacity < preview_data["student_count"]:
             raise HTTPException(status_code=422, detail=f"所选场室容量不足，还缺少 {preview_data['student_count'] - selected_capacity} 个座位")
@@ -520,30 +554,106 @@ async def delete_allocation_rule(
         RoomCohortAllocation.rule_id == rule_id,
     ))).scalars().all())
     room_ids = {allocation.room_id for allocation in allocations}
-    generated_classes = list((await session.execute(select(Class).where(
-        Class.tenant_id == tenant_id,
-        Class.home_room_id.in_(room_ids) if room_ids else False,
-    ))).scalars().all())
-    generated_class_ids = {item.id for item in generated_classes if item.id is not None}
-    unassigned_students = 0
-    if generated_class_ids:
-        students = list((await session.execute(select(Student).where(
-            Student.tenant_id == tenant_id,
-            Student.class_id.in_(generated_class_ids),
+    assigned_classes: list[Class] = []
+    if room_ids:
+        assigned_classes = list((await session.execute(select(Class).where(
+            Class.tenant_id == tenant_id,
+            Class.home_room_id.in_(room_ids),
+            Class.academic_year == rule.academic_year,
+            Class.term == rule.term,
         ))).scalars().all())
-        for student in students:
+    class_ids = [cls.id for cls in assigned_classes if cls.id is not None]
+    assigned_students: list[Student] = []
+    if class_ids:
+        assigned_students = list((await session.execute(select(Student).where(
+            Student.tenant_id == tenant_id,
+            Student.class_id.in_(class_ids),
+        ))).scalars().all())
+        for student in assigned_students:
             student.class_id = None
-            session.add(student)
-        unassigned_students = len(students)
-        for class_item in generated_classes:
-            await session.delete(class_item)
+    memberships: list[StudentClassMembership] = []
+    if class_ids:
+        memberships = list((await session.execute(select(StudentClassMembership).where(
+            StudentClassMembership.tenant_id == tenant_id,
+            StudentClassMembership.class_id.in_(class_ids),
+            StudentClassMembership.academic_year == rule.academic_year,
+            StudentClassMembership.term == rule.term,
+            StudentClassMembership.status == "active",
+        ))).scalars().all())
+        for membership in memberships:
+            membership.status = "removed"
+    teacher_assignments: list[TeachingAssignment] = []
+    if class_ids:
+        teacher_assignments = list((await session.execute(select(TeachingAssignment).where(
+            TeachingAssignment.tenant_id == tenant_id,
+            TeachingAssignment.class_id.in_(class_ids),
+            TeachingAssignment.academic_year == rule.academic_year,
+            TeachingAssignment.term == rule.term,
+        ))).scalars().all())
+        for assignment in teacher_assignments:
+            await session.delete(assignment)
+        for cls in assigned_classes:
+            cls.home_room_id = None
     for allocation in allocations:
         await session.delete(allocation)
     await session.delete(rule)
     await session.commit()
-    return {"code": 0, "message": "ok", "data": {
-        "deleted_class_count": len(generated_classes),
-        "unassigned_student_count": unassigned_students,
+    return {"code": 0, "message": "资源分配规则已硬删除", "data": {
+        "deleted_class_count": len(assigned_classes),
+        "released_student_count": len({item.id for item in assigned_students} | {
+            item.student_id for item in memberships
+        }),
+        "deleted_teacher_binding_count": len(teacher_assignments),
+        "released_room_count": len(room_ids),
+    }}
+
+
+@router.post("/facilities/allocation-rules/{rule_id}/release")
+async def release_allocation_rule(
+    rule_id: int,
+    tenant_id: int = Depends(get_current_tenant),
+    session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user),
+):
+    """释放规则占用的教室，但保留规则和历史记录。"""
+    await require_manager(session, user)
+    rule = await tenant_item(session, ResourceAllocationRule, rule_id, tenant_id, "资源划分规则")
+    allocations = list((await session.execute(select(RoomCohortAllocation).where(
+        RoomCohortAllocation.tenant_id == tenant_id,
+        RoomCohortAllocation.rule_id == rule_id,
+        RoomCohortAllocation.status == "active",
+    ))).scalars().all())
+    room_ids = {allocation.room_id for allocation in allocations}
+    assigned_classes: list[Class] = []
+    if room_ids:
+        assigned_classes = list((await session.execute(select(Class).where(
+            Class.tenant_id == tenant_id,
+            Class.home_room_id.in_(room_ids),
+            Class.academic_year == rule.academic_year,
+            Class.term == rule.term,
+        ))).scalars().all())
+    for cls in assigned_classes:
+        cls.home_room_id = None
+    released_class_ids = [cls.id for cls in assigned_classes if cls.id is not None]
+    teacher_assignments: list[TeachingAssignment] = []
+    if released_class_ids:
+        teacher_assignments = list((await session.execute(select(TeachingAssignment).where(
+            TeachingAssignment.tenant_id == tenant_id,
+            TeachingAssignment.class_id.in_(released_class_ids),
+            TeachingAssignment.academic_year == rule.academic_year,
+            TeachingAssignment.term == rule.term,
+        ))).scalars().all())
+        for assignment in teacher_assignments:
+            await session.delete(assignment)
+    for allocation in allocations:
+        allocation.status = "released"
+    rule.status = "released"
+    await session.commit()
+    return {"code": 0, "message": "资源已释放", "data": {
+        "released_room_count": len(room_ids),
+        "unbound_class_count": len(assigned_classes),
+        "released_teacher_binding_count": len(teacher_assignments),
+        "rule_id": rule_id,
     }}
 
 
@@ -638,10 +748,14 @@ async def _collect_planning_rooms(
         RoomCohortAllocation.term == term,
     ))).scalars().all())
     alloc_by_room: dict[int, set[str]] = {}
+    exclusive_room_ids: set[int] = set()
+    target_cohort_label = cohort_label or expected_cohort_label(academic_year, grade.level)
     for alloc in all_allocations:
         alloc_by_room.setdefault(alloc.room_id, set()).add(alloc.cohort_label)
+        if alloc.cohort_label == target_cohort_label and alloc.allocation_mode == "exclusive":
+            exclusive_room_ids.add(alloc.room_id)
     # 已分配届别的 room_id 全集(第一层硬过滤：未分配届别的教室一律不进候选池)
-    allocated_room_ids: set[int] = set(alloc_by_room.keys())
+    allocated_room_ids: set[int] = set(exclusive_room_ids)
 
     # 1) 已生成班级的教室 → home_room_id 集合
     skip_ids: set[int] = set()
@@ -651,6 +765,8 @@ async def _collect_planning_rooms(
                 Class.tenant_id == tenant_id,
                 Class.home_room_id.isnot(None),
                 Class.grade_id == grade_id,
+                Class.academic_year == academic_year,
+                Class.term == term,
                 *([Class.cohort_label == cohort_label] if cohort_label else []),
             )
         )).fetchall()
@@ -690,7 +806,7 @@ async def _collect_planning_rooms(
         if campus_building_ids and room.building_id not in campus_building_ids:
             continue
         # 第二层硬约束：必须属于当前选中的年级部/届别。
-        if cohort_label and cohort_label not in alloc_by_room.get(room.id, set()):
+        if target_cohort_label and target_cohort_label not in alloc_by_room.get(room.id, set()):
             continue
         if strategy == 'custom' and custom_selected_ids and room.id not in custom_selected_ids:
             continue
@@ -836,6 +952,8 @@ async def _run_class_planning_preview(
     existing_count = (await session.execute(select(func.count(Class.id)).where(
         Class.tenant_id == tenant_id,
         Class.grade_id == grade.id,
+        Class.academic_year == body.academic_year,
+        Class.term == body.term,
     ))).scalar() or 0
 
     # building preferences 的反向映射
@@ -976,9 +1094,11 @@ async def execute_class_planning(
     existing_home_room_ids = {r for (r,) in (await session.execute(select(Class.home_room_id).where(
         Class.tenant_id == tenant_id, Class.grade_id == grade.id,
         Class.cohort_label == cohort_label, Class.home_room_id.isnot(None),
+        Class.academic_year == body.academic_year, Class.term == body.term,
     ))).fetchall() if r is not None}
     existing_names = {r for (r,) in (await session.execute(select(Class.name).where(
         Class.tenant_id == tenant_id, Class.grade_id == grade.id, Class.cohort_label == cohort_label,
+        Class.academic_year == body.academic_year, Class.term == body.term,
     ))).fetchall()}
     created: list[Class] = []
     for item in plan:
@@ -1000,6 +1120,8 @@ async def execute_class_planning(
             home_room_id=item.room_id,
             planned_student_count=item.capacity,
             cohort_label=cohort_label,
+            academic_year=body.academic_year,
+            term=body.term,
         )
         session.add(new_class)
         created.append(new_class)
@@ -1014,31 +1136,3 @@ async def execute_class_planning(
         "by_type": readable_summary,
         "class_ids": [c.id for c in created if c.id is not None],
     }}
-
-
-@router.get("/meetings")
-async def list_meetings(tenant_id: int = Depends(get_current_tenant), session: AsyncSession = Depends(get_session),
-    user: User = Depends(get_current_user)):
-    rows = (await session.execute(select(Meeting, Room.name).join(Room, Room.id == Meeting.room_id)
-        .where(Meeting.tenant_id == tenant_id).order_by(Meeting.start_at.desc()))).all()
-    return {"code": 0, "message": "ok", "data": [{**meeting.model_dump(), "room_name": room_name} for meeting, room_name in rows]}
-
-@router.post("/meetings", status_code=status.HTTP_201_CREATED)
-async def create_meeting(body: MeetingIn, tenant_id: int = Depends(get_current_tenant),
-    session: AsyncSession = Depends(get_session), user: User = Depends(get_current_user)):
-    await require_manager(session, user)
-    room = await tenant_item(session, Room, body.room_id, tenant_id, "场室")
-    if room.status != "available" or not room.is_meeting_enabled:
-        raise HTTPException(status_code=422, detail="该场室当前不可用于会议")
-    conflict = (await session.execute(select(func.count(RoomBooking.id)).where(
-        RoomBooking.tenant_id == tenant_id, RoomBooking.room_id == room.id, RoomBooking.status == "active",
-        RoomBooking.start_at < body.end_at, RoomBooking.end_at > body.start_at,
-    ))).scalar_one()
-    if conflict:
-        raise HTTPException(status_code=409, detail="该场室在所选时间已被占用")
-    meeting = Meeting(tenant_id=tenant_id, organizer_id=user.id, **body.model_dump()); session.add(meeting)
-    await session.flush()
-    session.add(RoomBooking(tenant_id=tenant_id, room_id=room.id, source_type="meeting", source_id=meeting.id,
-        title=meeting.title, start_at=meeting.start_at, end_at=meeting.end_at))
-    await session.commit(); await session.refresh(meeting)
-    return {"code": 0, "message": "ok", "data": {**meeting.model_dump(), "room_name": room.name}}

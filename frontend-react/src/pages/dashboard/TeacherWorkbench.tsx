@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, App, Checkbox, Input, Spin } from 'antd'
 import dayjs from 'dayjs'
 import { useNavigate } from 'react-router-dom'
-import { orgApi, schedulingApi, teacherProfilesApi } from '@/api'
+import { fileCenterApi, orgApi, schedulingApi, teacherProfilesApi } from '@/api'
 import Icon from '@/components/Icon'
 import { selectDisplayName, useAuthStore } from '@/store/auth'
 import type { ScheduleEntry, TeacherScheduleEntry } from '@/types'
@@ -193,6 +193,25 @@ export default function TeacherWorkbench() {
     setTodoDraft('')
   }
 
+  const exportHeadStudentTimetables = async () => {
+    if (view !== 'head' || !headPills.length) {
+      message.warning('当前没有可导出的班级')
+      return
+    }
+    try {
+      await fileCenterApi.exportTimetable({
+        academic_year: academicYear,
+        term,
+        class_ids: headPills.map((item) => item.id),
+        sheets: ['cover', 'student_timetables'],
+        student_zip: true,
+      })
+      message.success(`已创建 ${headPills.length} 个班级的学生课表导出任务，可在文件中心下载`)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '学生课表导出失败')
+    }
+  }
+
   return (
     <div className="teacher-desk">
       <Spin spinning={loading}>
@@ -230,12 +249,8 @@ export default function TeacherWorkbench() {
             <form className="td-add-todo" onSubmit={(event) => { event.preventDefault(); addTodo() }}><Input aria-label="新待办事项" placeholder="添加教学待办…" value={todoDraft} onChange={(event) => setTodoDraft(event.target.value)} maxLength={120} /><button type="submit" disabled={!todoDraft.trim()} aria-label="添加待办"><Icon name="plus" size={18} /></button></form>
           </section>
           <section className="td-card">
-            <div className="td-section-heading"><h2>班级关注</h2>{classPills.length > 0 && <select aria-label="关注班级" value={activeClassId ?? ''} onChange={(event) => setClassId(Number(event.target.value))}>{classPills.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</div>
+            <div className="td-section-heading"><h2>班级关注</h2><div className="td-heading-actions">{view === 'head' && <button onClick={() => void exportHeadStudentTimetables()}>导出所管学生课表</button>}{classPills.length > 0 && <select aria-label="关注班级" value={activeClassId ?? ''} onChange={(event) => setClassId(Number(event.target.value))}>{classPills.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</div></div>
             <div className="td-attention">{[{ label: '作业异常', icon: 'clipboard' }, { label: '近期考试', icon: 'file-text' }, { label: '成绩波动', icon: 'chart' }].map((item) => <div key={item.label}><i><Icon name={item.icon} size={25} /></i><span><b>{item.label}</b><small>暂无统计数据</small></span></div>)}</div>
-          </section>
-          <section className="td-card">
-            <div className="td-section-heading"><h2>教研活动</h2><button onClick={() => navigate('/meetings')}>会议管理 <Icon name="arrow-right" size={14} /></button></div>
-            <div className="td-research"><i><Icon name="users" size={25} /></i><div><b>暂无教研活动数据</b><p>前往会议管理查看教学会议安排</p></div></div>
           </section>
         </div>
       </Spin>

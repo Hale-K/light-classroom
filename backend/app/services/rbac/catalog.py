@@ -7,6 +7,11 @@ from app.services.rbac.seed import PERMISSION_SEED
 
 
 _schema_checked = False
+RETIRED_PERMISSION_PREFIXES = ("scan:", "paper:", "grading:")
+
+
+def _is_retired_permission(code: str) -> bool:
+    return code.startswith(RETIRED_PERMISSION_PREFIXES)
 
 
 async def ensure_permission_schema(session: AsyncSession) -> None:
@@ -56,6 +61,10 @@ async def list_permissions(session: AsyncSession) -> list[dict]:
     grouped: dict[str, list[dict]] = {}
     order: list[str] = []
     for item in rows:
+        # Older databases may still have catalog rows until the cleanup migration
+        # runs. Do not expose removed modules in the role editor in the meantime.
+        if _is_retired_permission(item.code):
+            continue
         if item.module not in grouped:
             grouped[item.module] = []
             order.append(item.module)
@@ -75,6 +84,8 @@ async def create_permission(
     module = module.strip()
     if not code or not name or not module:
         raise ValueError("编码、名称、模块不能为空")
+    if _is_retired_permission(code):
+        raise ValueError("该功能已下线，不能重新添加权限")
     exists = (
         await session.execute(select(Permission.id).where(Permission.code == code))
     ).first()
@@ -106,6 +117,8 @@ async def update_permission(
     ).scalar_one_or_none()
     if item is None:
         raise ValueError("权限点不存在")
+    if _is_retired_permission(item.code):
+        raise ValueError("该权限已下线，请先执行权限清理迁移")
     if name is not None:
         item.name = name.strip()
     if module is not None:

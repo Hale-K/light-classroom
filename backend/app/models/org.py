@@ -111,11 +111,16 @@ class Grade(TenantMixin, SQLModel, table=True):
 class Class(TenantMixin, SQLModel, table=True):
     """班级"""
     __table_args__ = (
-        UniqueConstraint("tenant_id", "grade_id", "cohort_label", "name", name="uq_class_grade_cohort_name"),
+        UniqueConstraint(
+            "tenant_id", "grade_id", "cohort_label", "academic_year", "term", "name",
+            name="uq_class_grade_cohort_name",
+        ),
         {"comment": "班级"},
     )
     id: int | None = Field(default=None, primary_key=True)
     grade_id: int = Field(index=True)
+    academic_year: str = Field(default="2026-2027", max_length=20, index=True, description="所属学年")
+    term: str = Field(default="1", max_length=20, index=True, description="所属学期")
     campus_id: int | None = Field(default=None, index=True)
     home_room_id: int | None = Field(default=None, index=True)
     class_type: str = Field(default="regular", max_length=30, index=True, description="尖子班/重点班/普通班等")
@@ -169,6 +174,26 @@ class StudentGradeMembership(TimestampMixin, TenantMixin, SQLModel, table=True):
     grade_unit_id: int = Field(index=True, foreign_key="organizationunit.id", ondelete="RESTRICT")
     academic_year: str = Field(max_length=20, index=True, description="学年快照")
     cohort_label: str | None = Field(default=None, max_length=30, index=True, description="届别快照")
+    status: str = Field(default="active", max_length=20, index=True)
+
+
+class StudentClassMembership(TimestampMixin, TenantMixin, SQLModel, table=True):
+    """学生在指定届别、学年学期和年级中的行政班归属。"""
+    __tablename__ = "studentclassmembership"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "student_id", "cohort_label", "academic_year", "term", "grade_id",
+            name="uq_studentclassmembership_scope",
+        ),
+        {"comment": "学生行政班学期关联"},
+    )
+    id: int | None = Field(default=None, primary_key=True)
+    student_id: int = Field(index=True, foreign_key="student.id", ondelete="RESTRICT")
+    class_id: int = Field(index=True, foreign_key="class.id", ondelete="RESTRICT")
+    grade_id: int = Field(index=True, foreign_key="grade.id", ondelete="RESTRICT")
+    cohort_label: str = Field(max_length=30, index=True, description="届别")
+    academic_year: str = Field(max_length=20, index=True, description="学年")
+    term: str = Field(max_length=20, index=True, description="学期")
     status: str = Field(default="active", max_length=20, index=True)
 
 

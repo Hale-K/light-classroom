@@ -11,6 +11,7 @@ import {
   InputNumber,
   Modal,
   Pagination,
+  Popconfirm,
   Select,
   Space,
   Table,
@@ -19,11 +20,11 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import type { DataNode } from 'antd/es/tree'
-import { authApi, facilityApi, orgApi, organizationApi, schedulingApi } from '@/api'
+import { authApi, facilityApi, orgApi, organizationApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
-import type { Building, Campus, ClassInfo, FacilityOverview, Grade, OrganizationUnit, ResourceAllocationRule, RoomResource, SchedulingGridConfig } from '@/types'
+import type { Building, Campus, ClassInfo, FacilityOverview, Grade, OrganizationUnit, ResourceAllocationRule, RoomResource } from '@/types'
 import AllocationRuleDrawer from './allocation-rule-drawer'
 import { hasRoomFeature } from './room-features'
 
@@ -166,8 +167,8 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [resourceBuildingId, setResourceBuildingId] = useState<number>()
   const [resourceFloor, setResourceFloor] = useState<number>()
   const [resourceTerm, setResourceTerm] = useState<'1' | '2'>('1')
-  const [resourceAcademicYear, setResourceAcademicYear] = useState('2026-2027')
-  const [gridConfig, setGridConfig] = useState<SchedulingGridConfig | null>(null)
+  const [resourceAcademicYear, setResourceAcademicYear] = useState('')
+  const [resourceContextReady, setResourceContextReady] = useState(false)
   const [appliedResourceKeyword, setAppliedResourceKeyword] = useState('')
   const [appliedResourceBuildingId, setAppliedResourceBuildingId] = useState<number>()
   const [appliedResourceFloor, setAppliedResourceFloor] = useState<number>()
@@ -203,24 +204,43 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     setLoading(true)
     try {
       const [overview, roomItems, classItems, gradeItems, ruleItems, orgTree] = await Promise.all([
-        facilityApi.overview(), facilityApi.rooms({ academic_year: resourceAcademicYear, term: resourceTerm }), orgApi.classes(), orgApi.grades(), facilityApi.allocationRules({ academic_year: resourceAcademicYear, term: resourceTerm }), organizationApi.tree(),
+        facilityApi.overview(), facilityApi.rooms({ academic_year: resourceAcademicYear, term: resourceTerm }), orgApi.classes({ academic_year: resourceAcademicYear, term: resourceTerm }), orgApi.grades(), facilityApi.allocationRules({ academic_year: resourceAcademicYear, term: resourceTerm }), organizationApi.tree(),
       ])
       setData(overview); setRooms(roomItems); setClasses(classItems); setGrades(gradeItems); setAllocationRules(ruleItems)
       setGradeGroups(flattenGradeGroups(orgTree.units))
-      const configuredGrid = await schedulingApi.gridConfig({ academic_year: resourceAcademicYear, term: resourceTerm }).catch(() => null)
-      setGridConfig(configuredGrid)
     }
     catch (error) { message.error(error instanceof Error ? error.message : '加载校区楼宇失败') }
     finally { setLoading(false) }
+  }
+
+  const deleteAllocationRule = async (rule: ResourceAllocationRule) => {
+    try {
+      const result = await facilityApi.deleteAllocationRule(rule.id)
+      message.success(`已硬删除「${rule.name}」，释放 ${result.released_room_count} 间教室、${result.released_student_count} 个学生关系、${result.deleted_class_count} 个班级绑定和 ${result.deleted_teacher_binding_count} 条教师绑定`)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除资源分配规则失败')
+    }
+  }
+
+  const releaseAllocationRule = async (rule: ResourceAllocationRule) => {
+    try {
+      const result = await facilityApi.releaseAllocationRule(rule.id)
+      message.success(`已释放「${rule.name}」的 ${result.released_room_count} 间教室，解除 ${result.unbound_class_count} 个班级绑定和 ${result.released_teacher_binding_count} 条教师绑定`)
+      await load()
+    } catch (error) { message.error(error instanceof Error ? error.message : '释放空间资源失败') }
   }
 
   useEffect(() => {
     void authApi.academicYears().then((settings) => {
       if (settings.current_term) setResourceTerm(settings.current_term)
       if (settings.current_academic_year) setResourceAcademicYear(settings.current_academic_year)
-    }).catch(() => undefined)
+      setResourceContextReady(true)
+    }).catch((error) => {
+      message.error(error instanceof Error ? error.message : '读取当前学年学期失败')
+    })
   }, [])
-  useEffect(() => { void load() }, [resourceAcademicYear, resourceTerm])
+  useEffect(() => { if (resourceContextReady && resourceAcademicYear) void load() }, [resourceAcademicYear, resourceContextReady, resourceTerm])
 
   const createCampus = async (values: CampusForm) => {
     setSaving(true)
@@ -360,12 +380,21 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     if (planCohortLabel) {
       base = base.filter((r) => (r.cohort_allocations || []).some((a) => a.cohort_label === planCohortLabel))
     }
-    // 3) 跳过已生成过班级占用的教室
+    // 3) 行政班只能使用当前届别的独占教室；同届复用教室留给走班教学班。
+    base = base.filter((r) => (r.cohort_allocations || []).some((a) => a.cohort_label === planCohortLabel && a.allocation_mode === 'exclusive'))
+    // 4) 跳过已生成过班级占用的教室
     if (planSkipGenerated) {
       base = base.filter((r) => !(r.class_assignments?.length))
     }
     return base.sort((a, b) => a.building_name.localeCompare(b.building_name, 'zh-Hans-CN') || a.floor - b.floor || (a.code || '').localeCompare(b.code || ''))
   }, [planGradeId, data?.buildings, grades, assignedRooms, planCohortLabel, planSkipGenerated])
+  const planResourceModeCounts = useMemo(() => {
+    const scoped = assignedRooms.filter((room) => (room.cohort_allocations || []).some((allocation) => allocation.cohort_label === planCohortLabel))
+    return {
+      exclusive: scoped.filter((room) => room.cohort_allocations?.some((allocation) => allocation.cohort_label === planCohortLabel && allocation.allocation_mode === 'exclusive')).length,
+      shared: scoped.filter((room) => room.cohort_allocations?.some((allocation) => allocation.cohort_label === planCohortLabel && allocation.allocation_mode === 'shared')).length,
+    }
+  }, [assignedRooms, planCohortLabel])
   /** 剩余可设置：候选教室池减去本次已请求数量，用于 UI 提示 */
   const planTotalRequested = planTypeCounts.elite + planTypeCounts.key + planTypeCounts.experimental + planTypeCounts.regular
   const planRemainingCapacity = Math.max(0, planCandidateRooms.length - planTotalRequested)
@@ -542,7 +571,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     { title: '空间节点', dataIndex: 'name', render: (name, row) => <><strong>{name}</strong><div className="facility-cell-note">{row.note || (row.node_type === 'campus' ? '校区' : '未设置楼宇编号')}</div></> },
     { title: '类型', dataIndex: 'node_type', width: 110, render: (_, row) => row.node_type === 'campus' ? '校区' : row.node_type === 'building' ? '楼宇' : row.node_type === 'floor' ? '楼层' : ROOM_TYPE[row.room!.room_type] },
     { title: '规模', width: 120, render: (_, row) => row.campus?.student_capacity ? `${row.campus.student_capacity.toLocaleString()} 人` : row.node_type === 'building' ? `${row.building!.floor_count} 层` : row.node_type === 'floor' ? `${row.children?.length || 0} 间` : row.room ? `${row.room.capacity} 人` : '—' },
-    { title: '资源信息', render: (_, row) => row.node_type === 'building' ? `${row.building!.room_count} 间场室 · ${row.building!.multimedia_count} 间多媒体` : row.node_type === 'floor' ? <Space size={[4, 4]} wrap>{[...new Set((row.children || []).flatMap((child) => child.room?.cohort_allocations?.map((item) => item.cohort_label) || []))].map((label) => <Tag key={label}>{label}</Tag>)}</Space> : row.room ? <Space size={[4, 4]} wrap>{hasRoomFeature(row.room.features, 'multimedia') && <Tag>多媒体</Tag>}{row.room.cohort_allocations?.map((item) => <Tag color="blue" key={`${item.rule_id}-${item.cohort_label}`}>{item.cohort_label}·{item.allocation_mode === 'shared' ? '共享' : '专属'}</Tag>)}{row.room.is_schedulable && <Tag>排课</Tag>}{row.room.is_exam_enabled && <Tag>排考</Tag>}</Space> : '—' },
+    { title: '资源信息', render: (_, row) => row.node_type === 'building' ? `${row.building!.room_count} 间场室 · ${row.building!.multimedia_count} 间多媒体` : row.node_type === 'floor' ? <Space size={[4, 4]} wrap>{[...new Set((row.children || []).flatMap((child) => child.room?.cohort_allocations?.map((item) => item.cohort_label) || []))].map((label) => <Tag key={label}>{label}</Tag>)}</Space> : row.room ? <Space size={[4, 4]} wrap>{hasRoomFeature(row.room.features, 'multimedia') && <Tag>多媒体</Tag>}{row.room.cohort_allocations?.map((item) => <Tag color="blue" key={`${item.rule_id}-${item.cohort_label}`}>{item.cohort_label}·{item.allocation_mode === 'shared' ? '同届复用' : '独占'}</Tag>)}{row.room.is_schedulable && <Tag>排课</Tag>}{row.room.is_exam_enabled && <Tag>排考</Tag>}</Space> : '—' },
     { title: '使用状态', width: 140, render: (_, row) => row.node_type === 'building' ? <Select size="small" value={row.building!.status} loading={statusSavingId === row.building!.id} options={BUILDING_STATUS} style={{ width: 110 }} onChange={(value) => void updateStatus(row.building!, value as BuildingStatus)} /> : <span className="facility-status"><i />{row.room?.status === 'available' || !row.room ? '正常使用' : row.room.status}</span> },
   ]
 
@@ -591,7 +620,6 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
         </div>}
       </div>
         {focus === 'allocation' && <>
-          <div className="facility-term-toolbar"><span>{resourceAcademicYear} · 当前资源学期</span><Select value={resourceTerm} options={[{ value: '1', label: '上学期' }, { value: '2', label: '下学期' }]} onChange={setResourceTerm} /><span className="facility-muted">{gridConfig ? `课位结构：${gridConfig.days}天 / 每天${gridConfig.periods_per_day}节${gridConfig.enable_evening ? ' · 含晚自习' : ''}` : '课位结构尚未配置'}</span></div>
           <Table rowKey="id" size="middle" dataSource={allocationRules} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
           { title: '规则名称', dataIndex: 'name', width: 220, render: (value) => <strong>{value}</strong> },
           { title: '目标届别', dataIndex: 'cohort_label', width: 120, render: (value) => <Tag color="blue">{value}</Tag> },
@@ -599,21 +627,27 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           { title: '学期', dataIndex: 'term', width: 80, render: (value) => value === '1' ? '上学期' : '下学期' },
           { title: '校区', key: 'campus', width: 150, render: (_, row) => data?.campuses.find((campus) => campus.id === row.campus_id)?.name || '—' },
           { title: '资源范围', key: 'scope', render: (_, row) => `${row.building_ids?.length ? `${row.building_ids.length} 栋楼宇` : '全部楼宇'} · ${row.floor_from ?? '不限'}-${row.floor_to ?? '不限'}层${row.room_type ? ` · ${ROOM_TYPE[row.room_type]}` : ''}` },
-          { title: '分配方式', dataIndex: 'allocation_mode', width: 100, render: (value) => <Tag>{value === 'shared' ? '共享' : '专属'}</Tag> },
+          { title: '资源归属', dataIndex: 'allocation_mode', width: 110, render: (value) => <Tag>{value === 'shared' ? '同届复用' : '独占'}</Tag> },
           { title: '匹配教室', dataIndex: 'matched_room_count', width: 100, render: (value) => `${value} 间` },
           { title: '状态', dataIndex: 'status', width: 90, render: (value) => <Tag color={value === 'active' ? 'green' : 'default'}>{value === 'active' ? '生效中' : '已停用'}</Tag> },
-          { title: '操作', key: 'action', width: 110, render: (_, row) => <Button type="link" size="small" onClick={() => { setViewAllocationRule(row); setRuleOpen(true) }}>查看资源</Button> },
+          { title: '操作', key: 'action', width: 290, render: (_, row) => <Space size={4}><Button type="link" size="small" onClick={() => { setViewAllocationRule(row); setRuleOpen(true) }}>查看资源</Button><Popconfirm title="释放这条规则占用的教室？" description="释放后教室可重新分配，并同时解除班级教室绑定和教师任教绑定；规则记录会保留。" okText="确认释放" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void releaseAllocationRule(row)}><Button type="link" danger size="small">释放资源</Button></Popconfirm><Popconfirm title="硬删除这条资源分配规则？" description="此操作不可恢复：会删除规则和教室分配记录，并解除班级教室绑定、删除教师任教绑定；班级、学生和教师账号不会删除。" okText="确认硬删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void deleteAllocationRule(row)}><Button type="link" danger size="small">硬删除</Button></Popconfirm></Space> },
         ]} locale={{ emptyText: <EmptyState icon="sitemap" title={`暂无${resourceTerm === '1' ? '上' : '下'}学期资源分配规则`} desc="切换学期查看对应资源，或点击右上角“新建分配规则”创建。" height={240} /> }} />
         </>}
       {focus === 'class-planning' && <div className="facility-class-resource-grid">
-        {pagedResourceRooms.map((room) => <article className="facility-class-resource-card" key={room.id}>
-          <div className="facility-class-resource-card-top"><div><span className="facility-class-resource-kicker">{room.building_name} · {room.floor}层</span><strong>{room.name}</strong></div><Tag color={room.class_assignments?.length ? 'green' : 'gold'}>{room.class_assignments?.length ? '已生成班级' : '待生成班级'}</Tag></div>
+        {pagedResourceRooms.map((room) => {
+          // 卡片展示全部本学期分配，不依赖生成班级弹窗当前选中的届别。
+          const allocations = room.cohort_allocations || []
+          const hasExclusive = allocations.some((item) => item.allocation_mode === 'exclusive')
+          const hasShared = allocations.some((item) => item.allocation_mode === 'shared')
+          const hasClasses = Boolean(room.class_assignments?.length)
+          return <article className="facility-class-resource-card" key={room.id}>
+          <div className="facility-class-resource-card-top"><div><span className="facility-class-resource-kicker">{room.building_name} · {room.floor}层</span><strong>{room.name}</strong></div><Space size={4} wrap>{hasExclusive && <Tag color="blue">行政班独占</Tag>}{hasShared && <Tag color="purple">走班共享池</Tag>}{hasClasses && <Tag color="green">已生成班级</Tag>}</Space></div>
           <div className="facility-class-resource-meta"><span>{room.code || '未设置编号'}</span><span>{room.capacity}人容量</span></div>
           <div className="facility-class-resource-cohorts"><span>所属届别</span><Space size={[4, 4]} wrap>{room.cohort_allocations?.map((item) => <Tag color="blue" key={`${item.rule_id}-${item.cohort_label}`}>{item.cohort_label}</Tag>)}</Space></div>
-          <div className="facility-class-resource-assignment">{room.class_assignments?.length ? <Space size={[4, 4]} wrap>{room.class_assignments.map((item) => <Tag key={item.id}>{item.name}</Tag>)}</Space> : <span className="pending-text">这间教室还没有生成行政班</span>}</div>
-          <Button type={room.class_assignments?.length ? 'default' : 'primary'} block onClick={() => room.class_assignments?.length ? openClassPlan(room) : openCreateClass(room)}>{room.class_assignments?.length ? '调整班级' : '根据此教室生成行政班'}</Button>
-        </article>)}
-        {!filteredResourceRooms.length && <EmptyState icon="building" title={assignedRooms.length ? '没有匹配的教室' : '暂无可划分教室'} desc={assignedRooms.length ? '请调整查询条件后重试。' : '请先在“资源分配规则”中将教室分配给届别。'} height={240} />}
+          <div className="facility-class-resource-assignment">{hasClasses ? <Space size={[4, 4]} wrap>{room.class_assignments!.map((item) => <Tag key={item.id}>{item.name}</Tag>)}</Space> : hasShared && !hasExclusive ? <span className="pending-text">用于走班教学，不生成行政班</span> : <span className="pending-text">这间教室还没有生成行政班</span>}</div>
+          {hasExclusive && <Button type={hasClasses ? 'default' : 'primary'} block onClick={() => hasClasses ? openClassPlan(room) : openCreateClass(room)}>{hasClasses ? '调整班级' : '根据此教室生成行政班'}</Button>}
+        </article>})}
+        {!filteredResourceRooms.length && <div className="facility-class-resource-empty"><EmptyState icon="building" title={assignedRooms.length ? '没有匹配的教室' : '暂无可划分教室'} desc={assignedRooms.length ? '请调整查询条件后重试。' : '请先在“资源分配规则”中将教室分配给届别。'} height={240} /></div>}
         {!!filteredResourceRooms.length && <div className="facility-resource-pagination"><span>共 {filteredResourceRooms.length} 间教室</span><Pagination current={resourcePage} pageSize={resourcePageSize} total={filteredResourceRooms.length} showTotal={(total, range) => `${range[0]}-${range[1]} / 共 ${total} 间`} showSizeChanger pageSizeOptions={[12, 24, 36, 48]} onChange={(nextPage, nextPageSize) => { const normalizedPageSize = nextPageSize || resourcePageSize; setResourcePageSize(normalizedPageSize); setResourcePage(normalizedPageSize !== resourcePageSize ? 1 : nextPage) }} /></div>}
       </div>}
     </section>}
@@ -643,11 +677,11 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       </Form>
     </Modal>
     <Modal title="新增场室" open={roomOpen} onCancel={() => setRoomOpen(false)} onOk={() => roomForm.submit()} confirmLoading={saving} okText="创建" width={600}>
-      <Form form={roomForm} layout="vertical" requiredMark={false} onFinish={createRoom} initialValues={{ floor: 1, capacity: 40, room_type: 'classroom', is_schedulable: true, is_exam_enabled: false, is_meeting_enabled: false }}>
+      <Form form={roomForm} layout="vertical" requiredMark={false} onFinish={createRoom} initialValues={{ floor: 1, capacity: 40, room_type: 'classroom', is_schedulable: true, is_exam_enabled: false }}>
         <div className="facility-form-grid"><Form.Item name="building_id" label="所属楼宇" rules={[{ required: true, message: '请选择楼宇' }]}><Select options={data?.buildings.map((item) => ({ label: item.name, value: item.id }))} /></Form.Item><Form.Item name="room_type" label="场室类型" rules={[{ required: true }]}><Select options={Object.entries(ROOM_TYPE).map(([value, label]) => ({ value, label }))} /></Form.Item></div>
         <div className="facility-form-grid"><Form.Item name="name" label="场室名称" rules={[{ required: true, message: '请输入场室名称' }]}><Input /></Form.Item><Form.Item name="code" label="场室编号"><Input /></Form.Item></div>
         <div className="facility-form-grid"><Form.Item name="floor" label="所在楼层"><InputNumber min={-5} max={100} style={{ width: '100%' }} /></Form.Item><Form.Item name="capacity" label="容纳人数"><InputNumber min={1} max={5000} style={{ width: '100%' }} /></Form.Item></div>
-        <div className="facility-checks"><Form.Item name="multimedia" valuePropName="checked"><Checkbox>配备多媒体</Checkbox></Form.Item><Form.Item name="is_schedulable" valuePropName="checked"><Checkbox>可用于排课</Checkbox></Form.Item><Form.Item name="is_exam_enabled" valuePropName="checked"><Checkbox>可用于排考</Checkbox></Form.Item><Form.Item name="is_meeting_enabled" valuePropName="checked"><Checkbox>可用于会议</Checkbox></Form.Item></div>
+        <div className="facility-checks"><Form.Item name="multimedia" valuePropName="checked"><Checkbox>配备多媒体</Checkbox></Form.Item><Form.Item name="is_schedulable" valuePropName="checked"><Checkbox>可用于排课</Checkbox></Form.Item><Form.Item name="is_exam_enabled" valuePropName="checked"><Checkbox>可用于排考</Checkbox></Form.Item></div>
       </Form>
     </Modal>
     <Modal title="分配到行政班" open={!!planningRoom} onCancel={() => setPlanningRoom(undefined)} onOk={() => void submitClassPlan()} confirmLoading={classPlanSaving} okText="确认分配" centered destroyOnHidden>
@@ -711,7 +745,8 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
               <span>第 1 步 · 指定班级类型规模</span>
               {planGradeId ? (
                 <>
-                  <Tag color="geekblue" style={{ border: 0, background: '#eff6ff' }}>可用教室池 <b style={{ color: '#1d4ed8' }}>{planCandidateRooms.length}</b> 间</Tag>
+                  <Tag color="geekblue" style={{ border: 0, background: '#eff6ff' }}>行政班独占教室 <b style={{ color: '#1d4ed8' }}>{planResourceModeCounts.exclusive}</b> 间</Tag>
+                  {planResourceModeCounts.shared > 0 && <Tag color="purple" style={{ border: 0, background: '#f5f3ff' }}>走班同届复用池 <b style={{ color: '#7c3aed' }}>{planResourceModeCounts.shared}</b> 间</Tag>}
                   {planTotalRequested > 0 && (
                     planIsShortage
                       ? <Tag color="red" style={{ border: 0 }}>缺口 <b>{planTotalRequested - planCandidateRooms.length}</b> 间</Tag>

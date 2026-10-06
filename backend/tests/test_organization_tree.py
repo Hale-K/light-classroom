@@ -1,4 +1,4 @@
-from app.services.org.organization import build_organization_tree
+from app.services.org.organization import build_organization_tree, organization_subtree_ids
 
 
 def test_build_organization_tree_keeps_persisted_parent_child_structure():
@@ -23,3 +23,28 @@ def test_orphaned_units_are_kept_at_root_instead_of_disappearing():
     )
 
     assert [item["id"] for item in tree] == [9]
+
+
+def test_archived_unit_and_active_descendants_are_hidden_from_current_tree():
+    tree = build_organization_tree(
+        [
+            {"id": 1, "parent_id": None, "name": "已归档部门", "status": "archived"},
+            {"id": 2, "parent_id": 1, "name": "仍标记活动的年级部", "status": "active"},
+            {"id": 3, "parent_id": 2, "name": "班级", "status": "active"},
+            {"id": 4, "parent_id": None, "name": "正常部门", "status": "active"},
+        ],
+        {},
+    )
+
+    assert [item["id"] for item in tree] == [4]
+
+
+def test_organization_subtree_includes_every_descendant():
+    units = [
+        {"id": 1, "parent_id": None},
+        {"id": 2, "parent_id": 1},
+        {"id": 3, "parent_id": 2},
+        {"id": 4, "parent_id": None},
+    ]
+
+    assert organization_subtree_ids(1, units) == {1, 2, 3}

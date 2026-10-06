@@ -225,7 +225,7 @@ class SeatItem:
 
 @dataclass(frozen=True)
 class ExamScheduleItem:
-    paper_id: int
+    course_key: int
     subject_id: int
     grade_id: int
     exam_date: date
@@ -266,7 +266,7 @@ def normalize_exam_room_resources(
 
 @dataclass(frozen=True)
 class ExamRoomAssignment:
-    paper_id: int
+    course_key: int
     subject_id: int
     grade_id: int
     exam_date: date
@@ -279,7 +279,7 @@ class ExamRoomAssignment:
 
 @dataclass(frozen=True)
 class ExamCandidateSeat:
-    paper_id: int
+    course_key: int
     subject_id: int
     grade_id: int
     student_id: int
@@ -391,7 +391,7 @@ class _TemplateExamScheduleStrategy(ExamScheduleStrategy):
             if slot is None:
                 raise ValueError(f"{subject_name or '未知学科'}未配置在{self.mode}高考排考模板中")
             result.append(ExamScheduleItem(
-                paper_id=int(paper["id"]),
+                course_key=int(paper["id"]),
                 subject_id=int(paper["subject_id"]),
                 grade_id=int(paper["grade_id"]),
                 exam_date=exam_days[slot.day_index],
@@ -403,7 +403,7 @@ class _TemplateExamScheduleStrategy(ExamScheduleStrategy):
                 paper_teacher_id=paper.get("teacher_id"),
             ))
         return sorted(result, key=lambda item: (
-            item.exam_date, item.session_index, item.grade_id, item.subject_id, item.paper_id,
+            item.exam_date, item.session_index, item.grade_id, item.subject_id, item.course_key,
         ))
 
 
@@ -4782,7 +4782,7 @@ class SequentialExamScheduleStrategy(ExamScheduleStrategy):
                 current_date += timedelta(days=1)
             start_time, end_time = sessions[session_index]
             result.append(ExamScheduleItem(
-                paper_id=int(paper["id"]),
+                course_key=int(paper["id"]),
                 subject_id=int(paper["subject_id"]),
                 grade_id=int(paper["grade_id"]),
                 exam_date=current_date,
@@ -4826,7 +4826,7 @@ def generate_exam_schedule(
 def arrange_exam_candidates(
     schedules: Iterable[ExamScheduleItem],
     *,
-    candidate_ids_by_paper: Mapping[int, Iterable[int]],
+    candidate_ids_by_course: Mapping[int, Iterable[int]],
     rooms: Iterable[ExamRoomResource],
     teacher_ids: Iterable[int],
     unavailable_teacher_slots: Mapping[int, set[tuple[date, int]]] | None = None,
@@ -4850,8 +4850,8 @@ def arrange_exam_candidates(
         candidates_seen: set[int] = set()
         room_cursor = 0
         teacher_cursor = 0
-        for schedule in sorted(slot_schedules, key=lambda item: (item.grade_id, item.subject_id, item.paper_id)):
-            candidates = list(dict.fromkeys(int(item) for item in candidate_ids_by_paper.get(schedule.paper_id, ())))
+        for schedule in sorted(slot_schedules, key=lambda item: (item.grade_id, item.subject_id, item.course_key)):
+            candidates = list(dict.fromkeys(int(item) for item in candidate_ids_by_course.get(schedule.course_key, ())))
             duplicate = candidates_seen.intersection(candidates)
             if duplicate:
                 raise ValueError(f"同一场次存在 {len(duplicate)} 名重复考生，请检查选科冲突")
@@ -4875,7 +4875,7 @@ def arrange_exam_candidates(
                 invigilators = tuple(available_teachers[:invigilators_per_room])
                 teacher_cursor = max(teachers.index(item) for item in invigilators) + 1
                 room_assignments.append(ExamRoomAssignment(
-                    paper_id=schedule.paper_id,
+                    course_key=schedule.course_key,
                     subject_id=schedule.subject_id,
                     grade_id=schedule.grade_id,
                     exam_date=schedule.exam_date,
@@ -4887,7 +4887,7 @@ def arrange_exam_candidates(
                 ))
                 seats.extend(
                     ExamCandidateSeat(
-                        paper_id=schedule.paper_id,
+                        course_key=schedule.course_key,
                         subject_id=schedule.subject_id,
                         grade_id=schedule.grade_id,
                         student_id=student_id,
@@ -4914,14 +4914,14 @@ def resolve_exam_candidates(
     required_subjects = {"语文", "数学", "英语", "外语"}
     result: dict[int, list[int]] = {}
     for paper in papers:
-        paper_id = int(paper["id"])
+        course_key = int(paper["id"])
         subject_id = int(paper["subject_id"])
         grade_id = int(paper["grade_id"])
         grade_students = [int(item) for item in student_ids_by_grade.get(grade_id, ())]
         if subject_names.get(subject_id) in required_subjects:
-            result[paper_id] = grade_students
+            result[course_key] = grade_students
         else:
-            result[paper_id] = [
+            result[course_key] = [
                 student_id for student_id in grade_students
                 if subject_id in selected_subject_ids_by_student.get(student_id, set())
             ]

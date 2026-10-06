@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import type { ReactNode } from 'react'
 import { App, Button, InputNumber, Modal, Pagination, Radio, Select, Space, Tabs, Tag } from 'antd'
 import { authApi, type AcademicYearEntry, type AcademicYearRolloverPreview, type SchoolSettings } from '@/api'
 import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
 import './school-settings-form.css'
+import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 
 type GaokaoMode = '3+1+2' | '3+3' | 'traditional'
+type TimetableMode = 'administrative' | 'walk_class'
 type CohortStatus = AcademicYearEntry['status']
-type BasicKey = 'province' | 'gaokao_mode' | 'current_entry_year' | 'current_academic_year' | 'current_term' | 'head_teacher_max_lead'
+type BasicKey = 'province' | 'gaokao_mode' | 'timetable_mode' | 'current_entry_year' | 'current_academic_year' | 'current_term' | 'head_teacher_max_lead'
 
 const PROVINCES = [
   '北京', '天津', '河北', '山西', '内蒙古', '辽宁', '吉林', '黑龙江', '上海',
@@ -20,6 +23,11 @@ const MODES: Array<{ value: GaokaoMode; label: string; note: string }> = [
   { value: '3+1+2', label: '3+1+2', note: '物理/历史首选一门，其余四科再选两门' },
   { value: '3+3', label: '3+3', note: '语数外以外，从配置的选考科目中选择三门' },
   { value: 'traditional', label: '传统文理', note: '按文科、理科组织行政班教学' },
+]
+
+const TIMETABLE_MODES: Array<{ value: TimetableMode; label: string; note: string }> = [
+  { value: 'administrative', label: '行政班课表', note: '适用于高一上学期，按行政班统一排课' },
+  { value: 'walk_class', label: '选科走班课表', note: '适用于高一下学期及以后，按选科教学班和学生课表排课' },
 ]
 
 const STATUS_LABEL: Record<CohortStatus, string> = {
@@ -40,16 +48,17 @@ const buildCohortRow = (entryYear: number, status: CohortStatus = 'active'): Aca
 
 interface Props {
   onSaved?: () => void
+  gradePanel?: ReactNode
 }
 
-export default function SchoolSettingsForm({ onSaved }: Props) {
+export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
   const { message, modal } = App.useApp()
   const [settings, setSettings] = useState<SchoolSettings | null>(null)
   const [academicYears, setAcademicYears] = useState<AcademicYearEntry[]>([])
   const [currentEntryYear, setCurrentEntryYear] = useState<number>()
   const [currentAcademicYear, setCurrentAcademicYear] = useState<string>()
   const [currentTerm, setCurrentTerm] = useState<'1' | '2'>('1')
-  const [activeTab, setActiveTab] = useState<'basic' | 'cohorts'>('basic')
+  const [activeTab, setActiveTab] = useState<'basic' | 'cohorts' | 'grades'>('basic')
 
   // 新建届别弹窗
   const [cohortModalOpen, setCohortModalOpen] = useState(false)
@@ -62,6 +71,8 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
   // 编辑基础配置弹窗
   const [editingKey, setEditingKey] = useState<BasicKey | null>(null)
   const [editDraft, setEditDraft] = useState<any>()
+  // 所有学年学期写入串行化，防止连续点击时旧请求后返回并覆盖新配置。
+  const saveChainRef = useRef<Promise<unknown>>(Promise.resolve())
 
   const openRollover = async () => {
     if (currentEntryYear === undefined) return
@@ -109,24 +120,48 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
       .catch((e) => message.error(e instanceof Error ? e.message : '学校信息加载失败'))
   }, [message])
 
+  const refreshAcademicContext = async () => {
+    const yearSettings = await authApi.academicYears()
+    setAcademicYears(yearSettings.years)
+    setCurrentEntryYear(yearSettings.current_entry_year ?? undefined)
+    setCurrentAcademicYear(yearSettings.current_academic_year ?? undefined)
+    setCurrentTerm(yearSettings.current_term ?? '1')
+  }
+
+  useEffect(() => {
+    const handleAcademicContextChanged = () => {
+      void refreshAcademicContext().catch(() => undefined)
+    }
+    window.addEventListener(ACADEMIC_CONTEXT_CHANGED, handleAcademicContextChanged)
+    return () => window.removeEventListener(ACADEMIC_CONTEXT_CHANGED, handleAcademicContextChanged)
+  }, [])
+
   /** 统一把当前届次/学年/学期提交给后端，保持前后端同步 */
-  const persistCurrent = async (
-    nextYears: AcademicYearEntry[] = academicYears,
-    entryYear: number | undefined = currentEntryYear,
-    academicYear: string | undefined = currentAcademicYear,
-    term: '1' | '2' = currentTerm,
+  const persistCurrent = (
+    nextYears?: AcademicYearEntry[],
+    entryYear?: number,
+    academicYear?: string,
+    term?: '1' | '2',
   ) => {
-    const result = await authApi.saveAcademicYears(
-      nextYears.map((item) => ({ entry_year: item.entry_year, status: item.status })),
-      entryYear ?? null,
-      academicYear ?? null,
-      term,
-    )
-    setAcademicYears(result.years)
-    setCurrentEntryYear(result.current_entry_year ?? undefined)
-    setCurrentAcademicYear(result.current_academic_year ?? undefined)
-    setCurrentTerm(result.current_term ?? '1')
-    return result
+    const save = saveChainRef.current.then(async () => {
+      // 未显式传入的字段一律以保存前刚读取的后端值为准，避免闭包里的旧 state 覆盖配置。
+      const latest = await authApi.academicYears()
+      const years = nextYears ?? latest.years
+      const result = await authApi.saveAcademicYears(
+        years.map((item) => ({ entry_year: item.entry_year, status: item.status })),
+        entryYear ?? latest.current_entry_year,
+        academicYear ?? latest.current_academic_year,
+        term ?? latest.current_term,
+      )
+      setAcademicYears(result.years)
+      setCurrentEntryYear(result.current_entry_year ?? undefined)
+      setCurrentAcademicYear(result.current_academic_year ?? undefined)
+      setCurrentTerm(result.current_term ?? '1')
+      window.dispatchEvent(new CustomEvent(ACADEMIC_CONTEXT_CHANGED, { detail: result }))
+      return result
+    })
+    saveChainRef.current = save.catch(() => undefined)
+    return save
   }
 
   /** 基础配置 5 条规则数据 */
@@ -173,6 +208,19 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
           : '尚未设置当前届别，请到“届次管理”Tab 新建届别并设为当前。',
       },
       {
+        key: 'timetable_mode' as BasicKey,
+        icoColor: 'cyan',
+        icoName: 'calendar',
+        title: '课表模式',
+        subtitle: '决定排课、教学班和学生课表的组织方式',
+        chipColor: 'cyan',
+        chipLabel: TIMETABLE_MODES.find((item) => item.value === settings?.timetable_mode)?.label || '未设置',
+        modeTag: TIMETABLE_MODES.find((item) => item.value === settings?.timetable_mode)?.note || '',
+        desc: settings?.timetable_mode === 'walk_class'
+          ? '当前使用选科走班课表，学生最终课表以教学班选课结果为准。'
+          : '当前使用行政班课表，适合按行政班统一安排课程。',
+      },
+      {
         key: 'current_academic_year' as BasicKey,
         icoColor: 'orange',
         icoName: 'calendar',
@@ -211,6 +259,9 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
       case 'current_entry_year':
         setEditDraft(currentEntryYear)
         break
+      case 'timetable_mode':
+        setEditDraft(settings?.timetable_mode || 'administrative')
+        break
       case 'current_academic_year':
         setEditDraft(currentAcademicYear)
         break
@@ -223,10 +274,11 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
   const submitBasicEdit = async () => {
     if (!editingKey) return
     try {
-      if (editingKey === 'province' || editingKey === 'gaokao_mode') {
+      if (editingKey === 'province' || editingKey === 'gaokao_mode' || editingKey === 'timetable_mode') {
         const patch: any = {}
         if (editingKey === 'province') patch.province = editDraft as string
         if (editingKey === 'gaokao_mode') patch.gaokao_mode = editDraft as GaokaoMode
+        if (editingKey === 'timetable_mode') patch.timetable_mode = editDraft as TimetableMode
         const next = await authApi.updateSchool(patch)
         setSettings((prev) => (prev ? { ...prev, ...next } : next))
         await persistCurrent()
@@ -304,7 +356,7 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
 
   const setAsCurrentCohort = async (item: AcademicYearEntry) => {
     try {
-      await persistCurrent(academicYears, item.entry_year, `${item.entry_year}-${item.entry_year + 1}`, currentTerm)
+      await persistCurrent(academicYears, item.entry_year, `${item.entry_year}-${item.entry_year + 1}`)
       message.success(`已切换到 ${item.cohort_label} · ${item.entry_year}-${item.entry_year + 1}学年`)
     } catch (e) {
       message.error(e instanceof Error ? e.message : '切换失败')
@@ -389,7 +441,7 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
       <Tabs
         className="ssf-tabs"
         activeKey={activeTab}
-        onChange={(k: string) => setActiveTab(k as 'basic' | 'cohorts')}
+        onChange={(k: string) => setActiveTab(k as 'basic' | 'cohorts' | 'grades')}
         items={[
           {
             key: 'basic',
@@ -547,6 +599,13 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
               </div>
             ),
           },
+          ...(gradePanel
+            ? [{
+                key: 'grades',
+                label: '年级数据',
+                children: gradePanel,
+              }]
+            : []),
         ]}
       />
 
@@ -612,6 +671,21 @@ export default function SchoolSettingsForm({ onSaved }: Props) {
               style={{ display: 'grid', gap: 10 }}
             >
               {MODES.map((item) => (
+                <Radio key={item.value} value={item.value}>
+                  <strong>{item.label}</strong>
+                  <div style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 2 }}>{item.note}</div>
+                </Radio>
+              ))}
+            </Radio.Group>
+          )}
+          {editingKey === 'timetable_mode' && (
+            <Radio.Group
+              value={editDraft}
+              onChange={(e) => setEditDraft(e.target.value)}
+              className="ssf-mode-list"
+              style={{ display: 'grid', gap: 10 }}
+            >
+              {TIMETABLE_MODES.map((item) => (
                 <Radio key={item.value} value={item.value}>
                   <strong>{item.label}</strong>
                   <div style={{ color: 'var(--text-3)', fontSize: 12, marginTop: 2 }}>{item.note}</div>

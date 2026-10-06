@@ -46,6 +46,7 @@ def solve_evening_cpsat(
     first_evening_period: int,
     evening_daily_periods_odd: list[int],
     evening_daily_periods_even: list[int],
+    allowed_slots_by_parity: Mapping[str, set[tuple[int, int]]] | None = None,
     activity_subject_id: int | None = None,
     required_teacher_by_slot: Mapping[tuple[int, int], Mapping[int, int]] | None = None,
     teacher_forbidden_slots: Mapping[int, set[tuple[int, int]]] | None = None,
@@ -88,8 +89,13 @@ def solve_evening_cpsat(
 
     slots_odd = _slots_from_profile(evening_daily_periods_odd, first_evening_period)
     slots_even = _slots_from_profile(evening_daily_periods_even, first_evening_period)
+    if allowed_slots_by_parity is not None:
+        slots_odd = [slot for slot in slots_odd if slot in allowed_slots_by_parity.get('odd', set())]
+        slots_even = [slot for slot in slots_even if slot in allowed_slots_by_parity.get('even', set())]
     slots_common = sorted(set(slots_odd) & set(slots_even))
     if not slots_common and not slots_odd and not slots_even:
+        if any(_evening_quota(row, leg) for row in assignment_rows for leg in (WeekParity.odd, WeekParity.even)):
+            return CpSatSolveResult(status="INFEASIBLE", solve_seconds=0.0)
         return CpSatSolveResult(status="OPTIMAL", solve_seconds=0.0)
 
     # 晚课↔白天：教师在哪些天满足联动
@@ -512,6 +518,7 @@ def fill_evening_activity_slots(
     first_evening_period: int,
     evening_daily_periods_odd: list[int],
     evening_daily_periods_even: list[int],
+    allowed_slots_by_parity: Mapping[str, set[tuple[int, int]]] | None = None,
     activity_subject_id: int | None,
     free_evening_days: Mapping[int, set[int]] | None = None,
     required_teacher_by_slot: Mapping[tuple[int, int], Mapping[int, int]] | None = None,
@@ -544,6 +551,8 @@ def fill_evening_activity_slots(
                     pass
                 for offset in range(max(0, int(count))):
                     p = first_evening_period + offset
+                    if allowed_slots_by_parity is not None and (d, p) not in allowed_slots_by_parity.get(parity.value, set()):
+                        continue
                     if occupied(cid, d, p, parity):
                         continue
                     # 钉位已由 CP-SAT 处理；此处仅填普通空位
@@ -568,6 +577,7 @@ def generate_evening_schedule(
     first_evening_period: int,
     evening_daily_periods_odd: list[int],
     evening_daily_periods_even: list[int],
+    allowed_slots_by_parity: Mapping[str, set[tuple[int, int]]] | None = None,
     activity_subject_id: int | None = None,
     required_teacher_by_slot: Mapping[tuple[int, int], Mapping[int, int]] | None = None,
     teacher_forbidden_slots: Mapping[int, set[tuple[int, int]]] | None = None,
@@ -593,6 +603,7 @@ def generate_evening_schedule(
         first_evening_period=first_evening_period,
         evening_daily_periods_odd=evening_daily_periods_odd,
         evening_daily_periods_even=evening_daily_periods_even,
+        allowed_slots_by_parity=allowed_slots_by_parity,
         activity_subject_id=activity_subject_id,
         required_teacher_by_slot=required_teacher_by_slot,
         teacher_forbidden_slots=teacher_forbidden_slots,

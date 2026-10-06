@@ -11,7 +11,7 @@ from dataclasses import asdict, replace
 from datetime import date, datetime
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import delete, func, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -30,7 +30,6 @@ from app.services.academic.gaokao import SubjectChoicePolicy, get_subject_choice
 from app.services.scheduling import (
     ScheduleItem,
     ScheduleResult,
-    ScheduleValidationIssue,
     ensure_teacher_evening_daytime_anchors,
     expand_schedule,
     find_schedule_conflicts,
@@ -45,6 +44,7 @@ from app.services.scheduling.diagnosis import (
     diagnose_generation_failure,
 )
 from app.services.scheduling.evening_cpsat import generate_evening_schedule
+from app.services.scheduling.grid_slots import allowed_slots, item_matches_grid
 from app.services.scheduling.soft_search import improve_soft_period_preferences
 from app.services.scheduling.strategies import build_schedule_strategy, list_schedule_strategies
 from app.services.scheduling.generate_jobs import GenerateBusy
@@ -175,6 +175,7 @@ def _default_grid_config() -> dict:
         "evening_subject_ids_even_by_day": [None] * 7,
         "term_start_monday": None,
         "first_week_parity": WeekParity.odd.value,
+        "slot_overrides": [],
     }
 
 
@@ -394,7 +395,7 @@ class GenerateIn(BaseModel):
         self.evening_subject_ids = sorted(set(self.evening_subject_ids_odd) | set(self.evening_subject_ids_even))
         profiles = (*self.evening_daily_periods_odd, *self.evening_daily_periods_even)
         if any(not 0 <= count <= 3 for count in profiles):
-            raise ValueError("每天晚自习只能配置 0 或 1 节")
+            raise ValueError("每天晚自习课位数必须在 0 到 3 节之间")
         if self.enable_evening and not any(profiles):
             raise ValueError("开启晚自习后必须配置单周或双周的晚自习节数")
         if any(profiles):
@@ -411,11 +412,20 @@ class GenerateIn(BaseModel):
         return self
 
 
+class SchedulingGridSlotIn(BaseModel):
+    weekday: int = Field(ge=1, le=7)
+    period: int = Field(ge=1, le=12)
+    week_parity: Literal["odd", "even"]
+    slot_type: Literal["daytime", "evening", "disabled"]
+
+
 class SchedulingGridConfigIn(BaseModel):
-    """School term scheduling grid; values are stored per academic-year/term."""
+    """Grade semester time structure."""
+    grade_id: int | None = Field(default=None, ge=1)
+    slot_overrides: list[SchedulingGridSlotIn] = Field(default_factory=list, max_length=168)
     academic_year: str = Field(min_length=4, max_length=20)
     term: str = Field(default="1", min_length=1, max_length=20)
-    days: int = Field(default=5, ge=5, le=7)
+    days: int = Field(default=5, ge=1, le=7)
     periods_per_day: int = Field(default=7, ge=1, le=12)
     daily_periods: list[int] = Field(default_factory=lambda: [7, 7, 7, 7, 7, 0, 0], min_length=7, max_length=7)
     enable_saturday: bool = False
@@ -456,7 +466,7 @@ class SchedulingGridConfigIn(BaseModel):
         self.enable_saturday = self.daily_periods[5] > 0
         evening_profiles = (*self.evening_daily_periods_odd, *self.evening_daily_periods_even)
         if any(not 0 <= count <= 3 for count in evening_profiles):
-            raise ValueError("每天晚自习只能配置 0 或 1 节")
+            raise ValueError("每天特殊课位数必须在 0 到 3 节之间")
         self.enable_evening = any(evening_profiles)
         if self.enable_evening:
             # 正式课节数上调后（如 8→9），旧的 evening_start_period=9 会失效；自动接到正式课之后
@@ -473,6 +483,19 @@ class SchedulingGridConfigIn(BaseModel):
             raise ValueError("学期开始日期必须为周一")
         if self.first_week_parity is WeekParity.all:
             raise ValueError("首周类型只能是单周或双周")
+        keys = set()
+        for slot in self.slot_overrides:
+            key = (slot.weekday, slot.period, slot.week_parity)
+            if key in keys:
+                raise ValueError("同一课位的同一周次不能重复配置")
+            keys.add(key)
+            daytime = slot.period <= self.daily_periods[slot.weekday - 1]
+            envelope = max(self.evening_daily_periods_odd[slot.weekday - 1], self.evening_daily_periods_even[slot.weekday - 1])
+            evening = bool(self.evening_start_period and self.evening_start_period <= slot.period < self.evening_start_period + envelope)
+            if not daytime and not evening:
+                raise ValueError("逐格配置必须属于滑块定义的课位范围")
+            if slot.slot_type != 'disabled' and slot.slot_type != ('daytime' if daytime else 'evening'):
+                raise ValueError("白天与晚自习课位类型须与所在时间段一致")
         return self
 
 
@@ -657,6 +680,8 @@ def _slot_lane_block(
     - 周六：整课 all 只能对 all（单双同格一起动）；0.5 可单六↔双六并改单双周
     - 晚自习：整晚 all 对 all；0.5 可跨单双周（不可与白天对调）
     """
+    if grid.get('daily_periods') and not item_matches_grid(grid, target_weekday, target_period, move_parity.value):
+        return "目标课位在本年级本学期对应周次未启用"
     source_band = _period_band(grid, source.period)
     target_band = _period_band(grid, target_period)
     if source_band != target_band:
@@ -1023,7 +1048,7 @@ async def _rule_checks_after_adjustment(
             )
         ).all()
     } if class_ids else {}
-    grid = await _load_grid_config(session, tenant_id, academic_year, term)
+    grid = await _load_grid_config(session, tenant_id, academic_year, term, grade_id)
     rule_group = normalize_legacy_rule_group(group)
     evening_start = grid.get("evening_start_period")
     try:
@@ -1222,28 +1247,11 @@ async def _teaching_track_subject_ids(
     ).teaching_class_subject_pool(policy)
 
 
-async def _administrative_primary_subject_ids(
-    session: AsyncSession,
-    tenant_id: int,
-) -> frozenset[int]:
-    scheme = (await session.execute(select(GaokaoScheme).where(
-        GaokaoScheme.tenant_id == tenant_id,
-        GaokaoScheme.is_active == True,  # noqa: E712
-    ).order_by(GaokaoScheme.entry_year.desc()))).scalars().first()
-    if scheme is None:
-        return frozenset()
-    config = scheme.strategy_config or {}
-    if str(config.get("primary_delivery_mode", "administrative")) != "administrative":
-        return frozenset()
-    return frozenset(int(item) for item in scheme.primary_subject_ids)
-
-
 def _validate_generation(
     assignments: list[dict],
     body: GenerateIn,
-    administrative_primary_subject_ids: frozenset[int] = frozenset(),
 ):
-    result = validate_schedule_requirements(
+    return validate_schedule_requirements(
         assignments,
         days=body.days,
         periods_per_day=body.periods_per_day,
@@ -1256,32 +1264,12 @@ def _validate_generation(
         require_full_week=body.require_full_week,
         max_teacher_weekly_periods=body.max_teacher_weekly_periods,
     )
-    primary_by_class: dict[int, set[int]] = {}
-    for item in assignments:
-        if item["subject_id"] in administrative_primary_subject_ids:
-            primary_by_class.setdefault(item["class_id"], set()).add(item["subject_id"])
-    primary_issues = tuple(
-        ScheduleValidationIssue(
-            code="primary_admin_track_conflict",
-            message="同一行政班配置了多个互斥首选科目",
-            entity_type="class",
-            entity_id=class_id,
-            related_id=None,
-            requested=len(subject_ids),
-            capacity=1,
-            rule_code="primary_admin_single_track",
-            formula=f"行政班首选科目数 {len(subject_ids)} > 1",
-        )
-        for class_id, subject_ids in primary_by_class.items()
-        if len(subject_ids) > 1
-    )
-    if not primary_issues:
-        return result
-    return replace(result, valid=False, issues=[*result.issues, *primary_issues])
 
 
 @router.get("/resources", summary="排课基础资源")
 async def resources(
+    academic_year: str | None = Query(default=None, description="学年范围"),
+    term: str | None = Query(default=None, description="学期范围"),
     session: AsyncSession = Depends(get_session),
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
@@ -1295,12 +1283,22 @@ async def resources(
         Subject.tenant_id == tenant_id,
     ).order_by(Subject.id))).scalars().all())
     subjects = _sort_subjects(subjects)
-    classes = list((await session.execute(select(Class).where(
-        Class.tenant_id == tenant_id,
-    ).order_by(Class.grade_id, Class.id))).scalars().all())
-    assignments = list((await session.execute(select(TeachingAssignment).where(
-        TeachingAssignment.tenant_id == tenant_id,
-    ).order_by(TeachingAssignment.class_id, TeachingAssignment.id))).scalars().all())
+    class_stmt = select(Class).where(Class.tenant_id == tenant_id)
+    if academic_year:
+        class_stmt = class_stmt.where(Class.academic_year == academic_year)
+    if term:
+        class_stmt = class_stmt.where(Class.term == term)
+    classes = list((await session.execute(class_stmt.order_by(Class.grade_id, Class.id))).scalars().all())
+    assignment_stmt = select(TeachingAssignment).where(TeachingAssignment.tenant_id == tenant_id)
+    if academic_year:
+        assignment_stmt = assignment_stmt.where(TeachingAssignment.academic_year == academic_year)
+    if term:
+        assignment_stmt = assignment_stmt.where(TeachingAssignment.term == term)
+    if not classes:
+        assignments = []
+    else:
+        assignment_stmt = assignment_stmt.where(TeachingAssignment.class_id.in_([item.id for item in classes]))
+        assignments = list((await session.execute(assignment_stmt.order_by(TeachingAssignment.class_id, TeachingAssignment.id))).scalars().all())
     teaching_subject_ids = await _teaching_track_subject_ids(session, tenant_id)
     # 资源页展示完整的关系，包括校本/生涯/班会等活动安排；教学轨道只影响自动生成入口。
     teacher_names, subject_names, class_names = _resource_maps(teachers, subjects, classes)
@@ -2155,14 +2153,22 @@ async def _execute_schedule_generation(
             await asyncio.sleep(0)
 
     await _progress("validating", "正在校验任教与课位资源", percent=5)
-    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term)
-    periods_per_day = body.periods_per_day if body.periods_per_day is not None else grid["periods_per_day"]
-    evening_start = body.evening_start_period
+    grid_grade = await _generation_grid_grade(session, tenant_id, body)
+    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term, grid_grade)
+    if not grid.get('configured'):
+        raise HTTPException(status_code=422, detail="请先保存当前年级本学期的课位结构")
+    if grid.get('slot_overrides') and body.solver != 'cpsat':
+        raise HTTPException(status_code=422, detail="逐格单双周课位请使用全局求解器")
+    periods_per_day = grid["periods_per_day"]
+    evening_start = grid.get("evening_start_period")
     if body.enable_evening or any(body.evening_daily_periods_odd) or any(body.evening_daily_periods_even):
         if evening_start is None or evening_start <= periods_per_day:
             evening_start = periods_per_day + 1
     body = body.model_copy(update={
-        "days": body.days if body.days is not None else grid["days"],
+        "days": grid["days"],
+        "enable_evening": grid['enable_evening'],
+        "evening_daily_periods_odd": [max(a, b) for a, b in zip(grid['evening_daily_periods_odd'], grid['evening_daily_periods_even'])],
+        "evening_daily_periods_even": [max(a, b) for a, b in zip(grid['evening_daily_periods_odd'], grid['evening_daily_periods_even'])],
         "periods_per_day": periods_per_day,
         "evening_start_period": evening_start,
         "forbidden_slots": sorted({*body.forbidden_slots, *_grid_forbidden_slots(grid)}),
@@ -2179,7 +2185,6 @@ async def _execute_schedule_generation(
     validation = _validate_generation(
         assignments,
         validation_body,
-        await _administrative_primary_subject_ids(session, tenant_id),
     )
     if not validation.valid:
         msg = "排课条件无解，请先根据校验结果调整条件"
@@ -2322,8 +2327,8 @@ async def _execute_schedule_generation(
             # 单轮求解时限可用环境变量放宽；2 核小服务器 + 单双周课时结构下
             # 150s 常搜不到首个可行解（UNKNOWN→误报无解），实测 300s 内 170s 即出解。
             max_solve = float(os.environ.get("SCHEDULING_MAX_SOLVE_SECONDS", "300"))
-            # 递增时限重试：难实例「换种子」收效甚微（每轮都 UNKNOWN 打满），加时才有效
-            # （实测 150s UNKNOWN → 2线程 + 加时 170s 出解）。每轮时限 ×1/×2/×3。
+            need_evening = any(body.evening_daily_periods_odd) or any(body.evening_daily_periods_even)
+            # 每轮递增加时，避免晚课场景的白天 CP-SAT 因单轮时间不足搜不到首解。
             solve_rounds = [max_solve, max_solve * 2, max_solve * 3]
             seed_attempts = len(solve_rounds)
             # 不传 seed：每次任务随机起步；某一组超时/晚课对不上时换独立种子，不要整单失败。
@@ -2332,7 +2337,6 @@ async def _execute_schedule_generation(
             else:
                 base_seed = secrets.randbelow(1_000_000_000)
             seeds = _cpsat_retry_seeds(base_seed, seed_attempts)
-            need_evening = any(body.evening_daily_periods_odd) or any(body.evening_daily_periods_even)
 
             async def _run_daytime(seed: int, attempt: int, total: int, limit: float):
                 loop = asyncio.get_running_loop()
@@ -2385,6 +2389,7 @@ async def _execute_schedule_generation(
                         assignments=assignments,
                         days=body.days, periods_per_day=body.periods_per_day,
                         forbidden_slots=set(body.forbidden_slots),
+                        allowed_slots_by_parity=allowed_slots(grid, "daytime"),
                         max_class_lessons_per_day=weekday_cap,
                         max_teacher_lessons_per_day=None,
                         max_class_lessons_on_saturday=min(7, saturday_cap),
@@ -2412,8 +2417,6 @@ async def _execute_schedule_generation(
                         random_seed=seed,
                         num_search_workers=solver_worker_count(),
                         max_time_seconds=limit,
-                        # 首个可行解之后的软目标优化时长（质量换时间）；
-                        # 2 线程下首解约 20s，总时长 ≈ 首解 + 本打磨上限。
                         polish_seconds=float(os.environ.get("SCHEDULING_POLISH_SECONDS", "150")),
                         on_progress=_solver_progress,
                     )
@@ -2472,7 +2475,7 @@ async def _execute_schedule_generation(
 
             await _progress(
                 "generating",
-                f"本次起始种子 {base_seed}，最多 {len(seeds)} 轮（时限逐轮递增至 {int(solve_rounds[-1])}s）",
+                f"本次起始种子 {base_seed}，最多 {len(seeds)} 轮递增加时求解（最高 {int(solve_rounds[-1])}s）",
                 percent=12,
                 phase="daytime_search",
             )
@@ -2502,6 +2505,14 @@ async def _execute_schedule_generation(
                     phase="daytime_done",
                 )
                 if cp.status == "INFEASIBLE":
+                    if result is not None:
+                        await _progress(
+                            "generating",
+                            "已穷尽可行白天方案，采用已验证方案",
+                            percent=88,
+                            phase="evening_done",
+                        )
+                        break
                     msg = "当前规则组合数学上无解（CP-SAT 已证明）"
                     diagnosis = diagnose_generation_failure(
                         failure_kind="cpsat_infeasible",
@@ -2561,6 +2572,7 @@ async def _execute_schedule_generation(
                 try:
                     evening_result = await run_evening_cpsat(
                         assignments,
+                        allowed_slots_by_parity=allowed_slots(grid, "evening"),
                         class_ids=class_ids,
                         first_evening_period=evening_ctx["first_eve"],
                         evening_daily_periods_odd=body.evening_daily_periods_odd,
@@ -2587,7 +2599,7 @@ async def _execute_schedule_generation(
                         random_seed=seed,
                         max_time_seconds=100.0,
                         num_search_workers=solver_worker_count(),
-                        timeout=145,
+                        timeout=105.0,
                     )
                 except WorkerTimeout as exc:
                     last_error = f"晚课超时（seed={seed}，{int(exc.timeout_seconds)}s）"
@@ -2632,11 +2644,11 @@ async def _execute_schedule_generation(
                 )
             if result is None:
                 msg = (
-                    f"已尝试 {len(seeds)} 轮递增时限求解（最高 {int(solve_rounds[-1])}s），仍无法排出可通过硬规则验算的课表。"
+                    f"已尝试 {len(seeds)} 个求解候选（单轮最高 {int(solve_rounds[-1])}s），仍无法排出可通过硬规则验算的课表。"
                     f"最后失败：{last_error}"
                     if "硬规则" in str(last_error)
                     else (
-                        f"已尝试 {len(seeds)} 轮递增时限求解（最高 {int(solve_rounds[-1])}s），仍无法同时排出白天课和晚课。"
+                        f"已尝试 {len(seeds)} 个求解候选（单轮最高 {int(solve_rounds[-1])}s），仍无法同时排出白天课和晚课。"
                         f"最后失败：{last_error}"
                     )
                 )
@@ -2737,6 +2749,7 @@ async def _execute_schedule_generation(
             first_evening_period=first_eve,
             evening_daily_periods_odd=body.evening_daily_periods_odd,
             evening_daily_periods_even=body.evening_daily_periods_even,
+            allowed_slots_by_parity=allowed_slots(grid, "evening"),
             activity_subject_id=None,
             required_teacher_by_slot=required_teacher_by_slot,
             teacher_forbidden_slots=teacher_forbidden_slots,
@@ -2794,6 +2807,17 @@ async def _execute_schedule_generation(
             result = replace(result, items=before_soft)
         else:
             result = replace(result, items=improved.items)
+    invalid_grid_items = [
+        {"class_id": item.class_id, "weekday": item.weekday, "period": item.period,
+         "week_parity": item.week_parity.value}
+        for item in result.items
+        if not item_matches_grid(grid, item.weekday, item.period, item.week_parity.value)
+    ]
+    if invalid_grid_items:
+        raise HTTPException(status_code=422, detail={
+            "message": "生成结果超出本年级本学期启用的课位，未保存课表",
+            "code": "grid_slot_postcheck", "items": invalid_grid_items[:50],
+        })
     final_conflicts = find_schedule_conflicts(result.items)
     if final_conflicts:
         raise HTTPException(
@@ -3528,7 +3552,7 @@ async def validate_rule_group(
     tenant_id: int = Depends(get_current_tenant),
 ):
     group = normalize_legacy_rule_group(body.group)
-    grid = await _load_grid_config(session, tenant_id, group.academic_year, group.term)
+    grid = await _load_grid_config(session, tenant_id, group.academic_year, group.term, group.grade_id)
     schedule_items: list[ScheduleItem] = []
     if body.use_current_schedule:
         rows = list((await session.execute(select(Schedule).where(
@@ -3634,7 +3658,7 @@ async def verify_schedule(
             )
         ).all()
     }
-    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term)
+    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term, grade_id or group.grade_id)
     try:
         result = evaluate_rule_group(
             normalize_legacy_rule_group(group),
@@ -3679,7 +3703,6 @@ async def validate_schedule(
     result = _validate_generation(
         assignments,
         validation_body,
-        await _administrative_primary_subject_ids(session, tenant_id),
     )
     suggestions = []
     seen_suggestions: set[tuple[str, int]] = set()
@@ -3714,18 +3737,20 @@ async def _load_weekly(session: AsyncSession, class_id: int, academic_year: str,
 
 
 async def _load_grid_config(
-    session: AsyncSession,
-    tenant_id: int,
-    academic_year: str,
-    term: str,
+    session: AsyncSession, tenant_id: int, academic_year: str, term: str, grade_id: int | None = None,
 ) -> dict:
-    row = (await session.execute(select(TenantConfig).where(
-        TenantConfig.tenant_id == tenant_id,
-        TenantConfig.config_key == SCHEDULING_GRID_CONFIG_KEY,
-    ))).scalars().first()
-    saved = row.config_value if row and isinstance(row.config_value, dict) else {}
-    stored_scope = saved.get(f"{academic_year}:{term}", {})
-    stored_scope = stored_scope if isinstance(stored_scope, dict) else {}
+    if grade_id is not None:
+        await _require_grid_grade(session, tenant_id, grade_id)
+        from app.services.scheduling.grid_storage import load_grade_grid
+        stored_scope = await load_grade_grid(session, tenant_id, grade_id, academic_year, term)
+    else:
+        # Compatibility for school-level summaries only; scheduling consumers pass an explicit grade.
+        row = (await session.execute(select(TenantConfig).where(
+            TenantConfig.tenant_id == tenant_id, TenantConfig.config_key == SCHEDULING_GRID_CONFIG_KEY,
+        ))).scalars().first()
+        saved = row.config_value if row and isinstance(row.config_value, dict) else {}
+        stored_scope = saved.get(f"{academic_year}:{term}", {})
+        stored_scope = stored_scope if isinstance(stored_scope, dict) else {}
     configured = bool(stored_scope)
     value = {**_default_grid_config(), **stored_scope}
     if not isinstance(value.get("daily_periods"), list) or len(value["daily_periods"]) != 7:
@@ -3743,7 +3768,7 @@ async def _load_grid_config(
         if field not in stored_scope or not isinstance(value.get(field), list):
             value[field] = list(legacy_evening_subject_ids)
     value["evening_subject_ids"] = sorted(set(value["evening_subject_ids_odd"]) | set(value["evening_subject_ids_even"]))
-    value["days"] = max(index + 1 for index, count in enumerate(value["daily_periods"]) if count)
+    value["days"] = max((index + 1 for index, count in enumerate(value["daily_periods"]) if count), default=1)
     value["periods_per_day"] = max(value["daily_periods"])
     value["enable_saturday"] = value["daily_periods"][5] > 0
     value["enable_evening"] = any(value["evening_daily_periods_odd"]) or any(value["evening_daily_periods_even"])
@@ -3761,11 +3786,11 @@ async def _load_grid_config(
 
 def _grid_forbidden_slots(config: dict) -> set[tuple[int, int]]:
     """Turn per-day configured capacities into ordinary scheduling forbidden slots."""
-    return {
-        (weekday, period)
-        for weekday, available_periods in enumerate(config["daily_periods"], start=1)
-        for period in range(available_periods + 1, config["periods_per_day"] + 1)
-    }
+    allowed = allowed_slots(config, 'daytime')
+    return {(day, period) for day in range(1, 8) for period in range(1, config['periods_per_day'] + 1)
+            if (day, period) not in allowed['odd'] and (day, period) not in allowed['even']}
+
+
 
 
 def _evening_subject_ids_for_parity(config: dict, parity: WeekParity | str) -> set[int]:
@@ -3779,46 +3804,65 @@ def _evening_subject_ids_for_parity(config: dict, parity: WeekParity | str) -> s
     return set(legacy) if isinstance(legacy, list) else set()
 
 
-@router.get("/grid-config", summary="查询排课周格配置")
+async def _require_grid_grade(session: AsyncSession, tenant_id: int, grade_id: int) -> Grade:
+    grade = (await session.execute(select(Grade).where(Grade.id == grade_id, Grade.tenant_id == tenant_id))).scalar_one_or_none()
+    if grade is None:
+        raise HTTPException(status_code=404, detail="年级不存在")
+    return grade
+
+
+async def _class_grid_grade(session: AsyncSession, tenant_id: int, class_id: int) -> int:
+    grade_id = (await session.execute(select(Class.grade_id).where(Class.id == class_id, Class.tenant_id == tenant_id))).scalar_one_or_none()
+    if grade_id is None:
+        raise HTTPException(status_code=404, detail="班级不存在")
+    return int(grade_id)
+
+
+async def _generation_grid_grade(session: AsyncSession, tenant_id: int, body: GenerateIn) -> int | None:
+    group = await _resolve_generation_rule_group(session, tenant_id, body)
+    if group and group.grade_id:
+        return group.grade_id
+    stmt = select(Class.grade_id).where(Class.tenant_id == tenant_id, Class.academic_year == body.academic_year, Class.term == body.term)
+    if body.class_ids:
+        stmt = stmt.where(Class.id.in_(body.class_ids))
+    ids = set((await session.execute(stmt)).scalars().all())
+    if len(ids) > 1:
+        raise HTTPException(status_code=422, detail="不同年级使用独立课位结构，请按年级分别生成课表")
+    return next(iter(ids), None)
+
+
+@router.get("/grid-config", summary="查询年级学期课位结构")
 async def grid_config(
-    academic_year: str,
-    term: str = "1",
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
+    academic_year: str, term: str = Query(default="1", pattern="^[12]$"), grade_id: int | None = Query(default=None, ge=1),
+    session: AsyncSession = Depends(get_session), user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant),
 ):
-    return {"code": 0, "message": "ok", "data": await _load_grid_config(session, tenant_id, academic_year, term)}
+    return {"code": 0, "message": "ok", "data": await _load_grid_config(session, tenant_id, academic_year, term, grade_id)}
 
 
-@router.put("/grid-config", summary="保存排课周格配置")
+@router.put("/grid-config", summary="保存年级学期课位结构")
 async def save_grid_config(
-    body: SchedulingGridConfigIn,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
+    body: SchedulingGridConfigIn, session: AsyncSession = Depends(get_session),
+    user=Depends(require_management_user), tenant_id: int = Depends(get_current_tenant),
 ):
-    row = (await session.execute(select(TenantConfig).where(
-        TenantConfig.tenant_id == tenant_id,
-        TenantConfig.config_key == SCHEDULING_GRID_CONFIG_KEY,
-    ))).scalars().first()
-    config = dict(row.config_value) if row and isinstance(row.config_value, dict) else {}
-    value = body.model_dump(mode="json")
-    value.pop("academic_year", None)
-    value.pop("term", None)
-    config[f"{body.academic_year}:{body.term}"] = value
-    if row is None:
-        session.add(TenantConfig(
-            tenant_id=tenant_id,
-            config_key=SCHEDULING_GRID_CONFIG_KEY,
-            config_value=config,
-            updated_by=user.id,
-        ))
-    else:
-        row.config_value = config
-        row.updated_by = user.id
-        row.updated_at = datetime.utcnow()
+    if body.grade_id is None:
+        raise HTTPException(status_code=422, detail="请选择需要保存课位结构的年级")
+    if body.term not in ("1", "2"):
+        raise HTTPException(status_code=422, detail="学期只能为 1 或 2")
+    # Serialize saves, including the first save, under the parent grade row.
+    grade = (await session.execute(select(Grade).where(Grade.id == body.grade_id, Grade.tenant_id == tenant_id).with_for_update())).scalar_one_or_none()
+    if grade is None:
+        raise HTTPException(status_code=404, detail="年级不存在")
+    from app.services.scheduling.grid_storage import save_grade_grid
+    value = body.model_dump(mode="python")
+    subject_ids = set(value["evening_subject_ids"])
+    subject_ids.update(sid for field in ("evening_subject_ids_odd_by_day", "evening_subject_ids_even_by_day") for sid in value[field] if sid is not None)
+    if subject_ids:
+        available = set((await session.execute(select(Subject.id).where(Subject.id.in_(subject_ids), (Subject.tenant_id == tenant_id) | Subject.tenant_id.is_(None)))).scalars().all())
+        if subject_ids - available:
+            raise HTTPException(status_code=422, detail="晚课科目不属于当前学校")
+    await save_grade_grid(session, tenant_id, body.grade_id, body.academic_year, body.term, value)
     await session.commit()
-    return {"code": 0, "message": "ok", "data": value}
+    return {"code": 0, "message": "ok", "data": await _load_grid_config(session, tenant_id, body.academic_year, body.term, body.grade_id)}
 
 
 @router.get("/weekly", summary="查询班级周课表")
@@ -3844,7 +3888,7 @@ async def calendar_schedule(
     tenant_id: int = Depends(get_current_tenant),
 ):
     items, maps = await _load_weekly(session, class_id, academic_year, term)
-    grid = await _load_grid_config(session, tenant_id, academic_year, term)
+    grid = await _load_grid_config(session, tenant_id, academic_year, term, await _class_grid_grade(session, tenant_id, class_id))
     try:
         dated = expand_schedule(
             [schedule_item_from_row(item) for item in items],
@@ -3875,7 +3919,13 @@ async def schedule_adjustment_options(
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
-    grid = await _load_grid_config(session, tenant_id, academic_year, term)
+    source_grade = (await session.execute(select(Class.grade_id).join(Schedule, Schedule.class_id == Class.id).where(
+        Schedule.id == schedule_id, Schedule.tenant_id == tenant_id, Class.tenant_id == tenant_id,
+        Schedule.academic_year == academic_year, Schedule.term == term,
+    ))).scalar_one_or_none()
+    if source_grade is None:
+        raise HTTPException(status_code=404, detail="课表记录不存在")
+    grid = await _load_grid_config(session, tenant_id, academic_year, term, int(source_grade))
     days = days if days is not None else grid["days"]
     periods_per_day = periods_per_day if periods_per_day is not None else grid["periods_per_day"]
     source = (await session.execute(select(Schedule).where(
@@ -3957,7 +4007,13 @@ async def preview_schedule_adjustment(
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
-    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term)
+    source_grade = (await session.execute(select(Class.grade_id).join(Schedule, Schedule.class_id == Class.id).where(
+        Schedule.id == body.schedule_id, Schedule.tenant_id == tenant_id, Class.tenant_id == tenant_id,
+        Schedule.academic_year == body.academic_year, Schedule.term == body.term,
+    ))).scalar_one_or_none()
+    if source_grade is None:
+        raise HTTPException(status_code=404, detail="课表记录不存在")
+    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term, int(source_grade))
     days = body.days if body.days is not None else grid["days"]
     periods_per_day = body.periods_per_day if body.periods_per_day is not None else grid["periods_per_day"]
     evening_start = grid.get("evening_start_period") if grid.get("enable_evening") else None
@@ -4179,7 +4235,13 @@ async def move_schedule(
     user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
-    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term)
+    source_grade = (await session.execute(select(Class.grade_id).join(Schedule, Schedule.class_id == Class.id).where(
+        Schedule.id == body.schedule_id, Schedule.tenant_id == tenant_id, Class.tenant_id == tenant_id,
+        Schedule.academic_year == body.academic_year, Schedule.term == body.term,
+    ))).scalar_one_or_none()
+    if source_grade is None:
+        raise HTTPException(status_code=404, detail="课表记录不存在")
+    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term, int(source_grade))
     days = body.days if body.days is not None else grid["days"]
     periods_per_day = body.periods_per_day if body.periods_per_day is not None else grid["periods_per_day"]
     source = (await session.execute(select(Schedule).where(

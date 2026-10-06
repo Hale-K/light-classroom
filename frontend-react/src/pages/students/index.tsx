@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Alert, App, Button, Dropdown, Form, Input, InputNumber, Modal, Progress, Select, Space, Table, Tabs, Tag } from 'antd'
 import { DownloadOutlined, ExportOutlined, ImportOutlined, KeyOutlined, RobotOutlined } from '@ant-design/icons'
 import type { TableProps } from 'antd'
-import { fileCenterApi, orgApi, organizationApi } from '@/api'
+import { authApi, fileCenterApi, gaokaoApi, orgApi, organizationApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import FilterCard from '@/components/FilterCard'
 import TableCard from '@/components/TableCard'
@@ -58,6 +58,9 @@ export default function StudentsView() {
   const [grades, setGrades] = useState<Grade[]>([])
   const [organizationTree, setOrganizationTree] = useState<OrganizationTreeResult | null>(null)
   const [students, setStudents] = useState<Student[]>([])
+  const [academicYear, setAcademicYear] = useState('')
+  const [term, setTerm] = useState('1')
+  const [subjectChoices, setSubjectChoices] = useState<Map<number, { primary: string; secondary: string[] }>>(new Map())
   const [keyword, setKeyword] = useState('')
   const [campusFilter, setCampusFilter] = useState<CampusFilter>('')
   const [gradeFilter, setGradeFilter] = useState<GradeFilter>('')
@@ -193,15 +196,37 @@ export default function StudentsView() {
     }
   }
 
-  const loadData = async () => {
+  const loadData = async (selectedTerm?: string) => {
     setLoading(true)
     try {
+      const academicSettings = await authApi.academicYears().catch(() => null)
+      const scopedAcademicYear = academicSettings?.current_academic_year || academicYear
+      const scopedTerm = selectedTerm || (academicYear ? term : academicSettings?.current_term || term || '1')
+      setAcademicYear(scopedAcademicYear)
+      setTerm(scopedTerm)
       const [gradeList, classList, studentList, orgTree] = await Promise.all([
         orgApi.grades(),
-        orgApi.classes(),
-        orgApi.students(),
+        orgApi.classes({ academic_year: scopedAcademicYear, term: scopedTerm }),
+        orgApi.students(undefined, undefined, undefined, { academic_year: scopedAcademicYear, term: scopedTerm }),
         organizationApi.tree().catch(() => null),
       ])
+      const choices = scopedAcademicYear
+        ? await gaokaoApi.choicesForReview({
+            academic_year: scopedAcademicYear,
+            term: scopedTerm,
+            status_filter: '',
+          }).catch(() => [])
+        : []
+      const choicesByStudent = new Map<number, { primary: string; secondary: string[] }>()
+      choices.forEach((choice) => {
+        if (choice.status === 'confirmed' || choice.status === 'locked') {
+          choicesByStudent.set(choice.student_id, {
+            primary: choice.primary_subject_name,
+            secondary: choice.secondary_subject_names,
+          })
+        }
+      })
+      setSubjectChoices(choicesByStudent)
       setOrganizationTree(orgTree)
       // 年级筛选只保留「年级管理中心下已建年级部」的年级(与教师档案口径一致)
       const gradeUnitNames = (orgTree?.units ?? [])
@@ -224,6 +249,12 @@ export default function StudentsView() {
   useEffect(() => {
     void loadData()
   }, [])
+
+  const changeTerm = (value: string) => {
+    setTerm(value)
+    setPage(1)
+    void loadData(value)
+  }
 
   useEffect(() => {
     if (activeTab !== 'memberships') return
@@ -475,6 +506,18 @@ export default function StudentsView() {
       ),
     },
     {
+      title: '首选科目（1）',
+      key: 'primary_subject',
+      width: 130,
+      render: (_, record) => subjectChoices.get(record.id)?.primary || '—',
+    },
+    {
+      title: '再选科目（2）',
+      key: 'secondary_subjects',
+      width: 180,
+      render: (_, record) => subjectChoices.get(record.id)?.secondary.join('、') || '—',
+    },
+    {
       title: '性别',
       dataIndex: 'gender',
       width: 90,
@@ -545,6 +588,15 @@ export default function StudentsView() {
 
       <FilterCard>
         <div className="zh-filter-row">
+          <label className="zh-filter-field">
+            <span>学期</span>
+            <Select
+              value={term}
+              onChange={changeTerm}
+              style={{ width: 150 }}
+              options={[{ label: '第一学期', value: '1' }, { label: '第二学期', value: '2' }]}
+            />
+          </label>
           <label className="zh-filter-field">
             <span>学生</span>
             <Input

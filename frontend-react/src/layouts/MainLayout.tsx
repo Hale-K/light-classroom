@@ -10,14 +10,15 @@ import { routeRoles, routeTitle } from '@/router/meta'
 import { useAuthStore, selectDisplayName } from '@/store/auth'
 import { APP_NAME } from '@/types'
 import type { MenuNode } from '@/types'
+import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 
 const MENU_GROUP_ORDER = ['overview', 'school-affairs', 'teaching-exams']
 const NAV_COLLAPSED_KEY = 'zh_nav_collapsed_groups'
 const EXAM_MODULE_PATHS = ['/exam-rooms', '/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling']
 const MENU_GATED_PATHS = new Set([
-  '/dashboard', '/exams', '/scans', '/scheduling', '/teacher-courses', '/teacher-preparation', '/teacher-classes', '/teacher-students',
+  '/dashboard', '/exams', '/scheduling', '/teacher-courses', '/teacher-preparation', '/teacher-classes', '/teacher-students',
   '/file-center', '/ai-providers', '/students', '/classes', '/staff', '/rbac', '/gaokao', '/seating',
-  '/exam-scheduling', '/settings', '/subjects', '/campus-buildings', '/meetings',
+  '/exam-scheduling', '/settings', '/subjects', '/campus-buildings',
   '/teacher-profiles', '/teacher-grades', '/teacher-notices',
 ])
 
@@ -31,12 +32,12 @@ const MENU_PATH_OVERRIDE: Record<string, string> = {
   'teacher-students': '/teacher-students',
 }
 const MENU_NAME_OVERRIDE: Record<string, string> = {
+  exams: '考试管理',
   'teacher-classes': '学生管理',
   'teacher-students': '选课审核',
 }
 function requiredMenuPath(pathname: string): string | null {
   if (pathname === '/' || pathname === '/onboarding') return null
-  if (pathname.startsWith('/grading/') || pathname.startsWith('/stats/')) return '/exams'
   if (EXAM_MODULE_PATHS.includes(pathname)) return '/exam-scheduling'
   if (pathname === '/rooms') return '/campus-buildings'
   if (pathname === '/organization' || pathname === '/staff-positions') return '/staff'
@@ -129,7 +130,7 @@ export default function MainLayout() {
       .finally(() => setMenusLoaded(true))
   }, [activeRole])
 
-  useEffect(() => {
+  const refreshAcademicSettings = useCallback(() => {
     let active = true
     authApi.academicYears()
       .then((settings) => {
@@ -143,6 +144,12 @@ export default function MainLayout() {
     }
   }, [])
 
+  useEffect(() => {
+    refreshAcademicSettings()
+    window.addEventListener(ACADEMIC_CONTEXT_CHANGED, refreshAcademicSettings)
+    return () => window.removeEventListener(ACADEMIC_CONTEXT_CHANGED, refreshAcademicSettings)
+  }, [refreshAcademicSettings])
+
   const effectiveRole = activeRole || user?.role
   // 教师工作台模式：任课教师视角，不显示教导主任+的高级菜单
   const teacherMode = effectiveRole === 'teacher'
@@ -154,6 +161,7 @@ export default function MainLayout() {
       .map((group) => ({
         ...group,
         children: (group.children || []).filter((item) => {
+          if (['scans', 'meetings', 'teacher-research'].includes(item.key)) return false
           if (!item.path) return false
           const allowed = routeRoles(item.path)
           // undefined = 所有登录用户可进；否则要求当前角色在允许列表里

@@ -755,7 +755,13 @@ export default function AssistantDock() {
     setChatting(true)
     try {
       const intent = await classifyPageIntent(content, controller.signal)
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) {
+        commitThread(prev => replaceThinkBot(prev, { role: 'bot', text: '已停止意图识别。', mid }))
+        abortRef.current = null
+        busyRef.current = false
+        setChatting(false)
+        return
+      }
       if (intent === 'create_subject') {
         void runSubjectConversation(content, mid)
         return
@@ -766,7 +772,13 @@ export default function AssistantDock() {
       setChatting(false)
       void runLoop()
     } catch {
-      if (controller.signal.aborted) return
+      if (controller.signal.aborted) {
+        commitThread(prev => replaceThinkBot(prev, { role: 'bot', text: '已停止意图识别。', mid }))
+        abortRef.current = null
+        busyRef.current = false
+        setChatting(false)
+        return
+      }
       // Keep existing chat available if intent detection/model routing fails.
       commitThread(prev => replaceThinkBot(prev, { role: 'bot', text: '', mid }))
       abortRef.current = null

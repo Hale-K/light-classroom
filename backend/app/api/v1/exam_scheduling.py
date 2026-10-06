@@ -11,10 +11,10 @@ from app.db.session import get_session
 from app.models.enums import BaseUserRole, StudentStatus, UserStatus
 from app.models.exam import (
     Exam, ExamCandidateAssignment, ExamInvigilatorAvailability, ExamRoom, ExamRoomAssignment,
-    ExamSchedule, ExamSchedulingConfig, ExamVenue, Paper,
+    ExamSchedule, ExamSchedulingConfig, ExamVenue,
 )
 from app.models.gaokao import StudentSubjectChoice
-from app.models.org import Class, Grade, Student, Subject, Tenant, User
+from app.models.org import Class, CourseHourPlan, Grade, Student, Subject, Tenant, User
 from app.services.scheduling import (
     ExamRoomResource,
     arrange_exam_candidates,
@@ -102,11 +102,9 @@ class GenerateExamScheduleIn(BaseModel):
 
 
 async def _output(session: AsyncSession, items: list[ExamSchedule]):
-    papers = list((await session.execute(select(Paper))).scalars().all())
     subjects = list((await session.execute(select(Subject))).scalars().all())
     grades = list((await session.execute(select(Grade))).scalars().all())
     teachers = list((await session.execute(select(User))).scalars().all())
-    paper_map = {item.id: item.title for item in papers}
     subject_map = {item.id: item.name for item in subjects}
     grade_map = {item.id: item.name for item in grades}
     teacher_map = {item.id: item.name for item in teachers}
@@ -114,7 +112,6 @@ async def _output(session: AsyncSession, items: list[ExamSchedule]):
     for item in items:
         data = item.model_dump()
         data.update(
-            paper_title=paper_map.get(item.paper_id, "未命名试卷"),
             subject_name=subject_map.get(item.subject_id, "未知学科"),
             grade_name=grade_map.get(item.grade_id, "未知年级"),
             invigilator_name=teacher_map.get(item.invigilator_id, "待安排"),
@@ -158,10 +155,10 @@ async def _candidate_rosters(
     session: AsyncSession,
     tenant_id: int,
     exam: Exam,
-    papers: list[Paper],
+    papers: list[dict],
     subject_names: dict[int, str],
 ) -> tuple[dict[int, list[int]], int]:
-    grade_ids = {item.grade_id for item in papers}
+    grade_ids = {int(item["grade_id"]) for item in papers}
     classes = list((await session.execute(select(Class).where(
         Class.tenant_id == tenant_id,
         Class.grade_id.in_(grade_ids),
@@ -191,14 +188,14 @@ async def _candidate_rosters(
         selected_by_student[choice.student_id] = selected
 
     rosters = resolve_exam_candidates(
-        [item.model_dump() for item in papers],
+        papers,
         student_ids_by_grade=student_ids_by_grade,
         selected_subject_ids_by_student=selected_by_student,
         subject_names=subject_names,
     )
     elective_subject_ids = {
-        item.subject_id for item in papers
-        if subject_names.get(item.subject_id) not in {"语文", "数学", "英语", "外语"}
+        int(item["subject_id"]) for item in papers
+        if subject_names.get(int(item["subject_id"])) not in {"语文", "数学", "英语", "外语"}
     }
     missing_choice_count = sum(
         not selected_by_student.get(student.id)
@@ -258,19 +255,32 @@ async def _generate_full_plan(
     exam = await session.get(Exam, body.exam_id)
     if not exam or exam.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="考试不存在")
-    papers = list((await session.execute(select(Paper).where(
-        Paper.exam_id == body.exam_id,
-    ).order_by(Paper.grade_id, Paper.subject_id, Paper.id))).scalars().all())
     saved_config = (await session.execute(select(ExamSchedulingConfig).where(
         ExamSchedulingConfig.tenant_id == tenant_id,
         ExamSchedulingConfig.exam_id == body.exam_id,
     ))).scalar_one_or_none()
     effective_grade_ids = body.grade_ids or (saved_config.grade_ids if saved_config else [])
+    course_stmt = select(CourseHourPlan, Class.grade_id).join(
+        Class, Class.id == CourseHourPlan.class_id,
+    ).where(
+        Class.tenant_id == tenant_id,
+        CourseHourPlan.tenant_id == tenant_id,
+        CourseHourPlan.academic_year == exam.academic_year,
+        CourseHourPlan.term == exam.term,
+        CourseHourPlan.weekly_periods > 0,
+    ).order_by(Class.grade_id, CourseHourPlan.subject_id)
     if effective_grade_ids:
-        requested_grades = set(effective_grade_ids)
-        papers = [item for item in papers if item.grade_id in requested_grades]
-    if not papers:
-        raise HTTPException(status_code=422, detail="该考试还没有试卷，请先完成建卷")
+        course_stmt = course_stmt.where(Class.grade_id.in_(effective_grade_ids))
+    course_rows = (await session.execute(course_stmt)).all()
+    course_pairs = sorted({(int(grade_id), int(plan.subject_id)) for plan, grade_id in course_rows})
+    # The optimizer uses an in-memory identity for each grade/subject course;
+    # no paper row or persisted paper mapping is required.
+    courses = [
+        {"id": index, "grade_id": grade_id, "subject_id": subject_id}
+        for index, (grade_id, subject_id) in enumerate(course_pairs, start=1)
+    ]
+    if not courses:
+        raise HTTPException(status_code=422, detail="所选年级在该学年尚未配置课程，请先检查课时方案")
     school = await session.get(Tenant, tenant_id)
     if school is None:
         raise HTTPException(status_code=404, detail="学校不存在")
@@ -284,7 +294,7 @@ async def _generate_full_plan(
     teacher_ids = select_invigilator_ids(teachers)
     try:
         generated = generate_exam_schedule(
-            [item.model_dump() for item in papers],
+            courses,
             start_date=body.start_date,
             teacher_ids=teacher_ids,
             sessions=tuple((item.start_time, item.end_time) for item in body.sessions),
@@ -294,7 +304,7 @@ async def _generate_full_plan(
             subject_names=subject_names,
         )
         candidate_rosters, missing_choice_count = await _candidate_rosters(
-            session, tenant_id, exam, papers, subject_names,
+            session, tenant_id, exam, courses, subject_names,
         )
         if missing_choice_count:
             raise ValueError(f"有 {missing_choice_count} 名考生未完成确认选科，不能生成选考科目考场")
@@ -343,7 +353,6 @@ async def _generate_full_plan(
     ))
     records = [ExamSchedule(
         exam_id=body.exam_id,
-        paper_id=item.paper_id,
         grade_id=item.grade_id,
         subject_id=item.subject_id,
         exam_date=item.exam_date,
@@ -356,17 +365,16 @@ async def _generate_full_plan(
     ) for item in generated]
     session.add_all(records)
     await session.flush()
-    schedule_by_paper = {item.paper_id: item for item in records}
-    first_invigilator_by_paper: dict[int, int] = {}
+    schedule_by_course = {source.course_key: record for source, record in zip(generated, records)}
+    first_invigilator_by_course: dict[int, int] = {}
     room_records = []
     for item in arrangement.rooms:
-        schedule = schedule_by_paper[item.paper_id]
-        if item.invigilator_ids and item.paper_id not in first_invigilator_by_paper:
-            first_invigilator_by_paper[item.paper_id] = item.invigilator_ids[0]
+        schedule = schedule_by_course[item.course_key]
+        if item.invigilator_ids and item.course_key not in first_invigilator_by_course:
+            first_invigilator_by_course[item.course_key] = item.invigilator_ids[0]
         room_records.append(ExamRoomAssignment(
             exam_id=body.exam_id,
             exam_schedule_id=schedule.id,
-            paper_id=item.paper_id,
             grade_id=item.grade_id,
             subject_id=item.subject_id,
             exam_date=item.exam_date,
@@ -377,17 +385,19 @@ async def _generate_full_plan(
             invigilator_ids=list(item.invigilator_ids),
             tenant_id=tenant_id,
         ))
-    for record in records:
-        record.invigilator_id = first_invigilator_by_paper.get(record.paper_id)
+    for source, record in zip(generated, records):
+        record.invigilator_id = first_invigilator_by_course.get(source.course_key)
     session.add_all(room_records)
     await session.flush()
-    room_by_paper_name = {(item.paper_id, item.room_name): item for item in room_records}
+    room_by_course_name = {
+        (source.course_key, room.room_name): room
+        for source, room in zip(arrangement.rooms, room_records)
+    }
     session.add_all([
         ExamCandidateAssignment(
             exam_id=body.exam_id,
-            exam_schedule_id=schedule_by_paper[item.paper_id].id,
-            exam_room_assignment_id=room_by_paper_name[(item.paper_id, item.room_name)].id,
-            paper_id=item.paper_id,
+            exam_schedule_id=schedule_by_course[item.course_key].id,
+            exam_room_assignment_id=room_by_course_name[(item.course_key, item.room_name)].id,
             grade_id=item.grade_id,
             subject_id=item.subject_id,
             student_id=item.student_id,
@@ -449,9 +459,15 @@ async def get_exam_config(
     ))).scalar_one_or_none()
     if config:
         return {"code": 0, "message": "ok", "data": config.model_dump()}
-    grade_ids = list((await session.execute(select(Paper.grade_id).where(
-        Paper.exam_id == exam_id,
-    ).distinct().order_by(Paper.grade_id))).scalars().all())
+    grade_ids = list((await session.execute(
+        select(Class.grade_id).join(CourseHourPlan, CourseHourPlan.class_id == Class.id).where(
+            Class.tenant_id == tenant_id,
+            CourseHourPlan.tenant_id == tenant_id,
+            CourseHourPlan.academic_year == (await session.get(Exam, exam_id)).academic_year,
+            CourseHourPlan.term == (await session.get(Exam, exam_id)).term,
+            CourseHourPlan.weekly_periods > 0,
+        ).distinct().order_by(Class.grade_id)
+    )).scalars().all())
     return {"code": 0, "message": "ok", "data": {
         "exam_id": exam_id,
         "grade_ids": grade_ids,
@@ -471,12 +487,19 @@ async def save_exam_config(
     tenant_id: int = Depends(get_current_tenant),
 ):
     await _exam_or_404(session, exam_id, tenant_id)
-    available_grade_ids = set((await session.execute(select(Paper.grade_id).where(
-        Paper.exam_id == exam_id,
-    ).distinct())).scalars().all())
+    exam = await _exam_or_404(session, exam_id, tenant_id)
+    available_grade_ids = set((await session.execute(
+        select(Class.grade_id).join(CourseHourPlan, CourseHourPlan.class_id == Class.id).where(
+            Class.tenant_id == tenant_id,
+            CourseHourPlan.tenant_id == tenant_id,
+            CourseHourPlan.academic_year == exam.academic_year,
+            CourseHourPlan.term == exam.term,
+            CourseHourPlan.weekly_periods > 0,
+        ).distinct()
+    )).scalars().all())
     invalid = sorted(set(body.grade_ids) - available_grade_ids)
     if invalid:
-        raise HTTPException(status_code=422, detail=f"所选年级没有对应试卷：{invalid}")
+        raise HTTPException(status_code=422, detail=f"所选年级没有该学年的课时方案：{invalid}")
     config = (await session.execute(select(ExamSchedulingConfig).where(
         ExamSchedulingConfig.tenant_id == tenant_id,
         ExamSchedulingConfig.exam_id == exam_id,

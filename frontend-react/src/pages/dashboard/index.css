@@ -411,7 +411,6 @@
 .wb-todo-dot.blue { background: #2d79bd; }
 .wb-todo-dot.amber { background: #d69927; }
 .wb-todo-dot.green { background: var(--green-ink); }
-.wb-scan-panel { margin-bottom: 12px; }
 .wb-inline-empty {
   display: flex;
   align-items: center;

@@ -31,9 +31,9 @@ async function main() {
       const paths = [
         '/dashboard', '/onboarding', '/settings', '/staff', '/staff-positions', '/rbac',
         '/campus-buildings', '/students', '/classes', '/subjects', '/teacher-profiles',
-        '/scheduling', '/gaokao', '/seating', '/exams', '/scans', '/exam-rooms',
+        '/scheduling', '/gaokao', '/seating', '/exams', '/exam-rooms',
         '/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling',
-        '/grading/1', '/stats/1', '/meetings', '/file-center', '/ai-providers',
+        '/grading/1', '/stats/1', '/file-center', '/ai-providers',
       ]
       const progress = []
       const spaceNext = await runAssistantTool(

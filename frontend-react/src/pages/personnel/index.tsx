@@ -255,12 +255,9 @@ export default function PersonnelView() {
   }
   const archiveUnit = () => selectedUnit && modal.confirm({
     title: `归档“${selectedUnit.name}”`,
-    content: selectedUnit.unit_type === 'grade_group'
-      ? '将同时归档该年级部的教师任职关系，教师账号和历史业务数据保留。'
-      : '历史业务记录会保留，该组织不再出现在当前组织树。',
+    content: '该组织及其下级组织将从当前组织树中移除，相关当前任职关系将归档；教师账号和历史业务记录保留。',
     okText: '确认归档',
     onOk: async () => {
-      if (selectedUnit.unit_type === 'grade_group') await organizationApi.archiveUnitAppointments(selectedUnit.id)
       await organizationApi.updateUnit(selectedUnit.id, { status: 'archived' })
       setSelectedKey('school')
       await load()

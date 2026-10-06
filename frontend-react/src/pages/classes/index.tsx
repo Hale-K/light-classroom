@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { App, Button, Input, Modal, Select, Space, Switch, Table, Tabs, Tag } from 'antd'
 import type { TableProps } from 'antd'
-import { examApi, orgApi, organizationApi, schedulingApi, staffApi } from '@/api'
+import { authApi, gaokaoApi, orgApi, organizationApi, schedulingApi, staffApi } from '@/api'
 import { allocateHeadTeachers, coreSubjectScore as getCoreSubjectScore } from './head-teacher-allocation'
 import PageHeader from '@/components/PageHeader'
 import TableCard from '@/components/TableCard'
@@ -9,14 +9,13 @@ import DictTag from '@/components/DictTag'
 import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
 import { GENDER_DICT } from '@/types/dict'
-import type { AutoClassAssignmentResult, ClassInfo, Exam, Grade, OrganizationUnit, StaffAccount, StaffAppointment, Student, TeachingAssignment } from '@/types'
+import type { AutoClassAssignmentResult, ClassInfo, Grade, OrganizationUnit, StaffAccount, StaffAppointment, Student, TeachingAssignment } from '@/types'
 
 type ClassRule = {
   id: string
   name: string
-  basis: 'score_balanced' | 'stable' | 'snake'
+  basis: 'stable' | 'snake' | 'subject_choice'
   genderBalance: boolean
-  paperId?: number
   desc: string
   color: string
 }
@@ -29,11 +28,25 @@ const getClassTypeLabel = (classType?: string) => {
   return classType
 }
 
+function ClassSubjectTag({ track }: { track: ClassInfo['subject_track'] }) {
+  const label = track === 'physics' ? '物理班' : track === 'history' ? '历史班' : track === 'mixed' ? '选科混合' : '待确定选科'
+  const color = track === 'physics' ? 'blue' : track === 'history' ? 'orange' : track === 'mixed' ? 'red' : undefined
+  return <Tag color={color} style={{ margin: 0 }}>{label}</Tag>
+}
+
 const CLASS_RULES_KEY = 'light-classroom-class-assignment-rules'
+const WALK_CLASS_RULE: ClassRule = {
+  id: 'walk-class',
+  name: '走班分班',
+  basis: 'subject_choice',
+  genderBalance: false,
+  desc: '按物理/历史首选科目隔离班级池，并在各自池内均衡分班',
+  color: '#0f766e',
+}
 const DEFAULT_CLASS_RULES: ClassRule[] = [
-  { id: 'score-balanced', name: '中考成绩均衡分班', basis: 'score_balanced', genderBalance: true, desc: '按总分排序后蛇形分配，尽量均衡各班成绩与性别', color: '#2563eb' },
   { id: 'stable', name: '学号顺序分班', basis: 'stable', genderBalance: false, desc: '按学号顺序依次分入已分配教室的行政班', color: '#64748b' },
   { id: 'snake', name: '名册蛇形分班', basis: 'snake', genderBalance: true, desc: '按名册顺序往返分配，适合没有统一成绩的场景', color: '#7c3aed' },
+  WALK_CLASS_RULE,
 ]
 
 export default function ClassesView() {
@@ -41,11 +54,11 @@ export default function ClassesView() {
   const [grades, setGrades] = useState<Grade[]>([])
   const [classes, setClasses] = useState<ClassInfo[]>([])
   const [students, setStudents] = useState<Student[]>([])
+  const [primarySubjectByStudent, setPrimarySubjectByStudent] = useState<Map<number, string>>(new Map())
   const [staff, setStaff] = useState<StaffAccount[]>([])
   const [appointments, setAppointments] = useState<StaffAppointment[]>([])
   const [organizationUnits, setOrganizationUnits] = useState<OrganizationUnit[]>([])
   const [teachingAssignments, setTeachingAssignments] = useState<TeachingAssignment[]>([])
-  const [exams, setExams] = useState<Exam[]>([])
   const [gradeId, setGradeId] = useState<number>()
   const [selectedClassId, setSelectedClassId] = useState<number>()
   const [classKeyword, setClassKeyword] = useState('')
@@ -67,19 +80,21 @@ export default function ClassesView() {
   const [rules, setRules] = useState<ClassRule[]>(() => {
     try {
       const saved = localStorage.getItem(CLASS_RULES_KEY)
-      return saved ? (JSON.parse(saved) as ClassRule[]) : DEFAULT_CLASS_RULES
+      if (!saved) return DEFAULT_CLASS_RULES
+      const parsed = JSON.parse(saved) as ClassRule[]
+      const compatible = parsed.filter((item) => item.basis !== ('score_balanced' as string))
+      return compatible.some((item) => item.id === WALK_CLASS_RULE.id) ? compatible : [...compatible, WALK_CLASS_RULE]
     } catch {
       return DEFAULT_CLASS_RULES
     }
   })
-  const [defaultRuleId, setDefaultRuleId] = useState(() => localStorage.getItem(`${CLASS_RULES_KEY}-default`) || 'score-balanced')
-  const [selectedRuleId, setSelectedRuleId] = useState(() => localStorage.getItem(`${CLASS_RULES_KEY}-default`) || 'score-balanced')
+  const [defaultRuleId, setDefaultRuleId] = useState(() => localStorage.getItem(`${CLASS_RULES_KEY}-default`) || 'stable')
+  const [selectedRuleId, setSelectedRuleId] = useState(() => localStorage.getItem(`${CLASS_RULES_KEY}-default`) || 'stable')
   const [ruleModalOpen, setRuleModalOpen] = useState(false)
   const [editingRuleId, setEditingRuleId] = useState<string>()
   const [ruleName, setRuleName] = useState('')
-  const [ruleBasis, setRuleBasis] = useState<ClassRule['basis']>('score_balanced')
+  const [ruleBasis, setRuleBasis] = useState<ClassRule['basis']>('stable')
   const [ruleGenderBalance, setRuleGenderBalance] = useState(true)
-  const [rulePaperId, setRulePaperId] = useState<number>()
   const [ruleDesc, setRuleDesc] = useState('')
   const [headTeacherDialog, setHeadTeacherDialog] = useState(false)
   const [headTeacherId, setHeadTeacherId] = useState<number>()
@@ -234,20 +249,31 @@ export default function ClassesView() {
   const loadData = async () => {
     setLoading(true)
     try {
+      const academicSettings = await authApi.academicYears()
+      const scopedAcademicYear = academicSettings.current_academic_year || academicYear
+      const scopedTerm = academicSettings.current_term || term
+      setAcademicYear(scopedAcademicYear)
+      setTerm(scopedTerm)
       const gradeList = await orgApi.grades()
       setGrades(gradeList)
       const gid = gradeId ?? gradeList[0]?.id
       if (gid !== undefined && gradeId === undefined) setGradeId(gid)
-      const [classList, studentList, staffDirectory, appointmentList, schedulingResources, organizationTree] = await Promise.all([
-        orgApi.classes(gid !== undefined ? { grade_id: gid } : undefined),
-        orgApi.students(),
+      const [classList, studentList, staffDirectory, appointmentList, schedulingResources, organizationTree, choices] = await Promise.all([
+        orgApi.classes(gid !== undefined ? { grade_id: gid, academic_year: scopedAcademicYear, term: scopedTerm } : { academic_year: scopedAcademicYear, term: scopedTerm }),
+        orgApi.students(undefined, undefined, gid, { academic_year: scopedAcademicYear, term: scopedTerm }),
         staffApi.list().catch(() => ({ accounts: [], roles: [] })),
         organizationApi.appointments().catch(() => []),
         schedulingApi.resources().catch(() => ({ teachers: [], subjects: [], classes: [], assignments: [] })),
         organizationApi.tree().catch(() => ({ school: { id: 0, name: '' }, units: [] })),
+        gaokaoApi.choicesForReview({ academic_year: scopedAcademicYear, term: scopedTerm, status_filter: '' }).catch(() => []),
       ])
       setClasses(classList)
       setStudents(studentList)
+      setPrimarySubjectByStudent(new Map(
+        choices
+          .filter((choice) => choice.status === 'confirmed' || choice.status === 'locked')
+          .map((choice) => [choice.student_id, choice.primary_subject_name]),
+      ))
       setStaff(staffDirectory.accounts)
       setAppointments(appointmentList)
       setOrganizationUnits(organizationTree.units)
@@ -369,7 +395,6 @@ export default function ClassesView() {
 
   useEffect(() => {
     void loadData()
-    void examApi.list().then(setExams).catch(() => setExams([]))
   }, [])
 
   const openAssignment = () => {
@@ -386,7 +411,10 @@ export default function ClassesView() {
     }
     setAssigning(true)
     try {
-      await orgApi.assignStudents(selectedStudentIds, selectedClassId)
+      await orgApi.assignStudents(selectedStudentIds, selectedClassId, {
+        academic_year: academicYear, term, grade_id: selectedClass?.grade_id,
+        cohort_label: selectedClass?.cohort_label || undefined,
+      })
       setAssignDialog(false)
       message.success(`已将 ${selectedStudentIds.length} 名学生分入${selectedClass?.name}`)
       await loadData()
@@ -399,7 +427,10 @@ export default function ClassesView() {
 
   const removeFromClass = async (student: Student) => {
     try {
-      await orgApi.assignStudents([student.id], null)
+      await orgApi.assignStudents([student.id], null, {
+        academic_year: academicYear, term, grade_id: selectedClass?.grade_id,
+        cohort_label: selectedClass?.cohort_label || undefined,
+      })
       message.success(`${student.name}已移回待分班名单`)
       await loadData()
     } catch (error) {
@@ -410,8 +441,7 @@ export default function ClassesView() {
   const autoAssignPayload = () => ({
     grade_id: gradeId!,
     class_ids: assignableClasses.map((item) => item.id),
-    strategy: selectedRule?.basis ?? 'score_balanced',
-    paper_id: selectedRule?.paperId,
+    strategy: selectedRule?.basis ?? 'stable',
     balance_gender: selectedRule?.genderBalance ?? true,
     overwrite_existing: false,
   })
@@ -419,9 +449,8 @@ export default function ClassesView() {
   const openNewRule = () => {
     setEditingRuleId(undefined)
     setRuleName('')
-    setRuleBasis('score_balanced')
+    setRuleBasis('stable')
     setRuleGenderBalance(true)
-    setRulePaperId(undefined)
     setRuleDesc('')
     setRuleModalOpen(true)
   }
@@ -431,7 +460,6 @@ export default function ClassesView() {
     setRuleName(rule.name)
     setRuleBasis(rule.basis)
     setRuleGenderBalance(rule.genderBalance)
-    setRulePaperId(rule.paperId)
     setRuleDesc(rule.desc)
     setRuleModalOpen(true)
   }
@@ -444,8 +472,7 @@ export default function ClassesView() {
       name,
       basis: ruleBasis,
       genderBalance: ruleGenderBalance,
-      paperId: rulePaperId,
-      desc: ruleDesc.trim() || (ruleBasis === 'score_balanced' ? '按成绩均衡分班' : ruleBasis === 'stable' ? '按学号顺序分班' : '按名册蛇形分班'),
+      desc: ruleDesc.trim() || (ruleBasis === 'stable' ? '按学号顺序分班' : ruleBasis === 'subject_choice' ? '按学生选课组合分班' : '按名册蛇形分班'),
       color: editingRuleId ? (rules.find((item) => item.id === editingRuleId)?.color ?? '#64748b') : '#0f766e',
     }
     const next = editingRuleId ? rules.map((item) => item.id === editingRuleId ? nextRule : item) : [...rules, nextRule]
@@ -505,6 +532,7 @@ export default function ClassesView() {
   const rosterColumns: TableProps<Student>['columns'] = [
     { title: '学号', dataIndex: 'student_no', width: 160, render: (value: string) => value || '—' },
     { title: '姓名', dataIndex: 'name', width: 120 },
+    { title: '首选科目（+1）', key: 'primary_subject', width: 150, render: (_, record) => primarySubjectByStudent.get(record.id) || '—' },
     {
       title: '性别',
       dataIndex: 'gender',
@@ -551,7 +579,7 @@ export default function ClassesView() {
               pagination={{ pageSize: 8, showSizeChanger: false, showTotal: (total) => `共 ${total} 条规则` }}
               columns={[
                 { title: '规则名称', dataIndex: 'name', width: 230, render: (name: string, record) => <span className="st-rule-name"><i style={{ color: record.color, background: `${record.color}1a` }}><Icon name="clipboard" size={16} /></i><span className="st-rule-name-text">{name}{defaultRuleId === record.id && <Tag className="st-rule-default">默认</Tag>}</span></span> },
-                { title: '分班依据', dataIndex: 'basis', width: 150, render: (value: ClassRule['basis']) => <Tag color="blue">{{ score_balanced: '成绩均衡', stable: '学号顺序', snake: '名册蛇形' }[value]}</Tag> },
+                { title: '分班依据', dataIndex: 'basis', width: 150, render: (value: ClassRule['basis']) => <Tag color="blue">{{ stable: '学号顺序', snake: '名册蛇形', subject_choice: '选课组合' }[value]}</Tag> },
                 { title: '均衡方式', dataIndex: 'genderBalance', width: 130, render: (value: boolean) => value ? <Tag color="green">性别均衡</Tag> : <span>不启用</span> },
                 { title: '说明', dataIndex: 'desc', ellipsis: true },
                 { title: '启用', key: 'enabled', width: 90, render: (_, record) => <Switch size="small" checked={defaultRuleId === record.id} checkedChildren="开" unCheckedChildren="关" onChange={(checked) => { if (checked) setDefaultRule(record.id) }} /> },
@@ -619,7 +647,7 @@ export default function ClassesView() {
                       </em>
                     )}
                   </strong>
-                  <small>行政班</small>
+                  <small><ClassSubjectTag track={item.subject_track} /></small>
                   <small className={item.head_teacher_name ? undefined : 'pending-text'}>
                     {item.head_teacher_name ? `班主任：${item.head_teacher_name}` : '未安排班主任'}
                   </small>
@@ -636,7 +664,7 @@ export default function ClassesView() {
         <main className="zh-roster">
           <div className="zh-roster-header">
             <div>
-              <h2>{selectedClass?.name || '请选择班级'}</h2>
+              <h2>{selectedClass?.name || '请选择班级'}{selectedClass && <span style={{ marginLeft: 10 }}><ClassSubjectTag track={selectedClass.subject_track} /></span>}</h2>
               <span>{classStudents.length} 名学生 · 当前规则：{selectedRule?.name || '未设置'}</span>
             </div>
             <Space>
@@ -713,9 +741,8 @@ export default function ClassesView() {
       >
         <div className="st-modal-form">
           <label className="zh-filter-field"><span>规则名称</span><Input value={ruleName} onChange={(e) => setRuleName(e.target.value)} placeholder="例如：中考成绩均衡分班" maxLength={30} /></label>
-          <label className="zh-filter-field"><span>分班依据</span><Select value={ruleBasis} onChange={setRuleBasis} options={[{ label: '成绩均衡（蛇形分配）', value: 'score_balanced' }, { label: '学号顺序', value: 'stable' }, { label: '名册蛇形', value: 'snake' }]} /></label>
+          <label className="zh-filter-field"><span>分班依据</span><Select value={ruleBasis} onChange={setRuleBasis} options={[{ label: '按选课组合分班', value: 'subject_choice' }, { label: '学号顺序', value: 'stable' }, { label: '名册蛇形', value: 'snake' }]} /></label>
           <label className="zh-filter-field"><span>性别均衡</span><Switch checked={ruleGenderBalance} onChange={setRuleGenderBalance} checkedChildren="开启" unCheckedChildren="关闭" /></label>
-          <label className="zh-filter-field"><span>成绩来源</span><Select allowClear value={rulePaperId} onChange={setRulePaperId} placeholder="不参考成绩" options={exams.map((exam) => ({ label: `${exam.academic_year ? `${exam.academic_year} · ` : ''}${exam.name}`, value: exam.id }))} /></label>
           <label className="zh-filter-field"><span>规则说明</span><Input.TextArea value={ruleDesc} onChange={(e) => setRuleDesc(e.target.value)} rows={3} maxLength={100} placeholder="说明该规则适用的分班场景" /></label>
         </div>
       </Modal>
@@ -806,7 +833,7 @@ export default function ClassesView() {
       </Modal>
 
       <Modal title="自动分班预览" open={autoAssignDialog} onCancel={() => setAutoAssignDialog(false)} width={920} centered destroyOnHidden footer={<Space><Button onClick={() => setAutoAssignDialog(false)}>取消</Button><Button onClick={printAssignmentSheet} disabled={!autoPreview}>打印分班表</Button><Button type="primary" loading={autoLoading} disabled={!autoPreview} onClick={executeAutoAssignment}>确认分班</Button></Space>}>
-        {!autoPreview ? <EmptyState height={220} title="正在生成分班预览" desc="请稍候" /> : <><div className="zh-auto-assignment-summary"><strong>已分班 {autoPreview.assigned_student_count ?? 0} 人</strong><span>待分班 {autoPreview.total_students} 人</span><span>本次启用 {autoPreview.required_class_count ?? autoPreview.classes.length} 个班</span><span>备用 {autoPreview.unused_class_count ?? 0} 个班</span><span>预计未分班 {autoPreview.unassigned_count} 人</span></div><Table rowKey="id" size="small" dataSource={autoPreview.classes} pagination={false} columns={[{ title: '行政班', dataIndex: 'name' }, { title: '人数', dataIndex: 'student_count' }, { title: '容量', dataIndex: 'capacity' }, { title: '男生', dataIndex: 'male_count' }, { title: '女生', dataIndex: 'female_count' }, { title: '平均分', dataIndex: 'average_score', render: (value) => value ?? '—' }]} /></>}
+        {!autoPreview ? <EmptyState height={220} title="正在生成分班预览" desc="请稍候" /> : <><div className="zh-auto-assignment-summary"><strong>已分班 {autoPreview.assigned_student_count ?? 0} 人</strong><span>待分班 {autoPreview.total_students} 人</span><span>本次启用 {autoPreview.required_class_count ?? autoPreview.classes.length} 个班</span><span>备用 {autoPreview.unused_class_count ?? 0} 个班</span><span>预计未分班 {autoPreview.unassigned_count} 人</span></div><Table rowKey="id" size="small" dataSource={autoPreview.classes} pagination={false} columns={[{ title: '行政班', dataIndex: 'name' }, { title: '人数', dataIndex: 'student_count' }, { title: '容量', dataIndex: 'capacity' }, { title: '男生', dataIndex: 'male_count' }, { title: '女生', dataIndex: 'female_count' }]} /></>}
       </Modal>
 
       <Modal

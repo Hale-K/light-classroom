@@ -1,4 +1,8 @@
 import pytest
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+
+from app.api.v1.gaokao import UpdateTeachingSubjectHoursIn, update_teaching_subject_hours
 
 from app.services.academic.gaokao import (
     SubjectChoice,
@@ -104,6 +108,42 @@ def test_traditional_strategy_resolves_stream_subjects_from_policy():
 def test_unknown_subject_choice_strategy_is_rejected():
     with pytest.raises(ValueError, match="不支持的高考模式"):
         get_subject_choice_strategy("custom")
+
+
+@pytest.mark.asyncio
+async def test_subject_hours_update_preserves_classes_and_clears_only_their_schedules():
+    teaching_class = SimpleNamespace(id=41, weekly_periods=3)
+    classes_result = MagicMock()
+    classes_result.scalars.return_value.all.return_value = [teaching_class]
+    delete_result = SimpleNamespace(rowcount=2)
+    plan_result = MagicMock()
+    plan_result.scalar_one_or_none.return_value = SimpleNamespace(id=8, weekly_periods=3)
+    session = MagicMock()
+    session.get = AsyncMock(return_value=SimpleNamespace(tenant_id=7))
+    session.execute = AsyncMock(side_effect=[classes_result, plan_result, delete_result])
+    session.flush = AsyncMock()
+    session.commit = AsyncMock()
+
+    response = await update_teaching_subject_hours(
+        UpdateTeachingSubjectHoursIn(
+            grade_id=2,
+            academic_year="2026-2027",
+            term="2",
+            subject_id=9,
+            weekly_periods=4,
+        ),
+        session=session,
+        user=MagicMock(),
+        tenant_id=7,
+    )
+
+    assert teaching_class.weekly_periods == 4
+    assert response["data"] == {
+        "updated": 1,
+        "weekly_periods": 4,
+        "cleared_schedule_count": 2,
+    }
+    session.commit.assert_awaited_once()
 
 
 @pytest.mark.parametrize(

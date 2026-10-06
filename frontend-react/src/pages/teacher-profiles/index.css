@@ -44,7 +44,7 @@
 /* 筛选条 */
 .tp-filters {
   display: grid;
-  grid-template-columns: minmax(220px, 260px) 160px 220px auto auto auto;
+  grid-template-columns: minmax(220px, 260px) 160px 220px auto auto;
   gap: 12px;
   align-items: center;
   background: var(--bg-2);

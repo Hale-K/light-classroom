@@ -24,7 +24,6 @@ const ROOM_TYPES = [
   { value: 'classroom', label: '普通教室' },
   { value: 'laboratory', label: '实验室' },
   { value: 'computer', label: '计算机房' },
-  { value: 'meeting', label: '会议室' },
   { value: 'auditorium', label: '报告厅' },
 ]
 
@@ -62,6 +61,7 @@ export default function AllocationRuleDrawer({
   const [selectedRoomIds, setSelectedRoomIds] = useState<number[]>([])
   const [studentCount, setStudentCount] = useState<number | null>(null)
   const [availableCapacity, setAvailableCapacity] = useState(0)
+  const [resourceAllocationMode, setResourceAllocationMode] = useState<'cohort_capacity' | 'shared_pool'>('cohort_capacity')
   const viewedRooms = useMemo(
     () => viewRule ? rooms.filter((room) => room.cohort_allocations?.some((item) => item.rule_id === viewRule.id)) : [],
     [rooms, viewRule],
@@ -101,18 +101,6 @@ export default function AllocationRuleDrawer({
       academic_year: targetUnit.academic_year || values.academic_year,
     }).filter(([, value]) => value !== undefined && value !== ''))
   }
-  const selectRoomsForCapacity = (rooms: RoomAllocationPreview[], target: number | null) => {
-    const selectable = rooms.filter((room) => room.selectable).sort((left, right) => left.capacity - right.capacity || left.id - right.id)
-    if (target === null) return selectable.map((room) => room.id)
-    const selected: number[] = []
-    let capacity = 0
-    for (const room of selectable) {
-      if (capacity >= target) break
-      selected.push(room.id)
-      capacity += room.capacity
-    }
-    return selected
-  }
   const preview = async () => {
     try {
       const result = await facilityApi.previewAllocationRule(await normalizedValues())
@@ -122,9 +110,12 @@ export default function AllocationRuleDrawer({
       setPreviewRooms(rooms)
       setStudentCount(result.student_count ?? null)
       setAvailableCapacity(result.available_capacity ?? 0)
-      const selectedRoomIds = selectRoomsForCapacity(rooms, result.student_count ?? null)
-      setSelectedRoomIds(selectedRoomIds)
-      message.success(`已展示 ${result.rooms.length} 间场室，按 ${result.student_count ?? '目标'} 人自动勾选 ${selectedRoomIds.length} 间`)
+      setResourceAllocationMode(result.resource_allocation_mode ?? 'cohort_capacity')
+      // 预览只展示匹配结果；场室必须由用户明确勾选，避免误把整组教室分配出去。
+      setSelectedRoomIds([])
+      message.success(result.resource_allocation_mode === 'shared_pool'
+        ? `已展示 ${result.rooms.length} 间场室，请手动勾选共享教室`
+        : `已展示 ${result.rooms.length} 间场室，请手动勾选要分配的教室`)
     } catch (error) { message.error(error instanceof Error ? error.message : '规则预览失败') }
   }
   const create = async () => {
@@ -157,9 +148,15 @@ export default function AllocationRuleDrawer({
     available: '本次可选', occupied: '已被占用', current: '本届已分配', ineligible: '不符合规则', unavailable: '不可用',
   }
   const selectedCapacity = previewRooms.filter((room) => selectedRoomIds.includes(room.id)).reduce((total, room) => total + room.capacity, 0)
-  const capacitySufficient = studentCount === null || selectedCapacity >= studentCount
-  const capacityStatus = studentCount === null ? '无法校验' : capacitySufficient ? '满足要求' : '不满足要求'
-  const capacitySuggestion = studentCount === null
+  const capacitySufficient = resourceAllocationMode === 'shared_pool'
+    ? selectedRoomIds.length > 0
+    : studentCount === null || selectedCapacity >= studentCount
+  const capacityStatus = resourceAllocationMode === 'shared_pool'
+    ? (capacitySufficient ? '共享池可用' : '请至少选择一间教室')
+    : studentCount === null ? '无法校验' : capacitySufficient ? '满足要求' : '不满足要求'
+  const capacitySuggestion = resourceAllocationMode === 'shared_pool'
+    ? '走班制教室按教学班共享池使用，不把全年级学生人数累加为教室总容量；生成教学班时再校验每个教学班的单间容量。'
+    : studentCount === null
     ? '建议先为目标届别绑定年级，并确认学生档案已归属该年级。'
     : capacitySufficient
       ? '当前勾选场室容量可以覆盖目标届别学生，可继续执行划分。'
@@ -181,7 +178,7 @@ export default function AllocationRuleDrawer({
         <span>适用学年：<strong>{viewRule.academic_year}</strong></span>
         <span>适用学期：<strong>{viewRule.term === '1' ? '上学期' : '下学期'}</strong></span>
         <span>匹配教室：<strong>{viewRule.matched_room_count} 间</strong></span>
-        <span>分配方式：<strong>{viewRule.allocation_mode === 'shared' ? '共享' : '专属'}</strong></span>
+        <span>资源归属：<strong>{viewRule.allocation_mode === 'shared' ? '同届复用' : '独占'}</strong></span>
       </div>
       <ViewAllocationPreview rooms={viewedRooms} />
     </section> : <>
@@ -247,11 +244,11 @@ export default function AllocationRuleDrawer({
         <Form.Item name="min_capacity" label="最低容量" rules={[{ type: 'number', min: 1, max: 5000, message: '最低容量应为1至5000之间的整数' }]}><InputNumber min={1} max={5000} addonAfter="人" style={{ width: '100%' }} /></Form.Item>
         <Form.Item name="required_feature" label="必备能力"><Select allowClear placeholder="不限制" options={[{ value: 'multimedia', label: '多媒体' }]} /></Form.Item>
       </div>
-      <Form.Item name="allocation_mode" label="划分方式" rules={[{ required: true, message: '请选择划分方式' }]}><Select options={[{ value: 'shared', label: '共享：允许同一场室分给多个届' }, { value: 'exclusive', label: '专属：排除已分给其他届的场室' }]} /></Form.Item>
+      <Form.Item name="allocation_mode" label="资源归属方式" extra="同届复用只适用于当前学年、当前学期和当前届别；不允许把高一教室跨届分给高二，也不表示同一课位可同时安排多个班级。" rules={[{ required: true, message: '请选择资源归属方式' }]}><Select options={[{ value: 'shared', label: '同届复用：同一届内可用于多个教学班' }, { value: 'exclusive', label: '独占：教室只分配给当前届别' }]} /></Form.Item>
       <Space wrap><Button onClick={() => void preview()}>预览匹配</Button><Button type="primary" loading={saving} disabled={!selectedRoomIds.length || !capacitySufficient} onClick={() => void create()}>执行划分</Button>{previewCount !== undefined && <span className="facility-muted">可选 {selectedRoomIds.length} 间 · 已占用 {occupiedCount} 间</span>}</Space>
     </Form>
     {previewRooms.length > 0 && <div className={`facility-capacity-summary ${capacitySufficient ? 'is-ok' : 'is-shortage'}`} role="status">
-      <div className="facility-capacity-result"><strong>{capacityStatus}</strong><span>{capacitySuggestion}</span></div><div className="facility-capacity-metrics"><span>目标届别学生 {studentCount === null ? '未建立关联' : `${studentCount} 人`}</span><span>全部可选容量 {availableCapacity} 人</span><span>当前勾选容量 {selectedCapacity} 人</span></div>
+      <div className="facility-capacity-result"><strong>{capacityStatus}</strong><span>{capacitySuggestion}</span></div><div className="facility-capacity-metrics">{resourceAllocationMode === 'shared_pool' ? <><span>年级学生总数（参考） {studentCount === null ? '未建立关联' : `${studentCount} 人`}</span><span>共享池最大容量 {Math.max(0, ...previewRooms.filter((room) => room.selectable).map((room) => room.capacity))} 人</span><span>已选共享教室 {selectedRoomIds.length} 间</span></> : <><span>目标届别学生 {studentCount === null ? '未建立关联' : `${studentCount} 人`}</span><span>全部可选容量 {availableCapacity} 人</span><span>当前勾选容量 {selectedCapacity} 人</span></>}</div>
     </div>}
     {previewRooms.length > 0 && <section className="facility-room-preview" aria-label="场室匹配预览">
       <header className="facility-room-preview-head">

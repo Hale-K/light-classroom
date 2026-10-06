@@ -4,6 +4,9 @@
 所有查询自动注入 tenant_id 过滤条件，防越权靠中间件强制。
 """
 from contextvars import ContextVar
+import json
+from pathlib import Path
+from time import perf_counter
 from typing import AsyncGenerator
 from sqlmodel import SQLModel
 from sqlalchemy.ext.asyncio import (
@@ -26,6 +29,8 @@ school_code_ctx: ContextVar[str | None] = ContextVar("school_code", default=None
 # ---------- 引擎与 Session 工厂 ----------
 engine = create_async_engine(
     settings.database_url,
+    # 保留中文原文，方便直接查看数据库中的 JSON 消息和业务数据。
+    json_serializer=lambda value: json.dumps(value, ensure_ascii=False),
     pool_size=settings.db_pool_size,
     max_overflow=settings.db_max_overflow,
     echo=settings.db_echo,  # 开发调试才开，默认关，避免日志刷屏导致终端会话被回收
@@ -38,6 +43,32 @@ AsyncSessionLocal = async_sessionmaker(
     expire_on_commit=False,
     autoflush=False,
 )
+
+# DB_ECHO includes bound parameter values. Keep the diagnostic file logger
+# statement-only so student names, identifiers and other values aren't copied
+# into application logs.
+if settings.db_sql_log:
+    _sql_log_path = Path(__file__).resolve().parents[2] / "logs" / "sql.log"
+    _sql_log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.add(
+        str(_sql_log_path),
+        filter=lambda record: record["extra"].get("sql_statement") is True,
+        level="INFO",
+        rotation="20 MB",
+        retention="7 days",
+        enqueue=True,
+        encoding="utf-8",
+    )
+
+    @event.listens_for(engine.sync_engine, "before_cursor_execute")
+    def _start_sql_timer(conn, cursor, statement, parameters, context, executemany):
+        context._light_classroom_sql_started_at = perf_counter()
+
+    @event.listens_for(engine.sync_engine, "after_cursor_execute")
+    def _write_sql_log(conn, cursor, statement, parameters, context, executemany):
+        started_at = getattr(context, "_light_classroom_sql_started_at", None)
+        elapsed_ms = (perf_counter() - started_at) * 1000 if started_at is not None else 0
+        logger.bind(sql_statement=True).info("{:.1f} ms | {}", elapsed_ms, statement)
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

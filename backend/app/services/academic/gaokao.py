@@ -255,7 +255,7 @@ _SELECTION_PHASES = {
         "exploration", "探索准备", "开展生涯规划和学科分析，尚不形成正式教学班。", False, False,
     ),
     (1, "2"): SubjectSelectionPhase(
-        "intention", "意向与确认", "进行模拟选科、资源测算和正式确认，可预编教学班。", True, False,
+        "intention", "意向与确认", "完成选科确认后，可预编教学班并试排走班课表。", True, True,
     ),
 }
 _EFFECTIVE_SELECTION_PHASE = SubjectSelectionPhase(
@@ -307,12 +307,17 @@ def form_teaching_classes(
     groups: list[TeachingClassDraft] = []
     for subject_id in sorted(subject_students):
         student_ids = sorted(set(subject_students[subject_id]))
-        for offset in range(0, len(student_ids), capacity):
+        class_count = (len(student_ids) + capacity - 1) // capacity
+        size, extra = divmod(len(student_ids), class_count)
+        offset = 0
+        for index in range(class_count):
+            class_size = size + (index < extra)
             groups.append(TeachingClassDraft(
                 subject_id=subject_id,
-                sequence=offset // capacity + 1,
-                student_ids=tuple(student_ids[offset:offset + capacity]),
+                sequence=index + 1,
+                student_ids=tuple(student_ids[offset:offset + class_size]),
             ))
+            offset += class_size
     return groups
 
 

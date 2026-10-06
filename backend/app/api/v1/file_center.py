@@ -30,8 +30,9 @@ class ExportTimetableIn(BaseModel):
     evening_start_period: int | None = None
     sheets: list[str] | None = Field(
         default=None,
-        description="可选：cover / teacher_relation / teacher_hours / teacher_grid / class_timetables",
+        description="可选：cover / teacher_relation / teacher_hours / teacher_grid / class_timetables / student_timetables",
     )
+    student_zip: bool = Field(default=False, description="为每名学生生成独立课表并打包为 ZIP")
 
 
 class ExportStudentsIn(BaseModel):
@@ -147,6 +148,8 @@ async def export_timetable(
     if not sheets:
         raise HTTPException(status_code=422, detail="请至少勾选一种工作表")
     _title, file_name = pack_title_and_filename(grade_names)
+    if body.student_zip:
+        file_name = f"学生课表_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}.zip"
 
     job_id = uuid.uuid4().hex
     job = FileTransferJob(
@@ -169,6 +172,7 @@ async def export_timetable(
                 "periods_per_day": body.periods_per_day,
                 "evening_start_period": body.evening_start_period,
                 "sheets": sheets,
+                "student_zip": body.student_zip,
             },
             ensure_ascii=False,
         ),

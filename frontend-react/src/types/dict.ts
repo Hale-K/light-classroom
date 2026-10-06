@@ -35,44 +35,6 @@ export const EXAM_TYPE_DICT: Dict = {
   other: { label: '其他', color: 'default' },
 }
 
-// paper.status
-export const PAPER_STATUS_DICT: Dict = {
-  building: { label: '建卷中', color: 'default' },
-  finalized: { label: '已定稿', color: 'success' },
-}
-
-// question.difficulty
-export const DIFFICULTY_DICT: Dict = {
-  basic: { label: '基础', color: 'green' },
-  medium: { label: '中档', color: 'orange' },
-  hard: { label: '拔高', color: 'red' },
-}
-
-// ==================== 轻课堂 · 扫描 / 阅卷域 ====================
-
-// scan_batch.status
-export const SCAN_BATCH_STATUS_DICT: Dict = {
-  uploaded: { label: '已上传', color: 'default' },
-  split: { label: '已切分', color: 'processing' },
-  assigned: { label: '已分配', color: 'geekblue' },
-  confirmed: { label: '已确认', color: 'success' },
-}
-
-// submission.status
-export const SUBMISSION_STATUS_DICT: Dict = {
-  pending: { label: '待批阅', color: 'default' },
-  grading: { label: '批阅中', color: 'processing' },
-  finalized: { label: '已批完', color: 'success' },
-}
-
-// 评分确认状态
-export const CONFIRM_STATUS_DICT: Dict = {
-  pending: { label: '待确认', color: 'default' },
-  ai: { label: 'AI 预判', color: 'cyan' },
-  manual: { label: '人工确认', color: 'success' },
-  confirmed: { label: '已确认', color: 'success' },
-}
-
 // ==================== 轻课堂 · 组织 / 人员域 ====================
 
 // student.gender

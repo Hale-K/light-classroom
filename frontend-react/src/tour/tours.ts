@@ -50,12 +50,7 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     { title: '快捷入口', content: '从这里直接进入对应工作页；进入后可再次打开本页导览查看具体操作。', target: firstOf('.wb-action-grid', '.tw-diamond-grid') },
   ],
   '/exams': [
-    { title: '试卷筛选', content: '按学科、年级和关键词缩小试卷范围；筛选只改变当前列表，不会修改试卷内容。', target: '.zh-library-exam-filter' },
-    { title: '试卷库', content: '点击试卷查看题目目录和基本信息；新建、编辑和删除操作都从试卷记录进入。', target: firstOf('.zh-library', '.ant-table-wrapper') },
-  ],
-  '/scans': [
-    { title: '扫描批次筛选', content: '按试卷或处理状态查找扫描批次，先定位批次再查看识别和阅卷进度。', target: '.zh-filter-row' },
-    { title: '扫描任务', content: '这里显示上传文件、识别数量和当前状态；进入批次后可继续核对异常答卷。', target: '.ant-table-wrapper' },
+    { title: '考试管理', content: '在这里查看和新建考试；考试日期、科目场次、考场和监考安排在排考管理中完成。', target: '.ant-table-wrapper' },
   ],
   '/scheduling': [
     {
@@ -151,7 +146,7 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     },
     {
       title: '按校区、楼宇、场室逐级创建',
-      content: '先新增校区，再选择校区新增楼宇，最后选择楼宇新增场室。场室的容量、类型以及是否允许排课、排考和会议，会被后续业务直接使用。',
+      content: '先新增校区，再选择校区新增楼宇，最后选择楼宇新增场室。场室的容量、类型以及是否允许排课、排考，会被后续业务直接使用。',
       target: tabPanelTarget('.facility-tabs', '空间资源配置', '.facility-actions'),
       beforeEnter: switchTab('.facility-tabs', '空间资源配置'),
     },
@@ -238,19 +233,6 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     { title: '排考流程', content: '这是最后的人员排考环节，前面的考场、日程和教师可用性需要先准备完成。', target: '.es-nav' },
     { title: '选择考试', content: '先确认本次要处理的考试，页面指标和人员安排都会切换到该考试。', target: '.es-exam-select' },
     { title: '排考结果', content: '这里查看考生考场和监考教师安排。生成后仍需检查缺员、容量和时间冲突。', target: '.es-personnel' },
-  ],
-  '/meetings': [
-    { title: '会议说明', content: '这里维护学校会议和场室占用，会议时间会与其他资源使用共同核对。', target: firstOf('.chapter', '.facility-notice') },
-    { title: '会议列表', content: '按时间查看会议、地点和参与范围；新增前先确认场室在该时段可用。', target: '.ant-table-wrapper' },
-  ],
-  '/grading': [
-    { title: '阅卷进度', content: '顶栏显示当前试卷、题号和已阅进度，切题前先确保当前评分已经保存。', target: '.zh-gbar' },
-    { title: '答卷区域', content: '这里查看学生答卷或扫描图像，可缩放并定位需要评分的内容。', target: '.zh-sheet' },
-    { title: '评分区域', content: '按评分标准录入分数和批注，提交后再进入下一份答卷。', target: firstOf('.zh-gside', '.zh-grading aside') },
-  ],
-  '/stats': [
-    { title: '成绩概览', content: '这里汇总参考人数、平均分、最高分和最低分，先确认本次统计数据是否齐全。', target: '.st-sum-cards' },
-    { title: '成绩分布', content: '图表展示分数段、班级和题目维度的表现，用于定位需要复盘的班级或知识点。', target: '.st-charts' },
   ],
 }
 

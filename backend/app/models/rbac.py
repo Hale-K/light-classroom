@@ -35,7 +35,7 @@ class Permission(SQLModel, table=True):
     __table_args__ = {"comment": "权限点"}
     id: int | None = Field(default=None, primary_key=True)
     code: str = Field(max_length=100, unique=True, index=True,
-                      description="如 paper:create / scan:upload / score:write")
+                      description="如 scheduling:view / exam:manage")
     name: str = Field(max_length=50, description="权限名")
     module: str = Field(max_length=50, index=True, description="所属模块")
     sort: int = Field(default=0, description="模块内排序")

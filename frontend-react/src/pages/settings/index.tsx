@@ -6,8 +6,7 @@ import './index.css'
 export default function SchoolSettingsView() {
   return (
     <section className="stg-page-v2">
-      <SchoolSettingsForm />
-      <GradeManagementPanel />
+      <SchoolSettingsForm gradePanel={<GradeManagementPanel />} />
     </section>
   )
 }

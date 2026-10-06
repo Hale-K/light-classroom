@@ -6,6 +6,7 @@ from app.api.v1.org import (
     GradeIn,
     StudentIn,
     StudentSimulationIn,
+    assign_students_to_class,
     add_existing_class_counts,
     count_students,
     create_grade,
@@ -54,6 +55,34 @@ def test_students_can_be_assigned_or_returned_to_unassigned_pool():
     unassigned = ClassAssignmentIn(class_id=None, student_ids=[1, 2])
     assert assigned.class_id == 3
     assert unassigned.class_id is None
+
+
+@pytest.mark.asyncio
+async def test_returning_student_to_unassigned_pool_does_not_require_target_class():
+    student = type("StudentRow", (), {"id": 1, "tenant_id": 3, "class_id": 7})()
+
+    class Result:
+        def scalars(self):
+            return self
+
+        def all(self):
+            return [student]
+
+    class RecordingSession:
+        async def execute(self, _statement):
+            return Result()
+
+        async def commit(self):
+            pass
+
+    result = await assign_students_to_class(
+        ClassAssignmentIn(class_id=None, student_ids=[1]),
+        session=RecordingSession(),
+        user=object(),
+        tenant_id=3,
+    )
+
+    assert result["data"] == {"updated": 1, "class_id": None}
 
 
 def test_student_simulation_requires_at_least_one_student():

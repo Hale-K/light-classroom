@@ -20,80 +20,54 @@ function Write-Banner([string]$msg, [string]$color = "Cyan") {
     Write-Host ("=" * 70) -ForegroundColor Gray
 }
 
+function Get-ListenerOwners([int]$Port) {
+    foreach ($line in (netstat -ano -p tcp)) {
+        if ($line -match ":$Port\s+.*LISTENING\s+(\d+)\s*$") {
+            [int]$matches[1]
+        }
+    }
+}
+
 function Stop-PortOwner {
-    param(
-        [int]$Port,
-        [string[]]$AllowedProcessNames,  # 只杀这些名字的进程，避免误杀
-        [int]$MaxWaitMs = 8000
-    )
-
-    Write-Host "[port:$Port] 扫描占用进程..." -ForegroundColor DarkCyan
-
-    try {
-        $pids = @( Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
-                   Where-Object { $_.State -ne 'TIME_WAIT' -and $_.State -ne 'CLOSE_WAIT' } |
-                   Select-Object -ExpandProperty OwningProcess -Unique )
-    } catch {
-        # 老系统可能没有 Get-NetTCPConnection，回退 netstat 解析
-        Write-Host "[port:$Port] 回退 netstat 解析..." -ForegroundColor DarkYellow
-        $lines = netstat -ano | Select-String -Pattern "LISTENING"
-        $pids = @()
-        foreach ($l in $lines) {
-            if ($l -match ":$Port\s+.*LISTENING\s+(\d+)\s*$") {
-                $pids += [int]$matches[1]
+    param([int]$Port, [string[]]$AllowedProcessNames, [int]$MaxWaitMs = 8000)
+    $processes = @(Get-CimInstance Win32_Process)
+    $owners = @(Get-ListenerOwners $Port | Select-Object -Unique)
+    foreach ($ownerId in $owners) {
+        $owner = $processes | Where-Object { $_.ProcessId -eq $ownerId }
+        $targets = @($owner)
+        # Uvicorn reload 父进程退出后，spawn 子进程仍持有监听句柄。
+        if (-not $owner) {
+            $targets = @($processes | Where-Object {
+                $_.ParentProcessId -eq $ownerId -and
+                $_.CommandLine -match 'multiprocessing.spawn' -and
+                $_.Name -match '^python(w)?\.exe$'
+            })
+        }
+        $targetIds = @()
+        foreach ($target in $targets) {
+            if (-not $target) { continue }
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($target.Name)
+            if ($name -notin $AllowedProcessNames) {
+                throw "端口 $Port 被非服务进程 $name 占用，停止重启。"
             }
+            $targetIds += $target.ProcessId
+        }
+        do {
+            $children = @($processes | Where-Object {
+                $_.ParentProcessId -in $targetIds -and $_.ProcessId -notin $targetIds
+            })
+            $targetIds += @($children.ProcessId)
+        } while ($children.Count -gt 0)
+        foreach ($targetId in ($targetIds | Select-Object -Unique)) {
+            Stop-Process -Id $targetId -Force -ErrorAction SilentlyContinue
         }
     }
-
-    if (-not $pids -or $pids.Count -eq 0) {
-        Write-Host "[port:$Port] 未发现占用进程，跳过清理 ✅" -ForegroundColor Green
-        return $true
+    $timer = [System.Diagnostics.Stopwatch]::StartNew()
+    while ($timer.ElapsedMilliseconds -lt $MaxWaitMs) {
+        if (-not @(Get-ListenerOwners $Port).Count) { return }
+        Start-Sleep -Milliseconds 300
     }
-
-    $killedAny = $false
-    foreach ($procId in $pids) {
-        try {
-            $proc = Get-Process -Id $procId -ErrorAction Stop
-            $name = $proc.ProcessName
-            $match = $false
-            foreach ($ap in $AllowedProcessNames) {
-                if ($name -like "*$ap*") { $match = $true; break }
-            }
-            if (-not $match) {
-                Write-Host ("[port:$Port] 跳过 PID=$procId ($name)，不属于允许的进程名 " +
-                    ($AllowedProcessNames -join "/")) -ForegroundColor DarkYellow
-                continue
-            }
-            $memMB = [math]::Round($proc.WorkingSet64 / 1MB, 1)
-            Write-Host ("[port:$Port] 终止 PID=$procId  $name  (WS=$memMB MB)") `
-                -ForegroundColor Magenta
-            Stop-Process -Id $procId -Force -ErrorAction Stop
-            $killedAny = $true
-        } catch {
-            Write-Host "[port:$Port] PID=$procId 终止失败: $($_.Exception.Message)" `
-                -ForegroundColor Red
-        }
-    }
-
-    if (-not $killedAny) { return $true }
-
-    # 等待端口真正释放
-    $elapsed = 0
-    $step = 300
-    Write-Host "[port:$Port] 等待端口释放..." -ForegroundColor DarkCyan
-    while ($elapsed -lt $MaxWaitMs) {
-        Start-Sleep -Milliseconds $step
-        $elapsed += $step
-        $still = Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue |
-                  Where-Object { $_.State -ne 'TIME_WAIT' -and $_.State -ne 'CLOSE_WAIT' }
-        if (-not $still) {
-            Write-Host "[port:$Port] 端口已释放 ✅ (等待 $elapsed ms)" `
-                -ForegroundColor Green
-            return $true
-        }
-    }
-    Write-Host "[port:$Port] ⚠ 等待超时，仍可能被占用，继续启动..." -ForegroundColor Yellow
-    return $false
+    throw "端口 $Port 尚未释放，停止启动，避免运行多份服务。"
 }
 
 function Stop-CeleryWorker {
@@ -151,11 +125,11 @@ New-Item -ItemType Directory -Force -Path "$BACK_CWD\logs" | Out-Null
 New-Item -ItemType Directory -Force -Path "$FRONT_CWD\logs" | Out-Null
 
 $backCmd = @(
-    "-NoExit",
+    "-NoProfile",
     "-Command",
     "`$env:PYTHONPATH='$BACK_CWD'; " +
     "Set-Location '$BACK_CWD'; " +
-    "& '$BACK_VENV_PY' -X utf8 -m uvicorn app.main:app --host 127.0.0.1 --port $BACK_PORT --reload"
+    "& '$BACK_VENV_PY' -X utf8 -m uvicorn app.main:app --host 127.0.0.1 --port $BACK_PORT"
 )
 
 $bp = Start-Process -FilePath "powershell.exe" `
@@ -175,9 +149,9 @@ Write-Banner "启动 Celery Worker（scheduling, academic）" Yellow
 # Windows 开发环境使用 solo pool，避免 prefork 与 Windows 进程模型不兼容。
 $workerCmd = @(
     "-Command",
-    "`$env:PYTHONPATH='$BACK_CWD'; " +
+    "`$env:PYTHONPATH='$BACK_CWD'; `$env:PYTHONUTF8='1'; `$env:PYTHONIOENCODING='utf-8'; " +
     "Set-Location '$BACK_CWD'; " +
-    "& '$BACK_VENV_PY' -m celery -A app.workers.celery_app worker -Q scheduling,academic --loglevel=info --pool=solo"
+    "& '$BACK_VENV_PY' -m celery -A app.workers.celery_app:celery_app worker -Q scheduling,academic --loglevel=info --pool=solo"
 )
 
 $wp = Start-Process -FilePath "powershell.exe" `
@@ -191,10 +165,10 @@ Write-Host "Celery Worker 已启动 PID=$($wp.Id)" -ForegroundColor Green
 Write-Banner "启动前端 Vite @ $FRONT_PORT" Blue
 
 $frontCmd = @(
-    "-NoExit",
+    "-NoProfile",
     "-Command",
     "Set-Location '$FRONT_CWD'; " +
-    "npx vite --port $FRONT_PORT --host 127.0.0.1"
+    "npx vite --port $FRONT_PORT --host 127.0.0.1 --strictPort"
 )
 
 $fp = Start-Process -FilePath "powershell.exe" `

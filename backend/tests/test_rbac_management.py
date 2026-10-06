@@ -95,10 +95,9 @@ def test_build_menu_respects_injected_db_menu_permission_map():
     paths = menu_paths(build_menu(
         "teacher",
         "3+1+2",
-        permission_codes={"dashboard:view", "meetings:view"},
+        permission_codes={"dashboard:view"},
         menu_permissions={
             "dashboard": {"dashboard:view"},
-            "meetings": {"meetings:view"},
             "scheduling": {"scheduling:view"},
         },
         menu_items=seed_menu_items(),

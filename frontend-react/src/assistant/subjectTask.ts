@@ -11,13 +11,15 @@ export function isSubjectCreationRequest(content: string): boolean {
 
 // This only identifies an action-shaped message. The model determines its intent.
 export function mayRequestPageAction(content: string): boolean {
-  return /(?:帮我|请|想|要|给我|能否|可以).{0,16}(?:新建|新增|创建|添加|安排|配置|设置|修改|删除|生成|建一个|建一门|开一门)/.test(content)
-    || /(?:新建|新增|创建|添加|安排|配置|设置|修改|删除|生成|建一个|建一门|开一门).{0,24}(?:课程|课|科目|规则|排课|老师|班级|教室|学生|页面)/.test(content)
+  return /(?:帮我|请|想|要|给我|能否|可以).{0,16}(?:新建|新增|创建|添加|安排|配置|设置|修改|删除|生成|建立|建一个|建一门|开一门)/.test(content)
+    || /(?:新建|新增|创建|添加|安排|配置|设置|修改|删除|生成|建立|建一个|建一门|开一门).{0,24}(?:课程|课|科目|规则|排课|老师|班级|教室|学生|页面)/.test(content)
 }
 
 export function readExplicitSubjectName(content: string): string | null {
   const match = content.match(/(?:科目名称|名称|名字)\s*(?:是|叫|为|[:：])\s*[“「"']([^”」"']+)[”」"']/)
-  return match?.[1]?.trim() || null
+  if (match?.[1]?.trim()) return match[1].trim()
+  const naturalName = content.match(/(?:新建|新增|创建|添加|建立|开)(?:一个|一门)?(?:校本)?(.+?)(?:的)?(?:专业课|课程|科目|学科)(?=[，,。；;\s]|$)/)
+  return naturalName?.[1]?.trim() || null
 }
 
 export function isSubjectChoiceReply(content: string): boolean {

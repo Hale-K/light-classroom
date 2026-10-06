@@ -10,11 +10,13 @@ from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.db.session import AsyncSessionLocal
+from app.models.gaokao import TeachingClass, TeachingClassSchedule, TeachingClassStudent
 from app.models.org import Class, CourseHourPlan, Grade, Schedule, Student, Subject, TeachingAssignment, User
 from app.models.transfer import FileTransferJob
 from app.services.file_center.timetable_pack_xlsx import (
     PackSlot,
     build_timetable_pack_xlsx,
+    build_student_timetable_zip,
     normalize_pack_sheets,
     pack_title_and_filename,
     plan_evening_hours,
@@ -89,6 +91,7 @@ async def run_export_timetable(job_id: str) -> None:
         academic_year = meta.get("academic_year") or ""
         term = meta.get("term") or "1"
         class_ids = meta.get("class_ids") or []
+        student_zip = bool(meta.get("student_zip"))
         evening_start = int(meta.get("evening_start_period") or 10)
         include_sheets = normalize_pack_sheets(meta.get("sheets"))
         try:
@@ -158,6 +161,54 @@ async def run_export_timetable(job_id: str) -> None:
                     )
                 ).scalars().all()
             )
+            student_models = list(
+                (
+                    await session.execute(
+                        select(Student).where(
+                            Student.tenant_id == job.tenant_id,
+                            Student.class_id.in_(selected_ids),
+                            Student.status == "studying",
+                        ).order_by(Student.class_id, Student.roster_order, Student.id)
+                    )
+                ).scalars().all()
+            )
+            student_ids = [int(item.id) for item in student_models if item.id is not None]
+            teaching_classes = list(
+                (
+                    await session.execute(
+                        select(TeachingClass).where(
+                            TeachingClass.tenant_id == job.tenant_id,
+                            TeachingClass.grade_id.in_(list(grade_ids)) if grade_ids else False,
+                            TeachingClass.academic_year == academic_year,
+                            TeachingClass.term == term,
+                        )
+                    )
+                ).scalars().all()
+            ) if student_ids else []
+            teaching_class_ids = [int(item.id) for item in teaching_classes if item.id is not None]
+            teaching_members = list(
+                (
+                    await session.execute(
+                        select(TeachingClassStudent).where(
+                            TeachingClassStudent.tenant_id == job.tenant_id,
+                            TeachingClassStudent.student_id.in_(student_ids),
+                            TeachingClassStudent.teaching_class_id.in_(teaching_class_ids),
+                        )
+                    )
+                ).scalars().all()
+            ) if teaching_class_ids and student_ids else []
+            teaching_schedules = list(
+                (
+                    await session.execute(
+                        select(TeachingClassSchedule).where(
+                            TeachingClassSchedule.tenant_id == job.tenant_id,
+                            TeachingClassSchedule.teaching_class_id.in_(teaching_class_ids),
+                            TeachingClassSchedule.academic_year == academic_year,
+                            TeachingClassSchedule.term == term,
+                        )
+                    )
+                ).scalars().all()
+            ) if teaching_class_ids else []
             for row in schedules:
                 if row.teacher_id:
                     teacher_ids.add(int(row.teacher_id))
@@ -189,6 +240,24 @@ async def run_export_timetable(job_id: str) -> None:
                     )
                 ).all()
             } if teacher_ids else {}
+            for row in teaching_classes:
+                if row.teacher_id:
+                    teacher_ids.add(int(row.teacher_id))
+            for row in teaching_schedules:
+                if row.teacher_id:
+                    teacher_ids.add(int(row.teacher_id))
+            if teaching_classes:
+                teacher_names.update({
+                    int(uid): name
+                    for uid, name in (
+                        await session.execute(
+                            select(User.id, User.name).where(
+                                User.tenant_id == job.tenant_id,
+                                User.id.in_(teacher_ids) if teacher_ids else False,
+                            )
+                        )
+                    ).all()
+                })
 
             await _patch_job(session, job_id, progress=30, processed=0, total=total)
 
@@ -253,26 +322,86 @@ async def run_export_timetable(job_id: str) -> None:
                 for row in ta_rows
             ]
 
+            class_by_id = {int(item.id): item for item in class_models if item.id is not None}
+            student_by_id = {int(item.id): item for item in student_models if item.id is not None}
+            teaching_by_id = {int(item.id): item for item in teaching_classes if item.id is not None}
+            members_by_teaching: dict[int, list[int]] = {}
+            for member in teaching_members:
+                members_by_teaching.setdefault(int(member.teaching_class_id), []).append(int(member.student_id))
+            teaching_slots_by_student: dict[int, list[dict[str, Any]]] = {}
+            for item in teaching_schedules:
+                tc = teaching_by_id.get(int(item.teaching_class_id))
+                if tc is None:
+                    continue
+                for student_id in members_by_teaching.get(int(item.teaching_class_id), []):
+                    teaching_slots_by_student.setdefault(student_id, []).append({
+                        "weekday": int(item.weekday), "period": int(item.period),
+                        "parity": "all", "subject_id": int(item.subject_id),
+                        "teaching_group": tc.name, "teacher_id": int(item.teacher_id or tc.teacher_id) if (item.teacher_id or tc.teacher_id) else None,
+                        "room": item.room or tc.room or "",
+                    })
+            admin_slots_by_student = {
+                student_id: [row for row in schedules if int(row.class_id) == int(student.class_id or 0)]
+                for student_id, student in student_by_id.items()
+            }
+            student_export_rows: list[dict[str, Any]] = []
+            weekday_names = {1: "周一", 2: "周二", 3: "周三", 4: "周四", 5: "周五", 6: "周六", 7: "周日"}
+            parity_names = {"all": "每周", "odd": "单周", "even": "双周"}
+            for student_id, student in student_by_id.items():
+                walk_slots = teaching_slots_by_student.get(student_id, [])
+                walk_keys = {(item["weekday"], item["period"]) for item in walk_slots}
+                combined: list[dict[str, Any]] = []
+                for row in admin_slots_by_student.get(student_id, []):
+                    if (int(row.weekday), int(row.period)) in walk_keys:
+                        continue
+                    parity = row.week_parity.value if hasattr(row.week_parity, "value") else str(row.week_parity or "all")
+                    combined.append({
+                        "weekday": int(row.weekday), "period": int(row.period), "parity": parity,
+                        "subject_id": int(row.subject_id or 0), "teaching_group": "行政班",
+                        "teacher_id": int(row.teacher_id) if row.teacher_id else None, "room": row.room or "",
+                    })
+                combined.extend(walk_slots)
+                for item in sorted(combined, key=lambda value: (value["weekday"], value["period"], value["subject_id"])):
+                    student_export_rows.append({
+                        "student_no": student.student_no or "", "student_name": student.name,
+                        "class_name": class_by_id.get(int(student.class_id or 0), None).name if class_by_id.get(int(student.class_id or 0)) else "",
+                        "teaching_group": item["teaching_group"], "weekday_name": weekday_names.get(item["weekday"], ""),
+                        "period": item["period"], "parity_name": parity_names.get(item["parity"], item["parity"]),
+                        "subject_name": subject_names.get(item["subject_id"], ""),
+                        "teacher_name": teacher_names.get(item["teacher_id"] or 0, ""), "room": item["room"],
+                    })
+
             await _patch_job(session, job_id, progress=70, processed=total, total=total)
-            payload = build_timetable_pack_xlsx(
-                pack_title=pack_title,
-                academic_year=academic_year,
-                term=term,
-                scope_label=job.scope or f"{total} 个班",
-                evening_start=evening_start,
-                slots=slots,
-                class_rows=class_rows if "class_timetables" in include_sheets else [],
-                plan_by_cs=plan_by_cs,
-                teaching_assignments=teaching_assignments,
-                activity_subject_ids=activity_subject_ids,
-                include_sheets=include_sheets,
-            )
-            file_name = job.file_name or default_name
+            if student_zip:
+                payload = build_student_timetable_zip(
+                    academic_year=academic_year,
+                    term=term,
+                    student_rows=student_export_rows,
+                )
+                file_name = job.file_name or f"学生课表_{datetime.now().strftime('%Y%m%d_%H%M%S')}.zip"
+                content_type = "application/zip"
+            else:
+                payload = build_timetable_pack_xlsx(
+                    pack_title=pack_title,
+                    academic_year=academic_year,
+                    term=term,
+                    scope_label=job.scope or f"{total} 个班",
+                    evening_start=evening_start,
+                    slots=slots,
+                    class_rows=class_rows if "class_timetables" in include_sheets else [],
+                    plan_by_cs=plan_by_cs,
+                    teaching_assignments=teaching_assignments,
+                    activity_subject_ids=activity_subject_ids,
+                    student_rows=student_export_rows,
+                    include_sheets=include_sheets,
+                )
+                file_name = job.file_name or default_name
+                content_type = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             object_key = f"exports/{job.tenant_id}/{job_id}/{file_name}"
             size = minio_client.put_bytes(
                 object_key,
                 payload,
-                content_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                content_type=content_type,
             )
             await _patch_job(
                 session,

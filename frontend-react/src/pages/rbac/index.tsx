@@ -55,6 +55,12 @@ function sameCodes(a: string[], b: string[]) {
   return a.every((code) => saved.has(code))
 }
 
+const RETIRED_PERMISSION_PREFIXES = ['scan:', 'paper:', 'grading:']
+
+function isRetiredPermission(code: string) {
+  return RETIRED_PERMISSION_PREFIXES.some((prefix) => code.startsWith(prefix))
+}
+
 export default function RbacWorkbenchView() {
   const { message, modal } = App.useApp()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -150,7 +156,16 @@ export default function RbacWorkbenchView() {
         rbacApi.permissions(),
         rbacApi.roles(),
       ])
-      setGroups(perms)
+      // Hide legacy catalog rows even when this frontend is connected to a
+      // database that has not run the feature-removal migration yet.
+      setGroups(
+        perms
+          .map((group) => ({
+            ...group,
+            permissions: group.permissions.filter((item) => !isRetiredPermission(item.code)),
+          }))
+          .filter((group) => group.permissions.length > 0),
+      )
       setRoles(roleList)
       const fromUrl = Number(searchParams.get('role'))
       const candidates = [preferRoleId, fromUrl, roleId].filter(
@@ -195,8 +210,9 @@ export default function RbacWorkbenchView() {
     ])
       .then(([codes, memberResult]) => {
         if (cancelled) return
-        setSelected(codes)
-        setSavedSelected(codes)
+        const activeCodes = codes.filter((code) => !isRetiredPermission(code))
+        setSelected(activeCodes)
+        setSavedSelected(activeCodes)
         setMembers(memberResult.members)
         setMembersEditable(memberResult.editable)
         const assigned = memberResult.members

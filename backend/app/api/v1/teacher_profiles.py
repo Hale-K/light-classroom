@@ -102,7 +102,7 @@ async def _defaults(session: AsyncSession, tenant_id: int) -> dict[str, Any]:
         elif row.config_key == "academic_years":
             # 系统设置里真实存在的key，优先级最高
             entry_year = cfg.get("current_entry_year") or cfg.get("entry_year") or entry_year
-            academic_year = cfg.get("current_academic_year") or academic_year
+            academic_year = cfg.get("current_academic_year") or cfg.get("current_year") or academic_year
             term = str(cfg.get("current_term") or term)
         else:
             # school_settings 里可能同时有三者
@@ -220,13 +220,14 @@ async def list_teacher_profiles(
     grade_id: int | None = Query(default=None, description="按行政年级筛选"),
     cohort_entry_year: int | None = Query(default=None, description="届别(入学年份)筛选，默认取系统当前届"),
     academic_year: str | None = Query(default=None, description="学年，默认取配置学年"),
-    term: str = Query(default="1", description="学期"),
+    term: str | None = Query(default=None, pattern="^[12]$", description="学期，默认取配置"),
     keyword: str | None = Query(default=None, description="姓名关键词"),
     session: AsyncSession = Depends(get_session),
     tenant_id: int = Depends(get_current_tenant),
     user=Depends(get_current_user),
 ):
     defaults = await _defaults(session, tenant_id)
+    term = term or defaults["term"]
     if not academic_year:
         academic_year = defaults["academic_year"]
     if cohort_entry_year is None:
@@ -260,6 +261,8 @@ async def list_teacher_profiles(
         ht_stmt = select(Class.head_teacher_id).where(
             Class.tenant_id == tenant_id,
             Class.grade_id == grade_id,
+            Class.academic_year == academic_year,
+            Class.term == term,
             Class.head_teacher_id.isnot(None),
         )
         head_teacher_ids_by_grade = {r for r, in (await session.execute(ht_stmt)).fetchall() if r}
@@ -278,7 +281,12 @@ async def list_teacher_profiles(
 
     # 2) 班级信息（按grade_id筛班主任）
     class_map: dict[int, Class] = {}
-    for c in (await session.execute(select(Class).where(Class.tenant_id == tenant_id))).scalars().all():
+    class_stmt = select(Class).where(
+        Class.tenant_id == tenant_id,
+        Class.academic_year == academic_year,
+        Class.term == term,
+    )
+    for c in (await session.execute(class_stmt)).scalars().all():
         class_map[c.id] = c
     head_teacher_ids = {c.head_teacher_id for c in class_map.values() if c.head_teacher_id}
 
@@ -310,7 +318,9 @@ async def list_teacher_profiles(
     ta_stmt = select(TeachingAssignment, Class, Subject).join(
         Class, TeachingAssignment.class_id == Class.id,
     ).join(Subject, TeachingAssignment.subject_id == Subject.id).where(
-        _ta_where(ta_base_where, academic_year, term)
+        _ta_where(ta_base_where, academic_year, term),
+        Class.academic_year == academic_year,
+        Class.term == term,
     )
     tas: dict[int, list[tuple[TeachingAssignment, Class, Subject]]] = defaultdict(list)
     teacher_class_ids: dict[int, set[int]] = defaultdict(set)
@@ -487,12 +497,6 @@ async def list_teacher_profiles(
             select(_SCHEDULE_UNIT).where(and_(*sched_where))
         )).scalar()
         class_scheduled_count = float(exact_val or 0)
-        if class_scheduled_count <= 0:
-            fb_val = (await session.execute(select(_SCHEDULE_UNIT).where(
-                Schedule.tenant_id == tenant_id,
-                Schedule.class_id.in_(list(filtered_class_ids)),
-            ))).scalar()
-            class_scheduled_count = float(fb_val or 0)
 
     completion = 0.0
     if class_weekly_target > 0:
@@ -529,21 +533,18 @@ async def list_teacher_profiles(
 async def teacher_weekly_schedule(
     teacher_id: int,
     academic_year: str | None = Query(default=None, description="学年，默认取配置"),
-    term: str = Query(default="1"),
+    term: str | None = Query(default=None, pattern="^[12]$"),
     session: AsyncSession = Depends(get_session),
     tenant_id: int = Depends(get_current_tenant),
     user=Depends(get_current_user),
 ):
     defaults = await _defaults(session, tenant_id)
+    term = term or defaults["term"]
     fallback_used = False
     if not academic_year:
         academic_year = defaults["academic_year"]
 
     # ---- 1) 先按配置/入参的 学年学期 精确匹配 ----
-    stmt = select(Schedule).where(
-        Schedule.tenant_id == tenant_id,
-        Schedule.teacher_id == teacher_id,
-    )
     where_exact = [Schedule.tenant_id == tenant_id, Schedule.teacher_id == teacher_id]
     if academic_year:
         where_exact.append(Schedule.academic_year == academic_year)
@@ -554,20 +555,14 @@ async def teacher_weekly_schedule(
     )
     items = list((await session.execute(exact_stmt)).scalars().all())
 
-    # ---- 2) 精确匹配为空时，回退到不区分学年学期（和列表页汇总口径一致） ----
-    if len(items) == 0:
-        fallback_stmt = (
-            select(Schedule)
-            .where(Schedule.tenant_id == tenant_id, Schedule.teacher_id == teacher_id)
-            .order_by(Schedule.weekday, Schedule.period)
-        )
-        items = list((await session.execute(fallback_stmt)).scalars().all())
-        if len(items) > 0:
-            fallback_used = True
-
     teachers = list((await session.execute(select(User).where(User.id == teacher_id))).scalars().all())
     subjects = list((await session.execute(select(Subject))).scalars().all())
-    classes = list((await session.execute(select(Class))).scalars().all())
+    class_stmt = select(Class).where(Class.tenant_id == tenant_id)
+    if academic_year:
+        class_stmt = class_stmt.where(Class.academic_year == academic_year)
+    if term:
+        class_stmt = class_stmt.where(Class.term == term)
+    classes = list((await session.execute(class_stmt)).scalars().all())
     tname = {t.id: t.name for t in teachers}
     sname = {s.id: s.name for s in subjects}
     cname = {c.id: c.name for c in classes}

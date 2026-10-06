@@ -130,7 +130,7 @@ async def prepare_subject(
                              if type_match else body.draft.course_type)
         evening_text = body.content.strip().rstrip('。！!')
         if '晚自习' in evening_text or evening_text in ('允许', '不允许'):
-            if re.search(r'不允许|不安排|不能|不可以|禁止', evening_text):
+            if re.search(r'不允许|不安排|不进行|不参加|不能|不可以|禁止|无需|不用', evening_text):
                 draft.evening_study_allowed = False
             elif re.search(r'允许|可以|能安排', evening_text):
                 draft.evening_study_allowed = True

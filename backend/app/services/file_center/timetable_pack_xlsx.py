@@ -1,8 +1,9 @@
-"""排课完整包 Excel：说明 + 教师课时关系 + 教师课时 + 教师分课表 + 各班课表。"""
+"""排课完整包 Excel：说明、教师课表、班级课表和学生个人课表。"""
 from __future__ import annotations
 
 import io
 import re
+import zipfile
 from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
@@ -57,6 +58,7 @@ PACK_SHEET_KEYS = (
     "teacher_hours",
     "teacher_grid",
     "class_timetables",
+    "student_timetables",
 )
 
 PACK_SHEET_LABELS = {
@@ -65,6 +67,7 @@ PACK_SHEET_LABELS = {
     "teacher_hours": "教师课时",
     "teacher_grid": "教师分课表",
     "class_timetables": "各班课表",
+    "student_timetables": "学生个人课表",
 }
 
 DAY_HEADERS = ["一", "二", "三", "四", "五", "单六", "双六"]
@@ -174,6 +177,66 @@ def pack_title_and_filename(grade_names: list[str], stamp: str | None = None) ->
     return title, f"{prefix}-排课完整包_{stamp}.xlsx"
 
 
+def build_student_timetable_zip(
+    *,
+    academic_year: str,
+    term: str,
+    student_rows: list[dict[str, Any]],
+) -> bytes:
+    """为每名学生生成一个独立 Excel 课表，并打包为 ZIP。"""
+    grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+    for row in student_rows:
+        grouped[(str(row.get("student_no") or "无学号"), str(row.get("student_name") or "未命名学生"))].append(row)
+
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as zipped:
+        for (student_no, student_name), rows in grouped.items():
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "个人课表"
+            ws["A1"] = f"{student_name}（{student_no}）个人课表"
+            ws["A2"] = f"学年学期：{academic_year} 第{term}学期"
+            ws.merge_cells("A1:J1")
+            ws.merge_cells("A2:J2")
+            title_fill = PatternFill("solid", fgColor="102744")
+            head_fill = PatternFill("solid", fgColor="D9EAF7")
+            thin = Border(
+                left=Side(style="thin", color="B0B0B0"), right=Side(style="thin", color="B0B0B0"),
+                top=Side(style="thin", color="B0B0B0"), bottom=Side(style="thin", color="B0B0B0"),
+            )
+            center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            ws["A1"].font = Font(name="微软雅黑", bold=True, color="FFFFFF", size=15)
+            ws["A1"].fill = title_fill
+            ws["A1"].alignment = center
+            ws["A2"].alignment = center
+            headers = ["行政班", "教学归属", "星期", "节次", "周次", "课程", "教师", "教室"]
+            for col, header in enumerate(headers, 1):
+                cell = ws.cell(row=4, column=col, value=header)
+                cell.font = Font(name="微软雅黑", bold=True)
+                cell.fill = head_fill
+                cell.alignment = center
+                cell.border = thin
+            for row_index, item in enumerate(rows, start=5):
+                values = [
+                    item.get("class_name", ""), item.get("teaching_group", "行政班"), item.get("weekday_name", ""),
+                    item.get("period", ""), item.get("parity_name", "每周"), item.get("subject_name", ""),
+                    item.get("teacher_name", ""), item.get("room", ""),
+                ]
+                for col, value in enumerate(values, 1):
+                    cell = ws.cell(row=row_index, column=col, value=value)
+                    cell.font = Font(name="微软雅黑", size=10)
+                    cell.alignment = center
+                    cell.border = thin
+            ws.freeze_panes = "A5"
+            for col, width in enumerate((14, 22, 8, 8, 8, 12, 12, 16), 1):
+                ws.column_dimensions[get_column_letter(col)].width = width
+            output = io.BytesIO()
+            wb.save(output)
+            safe_name = re.sub(r'[\\/:*?"<>|]', "_", f"{student_no}_{student_name}.xlsx")
+            zipped.writestr(safe_name, output.getvalue())
+    return archive.getvalue()
+
+
 def build_timetable_pack_xlsx(
     *,
     pack_title: str,
@@ -186,6 +249,7 @@ def build_timetable_pack_xlsx(
     plan_by_cs: dict[tuple[int, int], dict[str, float]],
     teaching_assignments: list[dict[str, Any]],
     activity_subject_ids: set[int],
+    student_rows: list[dict[str, Any]] | None = None,
     include_sheets: set[str] | list[str] | None = None,
 ) -> bytes:
     include = normalize_pack_sheets(list(include_sheets) if include_sheets is not None else None)
@@ -660,6 +724,33 @@ def build_timetable_pack_xlsx(
                 ws.column_dimensions[get_column_letter(col)].width = 6
             for r in range(1, eve_base + 3):
                 ws.row_dimensions[r].height = 22
+
+    if "student_timetables" in include:
+        ws = wb.create_sheet("学生个人课表")
+        headers = ["学号", "姓名", "行政班", "教学归属", "星期", "节次", "周次", "课程", "教师", "教室"]
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=header)
+            cell.font = white_bold
+            cell.fill = sum_head
+            cell.alignment = center
+            cell.border = thin
+        rows = student_rows or []
+        for row_index, item in enumerate(rows, start=2):
+            values = [
+                item.get("student_no", ""), item.get("student_name", ""), item.get("class_name", ""),
+                item.get("teaching_group", "行政班"), item.get("weekday_name", ""), item.get("period", ""),
+                item.get("parity_name", "每周"), item.get("subject_name", ""), item.get("teacher_name", ""),
+                item.get("room", ""),
+            ]
+            for col, value in enumerate(values, 1):
+                cell = ws.cell(row=row_index, column=col, value=value)
+                cell.font = cell_font
+                cell.alignment = center
+                cell.border = thin
+        ws.freeze_panes = "A2"
+        ws.auto_filter.ref = f"A1:J{max(1, len(rows) + 1)}"
+        for col, width in enumerate((15, 10, 14, 20, 8, 8, 8, 12, 12, 16), 1):
+            ws.column_dimensions[get_column_letter(col)].width = width
 
     if not wb.sheetnames:
         raise ValueError("请至少勾选一种工作表")

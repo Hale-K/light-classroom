@@ -5,7 +5,6 @@
 import { ApiError, http, unwrap, setAuthResolver } from './http'
 import type {
   AdminSchool,
-  AnswerScore,
   AutoClassAssignmentResult,
   ClassInfo,
   Campus,
@@ -20,23 +19,18 @@ import type {
   ExamSchedulingConfig,
   Grade,
   FacilityOverview,
-  MeetingRecord,
   MenuResult,
   OrganizationTreeResult,
   OrganizationUnit,
-  Paper,
-  PaperSummary,
   PlatformAdminInfo,
   MenuPermissionBinding,
   PermissionGroup,
   RoleMenuPreview,
-  Question,
   RoleInfo,
   RoleMembersResult,
   RoomResource,
   ResourceAllocationRule,
   AllocationPreviewResult,
-  ScanBatch,
   ScheduleEntry,
   ScheduleStrategyOption,
   ScheduleValidationResult,
@@ -52,8 +46,6 @@ import type {
   StaffDirectory,
   StaffRoleCode,
   Student,
-  Submission,
-  SubmissionDetail,
   UserInfo,
 } from '@/types'
 
@@ -77,6 +69,7 @@ export interface SchoolSettings {
   name: string
   province: string
   gaokao_mode: '3+1+2' | '3+3' | 'traditional'
+  timetable_mode: 'administrative' | 'walk_class'
 }
 
 export interface AcademicYearEntry {
@@ -90,6 +83,29 @@ export interface AcademicYearsSettings {
   current_entry_year: number | null
   current_academic_year: string | null
   current_term: '1' | '2'
+}
+
+const settingsCacheKey = (name: string) => {
+  const schoolCode = localStorage.getItem('zh_school_code') || 'default'
+  return `light-classroom:settings:${schoolCode}:${name}`
+}
+
+function readSettingsCache<T>(name: string): T | null {
+  try {
+    const raw = localStorage.getItem(settingsCacheKey(name))
+    return raw ? JSON.parse(raw) as T : null
+  } catch {
+    return null
+  }
+}
+
+function writeSettingsCache<T>(name: string, value: T): T {
+  try { localStorage.setItem(settingsCacheKey(name), JSON.stringify(value)) } catch { /* storage may be unavailable */ }
+  return value
+}
+
+function clearSettingsCache(name: string) {
+  localStorage.removeItem(settingsCacheKey(name))
 }
 export interface AcademicYearRolloverPreview {
   source_entry_year: number
@@ -114,20 +130,41 @@ export const authApi = {
     unwrap<UserInfo>(http.post('/auth/register', data)),
   me: () => unwrap<UserInfo>(http.get('/auth/me')),
   menus: () => unwrap<MenuResult>(http.get('/auth/menus')),
-  school: () => unwrap<SchoolSettings>(http.get('/auth/school')),
-  updateSchool: (data: {
+  school: async (refresh = false) => {
+    if (!refresh) {
+      const cached = readSettingsCache<SchoolSettings>('school')
+      if (cached) return cached
+    }
+    return writeSettingsCache('school', await unwrap<SchoolSettings>(http.get('/auth/school')))
+  },
+  updateSchool: async (data: {
     province?: string
     gaokao_mode?: '3+1+2' | '3+3' | 'traditional'
-  }) => unwrap<SchoolSettings>(http.patch('/auth/school', data)),
-  academicYears: () => unwrap<AcademicYearsSettings>(http.get('/auth/academic-years')),
+    timetable_mode?: 'administrative' | 'walk_class'
+  }) => {
+    const updated = await unwrap<SchoolSettings>(http.patch('/auth/school', data))
+    return writeSettingsCache('school', updated)
+  },
+  academicYears: async (refresh = false) => {
+    if (!refresh) {
+      const cached = readSettingsCache<AcademicYearsSettings>('academic-years')
+      if (cached) return cached
+    }
+    return writeSettingsCache('academic-years', await unwrap<AcademicYearsSettings>(http.get('/auth/academic-years')))
+  },
   previewAcademicYearRollover: (source_entry_year: number) =>
     unwrap<AcademicYearRolloverPreview>(http.post('/auth/academic-year-rollover/preview', { source_entry_year })),
-  commitAcademicYearRollover: (source_entry_year: number) =>
-    unwrap<{ current_entry_year: number; current_academic_year: string; current_term: '1' | '2'; promoted_student_count: number; created_class_count: number }>(
+  commitAcademicYearRollover: async (source_entry_year: number) => {
+    const result = await unwrap<{ current_entry_year: number; current_academic_year: string; current_term: '1' | '2'; promoted_student_count: number; created_class_count: number }>(
       http.post('/auth/academic-year-rollover/commit', { source_entry_year }),
-    ),
-  saveAcademicYears: (years: Array<{ entry_year: number; status: 'active' | 'inactive' }>, current_entry_year?: number | null, current_academic_year?: string | null, current_term?: '1' | '2') =>
-    unwrap<AcademicYearsSettings>(http.put('/auth/academic-years', { years, current_entry_year, current_academic_year, current_term })),
+    )
+    clearSettingsCache('academic-years')
+    return result
+  },
+  saveAcademicYears: async (years: Array<{ entry_year: number; status: 'active' | 'inactive' }>, current_entry_year?: number | null, current_academic_year?: string | null, current_term?: '1' | '2') => {
+    const result = await unwrap<AcademicYearsSettings>(http.put('/auth/academic-years', { years, current_entry_year, current_academic_year, current_term }))
+    return writeSettingsCache('academic-years', result)
+  },
 }
 
 /** 平台超管 API（创建学校后台） */
@@ -175,7 +212,7 @@ export const orgApi = {
   },
   createGrade: (data: { name: string; level: number; campus_id?: number | null }) =>
     unwrap<Grade>(http.post('/org/grades', data)),
-  classes: (params?: { grade_id?: number }) =>
+  classes: (params?: { grade_id?: number; academic_year?: string; term?: string }) =>
     unwrap<ClassInfo[]>(http.get('/org/classes', { params })),
   assignHeadTeacher: (classId: number, data: { teacher_id: number; academic_year: string; term: string }) =>
     unwrap<ClassInfo>(http.patch(`/org/classes/${classId}/head-teacher`, data)),
@@ -183,12 +220,12 @@ export const orgApi = {
     unwrap<ClassInfo>(http.post('/org/classes', data)),
   updateClassResourcePlan: (id: number, data: { home_room_id: number | null; class_type: string }) =>
     unwrap<ClassInfo>(http.patch(`/org/classes/${id}/resource-plan`, data)),
-  autoAssignPreview: (data: { grade_id: number; class_ids: number[]; strategy: string; paper_id?: number; balance_gender?: boolean; overwrite_existing?: boolean }) =>
+  autoAssignPreview: (data: { grade_id: number; class_ids: number[]; strategy: string; balance_gender?: boolean; overwrite_existing?: boolean }) =>
     unwrap<AutoClassAssignmentResult>(http.post('/org/classes/auto-assign/preview', data)),
-  autoAssign: (data: { grade_id: number; class_ids: number[]; strategy: string; paper_id?: number; balance_gender?: boolean; overwrite_existing?: boolean }) =>
+  autoAssign: (data: { grade_id: number; class_ids: number[]; strategy: string; balance_gender?: boolean; overwrite_existing?: boolean }) =>
     unwrap<AutoClassAssignmentResult>(http.post('/org/classes/auto-assign', data)),
-  students: (class_id?: number, campus_id?: number, grade_id?: number) =>
-    unwrap<Student[]>(http.get('/org/students', { params: { class_id, campus_id, grade_id } })),
+  students: (class_id?: number, campus_id?: number, grade_id?: number, scope?: { academic_year?: string; term?: string; cohort_label?: string }) =>
+    unwrap<Student[]>(http.get('/org/students', { params: { class_id, campus_id, grade_id, ...scope } })),
   validateStudentImport: (importType: 'full' | 'incremental', file: File) => {
     const body = new FormData()
     body.append('file', file)
@@ -222,9 +259,9 @@ export const orgApi = {
       academic_year: string
       status: string
     }>(http.post('/org/students/simulate', data)),
-  assignStudents: (student_ids: number[], class_id: number | null) =>
+  assignStudents: (student_ids: number[], class_id: number | null, scope?: { academic_year?: string; term?: string; grade_id?: number; cohort_label?: string }) =>
     unwrap<{ updated: number; class_id: number | null }>(
-      http.patch('/org/students/assign-class', { student_ids, class_id }),
+      http.patch('/org/students/assign-class', { student_ids, class_id, ...scope }),
     ),
   updateStudentStatus: (student_id: number, status: string) =>
     unwrap<Student>(http.patch(`/org/students/${student_id}`, { status })),
@@ -307,7 +344,6 @@ export const facilityApi = {
     features: string[]
     is_schedulable: boolean
     is_exam_enabled: boolean
-    is_meeting_enabled: boolean
   }) => unwrap<RoomResource>(http.post('/facilities/rooms', data)),
   createRoomsBatch: (data: {
     building_id: number
@@ -324,7 +360,8 @@ export const facilityApi = {
     unwrap<AllocationPreviewResult>(http.post('/facilities/allocation-rules/preview', data)),
   createAllocationRule: (data: Record<string, unknown>) =>
     unwrap<ResourceAllocationRule>(http.post('/facilities/allocation-rules', data)),
-  deleteAllocationRule: (id: number) => unwrap<null>(http.delete(`/facilities/allocation-rules/${id}`)),
+  deleteAllocationRule: (id: number) => unwrap<{ deleted_class_count: number; released_student_count: number; deleted_teacher_binding_count: number; released_room_count: number }>(http.delete(`/facilities/allocation-rules/${id}`)),
+  releaseAllocationRule: (id: number) => unwrap<{ released_room_count: number; unbound_class_count: number; released_teacher_binding_count: number; rule_id: number }>(http.post(`/facilities/allocation-rules/${id}/release`)),
   classPlanningPreview: (data: {
     grade_id: number
     grade_group_id?: number
@@ -403,19 +440,10 @@ export const facilityApi = {
     by_type: Record<string, number>
     class_ids: number[]
   }>(http.post('/facilities/class-planning/execute', data)),
-  meetings: () => unwrap<MeetingRecord[]>(http.get('/meetings')),
-  createMeeting: (data: {
-    title: string
-    room_id: number
-    start_at: string
-    end_at: string
-    participant_ids?: number[]
-    agenda?: string
-  }) => unwrap<MeetingRecord>(http.post('/meetings', data)),
 }
 
 export const schedulingApi = {
-  resources: () => unwrap<SchedulingResources>(http.get('/scheduling/resources')),
+  resources: (params?: { academic_year?: string; term?: string }) => unwrap<SchedulingResources>(http.get('/scheduling/resources', { params })),
   subjects: () => unwrap<import('@/types').SubjectInfo[]>(http.get('/scheduling/subjects')),
   courseHours: (params: { academic_year: string; term: string; class_id?: number }) =>
     unwrap<import('@/types').CourseHourPlanInfo[]>(http.get('/scheduling/course-hours', { params })),
@@ -446,9 +474,9 @@ export const schedulingApi = {
       rule_groups_created_or_copied: number
       rule_groups_replaced: number
     }>(http.post('/scheduling/inherit-term-data', data)),
-  gridConfig: (params: { academic_year: string; term: string }) =>
+  gridConfig: (params: { academic_year: string; term: string; grade_id?: number }) =>
     unwrap<import('@/types').SchedulingGridConfig>(http.get('/scheduling/grid-config', { params })),
-  saveGridConfig: (data: import('@/types').SchedulingGridConfig & { academic_year: string; term: string }) =>
+  saveGridConfig: (data: import('@/types').SchedulingGridConfig & { academic_year: string; term: string; grade_id?: number }) =>
     unwrap<import('@/types').SchedulingGridConfig>(http.put('/scheduling/grid-config', data)),
   strategies: () => unwrap<ScheduleStrategyOption[]>(http.get('/scheduling/strategies')),
   createTeacher: (data: { name: string; phone: string; password: string }) =>
@@ -807,6 +835,7 @@ export interface GaokaoOverview {
     teaching_class_count: number
     teacher_count: number
   }>
+  teaching_classes?: Array<{ subject_id: number; weekly_periods: number }>
 }
 
 export interface GaokaoChoiceReview {
@@ -821,7 +850,40 @@ export interface GaokaoChoiceReview {
   round_no: number
 }
 
+export interface WalkTeachingClass {
+  id: number
+  name: string
+  subject_id: number
+  subject_name: string
+  sequence: number
+  capacity: number
+  weekly_periods: number
+  hours_overridden?: boolean
+  teacher_id: number | null
+  room: string | null
+  student_count: number
+  teacher_name?: string | null
+  students: Array<{
+    id: number
+    student_no: string | null
+    name: string
+    administrative_class: string | null
+  }>
+}
+
 export const gaokaoApi = {
+  recommendWalkConfiguration: (data: { grade_id: number; academic_year: string; term: string; room_ids?: number[]; forbidden_slots?: [number, number][] }) =>
+    unwrap<{ status: string; message: string; lower_bound?: number; recommended_count?: number; slots?: [number, number][]; room_ids?: number[];
+      student_count?: number; roster_student_count: number; student_hours_min?: number; student_hours_max?: number; total_class_periods?: number;
+      room_count?: number; peak_concurrent_classes?: number; minimal_proven?: boolean; warnings: string[]; bounds?: {rooms: number; students: number; teachers: number};
+      rule_failures?: Array<{ rule_id: string; title: string; message: string }>;
+      rule_results?: Array<{ rule_id: string; code: string; title: string; priority: string; status: string; message: string }>;
+      daily_slot_counts?: number[]; combined_hours_min?: number; combined_hours_max?: number;
+      placements?: Array<{ teaching_class_id: number; class_name: string; teacher_id: number; weekday: number; period: number; room_id: number; room_name: string }> }>(http.post('/gaokao/walk-configuration/recommend', data, { timeout: 25000 })),
+  teachingClassTeachers: (params: { academic_year: string; term: string }) =>
+    unwrap<Array<{ id: number; name: string; subject_ids: number[]; administrative_periods: number; walk_periods: number; total_periods: number }>>(http.get('/gaokao/teaching-classes/teachers', { params })),
+  assignTeachingClassTeachers: (data: { grade_id: number; academic_year: string; term: string; assignments: Array<{ teaching_class_id: number; teacher_id: number | null; expected_teacher_id: number | null }> }) =>
+    unwrap<{ updated: number }>(http.patch('/gaokao/teaching-classes/teachers', data)),
   myStudents: (includeTeaching = false) => unwrap<import('@/types').Student[]>(http.get('/gaokao/my-students', {
     params: includeTeaching ? { include_teaching: true } : undefined,
   })),
@@ -839,19 +901,75 @@ export const gaokaoApi = {
     term: string
     capacity?: number
     weekly_periods?: number
+    weekly_periods_by_subject?: Record<number, number>
     primary_delivery_mode?: 'administrative' | 'teaching_class'
+    preview?: boolean
+    replace_existing?: boolean
+    preview_token?: string
   }) =>
-    unwrap<{ created: number; memberships: number }>(
+    unwrap<{ created: number; memberships: number; existing_class_count?: number; available_room_count?: number;
+      preview_token?: string; warnings?: string[];
+      classes?: Array<{ subject_id: number; subject_name: string; sequence: number; student_count: number; weekly_periods: number }> }>(
       http.post('/gaokao/teaching-classes/generate', data),
     ),
+  updateTeachingSubjectHours: (data: {
+    grade_id: number
+    academic_year: string
+    term: string
+    subject_id: number
+    weekly_periods: number
+  }) => unwrap<{ updated: number; weekly_periods: number; cleared_schedule_count: number }>(
+    http.patch('/gaokao/teaching-classes/subject-hours', data),
+  ),
+  teachingSubjectHours: (params: { grade_id: number; academic_year: string; term: string }) =>
+    unwrap<Record<string, number>>(http.get('/gaokao/teaching-classes/subject-hours', { params })),
+  updateTeachingClassHours: (classId: number, data: { grade_id: number; academic_year: string; term: string; weekly_periods: number }) =>
+    unwrap<{ updated: number; cleared_schedule_count: number }>(http.patch(`/gaokao/teaching-classes/${classId}/hours`, data)),
+  teachingClasses: (params: { grade_id: number; academic_year: string; term: string }) =>
+    unwrap<WalkTeachingClass[]>(http.get('/gaokao/teaching-classes', { params })),
+  walkClassSpacePool: (params: { grade_id: number; academic_year: string; term?: string }) =>
+      unwrap<{ grade_id: number; academic_year: string; term: string | null; physics_room_ids: number[]; history_room_ids: number[]; shared_room_ids: number[]; available_rooms: Array<{ id: number; name: string; capacity: number }> }>(
+        http.get('/gaokao/space-pool', { params }),
+      ),
+  saveWalkClassSpacePool: (data: {
+    grade_id: number
+    academic_year: string
+    term?: string
+    physics_room_ids: number[]
+    history_room_ids: number[]
+    shared_room_ids: number[]
+  }) =>
+    unwrap<{ grade_id: number; academic_year: string; physics_room_ids: number[]; history_room_ids: number[]; shared_room_ids: number[] }>(
+      http.put('/gaokao/space-pool', data),
+    ),
+  schedules: (params: { academic_year: string; term: string; grade_id?: number }) =>
+    unwrap<Array<{
+      id: number
+      teaching_class_id: number
+      teaching_class_name: string
+      teacher_id: number | null
+      teacher_name: string
+      subject_id: number
+      subject_name: string
+      academic_year: string
+      term: string
+      weekday: number
+      period: number
+      room: string | null
+    }>>(http.get('/gaokao/schedules', { params })),
   generateSchedule: (data: {
     grade_id: number
     academic_year: string
     term: string
     days?: number
     periods_per_day?: number
+    room_ids?: number[]
   }) =>
-    unwrap<{ created: number; unplaced: Array<{ teaching_class_id: number; count: number }> }>(
+    unwrap<{ created: number; teaching_class_count: number; unplaced: Array<{ teaching_class_id: number; count: number }>;
+      room_count: number; room_ids: number[]; slots: [number, number][]; daily_slot_counts: number[]; peak_concurrent_classes?: number;
+      placements: Array<{ teaching_class_id: number; class_name: string; teacher_id: number; weekday: number; period: number; room_id: number; room_name: string }>;
+      rule_results: Array<{ rule_id: string; code: string; title: string; priority: string; status: string; message: string }>;
+      warnings: string[] }>(
       http.post('/gaokao/schedules/generate', data),
     ),
 }
@@ -981,80 +1099,21 @@ export const examSchedulingApi = {
 
 export const examApi = {
   list: () => unwrap<Exam[]>(http.get('/exams')),
-  create: (data: { name: string; exam_type: string; academic_year: string }) =>
+  create: (data: { name: string; exam_type: string; academic_year: string; term: string }) =>
     unwrap<Exam>(http.post('/exams', data)),
-  detail: (id: number) => unwrap<Exam & { papers: Paper[] }>(http.get(`/exams/${id}`)),
   updateStatus: (id: number, status: string) =>
     unwrap<Exam>(http.patch(`/exams/${id}/status`, { status })),
-  createPaper: (examId: number, data: Record<string, unknown>) =>
-    unwrap<Paper>(http.post(`/exams/${examId}/papers`, data)),
-  paper: (id: number) =>
-    unwrap<Paper & { questions?: Question[]; actual_score?: number }>(http.get(`/papers/${id}`)),
-  addQuestion: (paperId: number, data: Record<string, unknown>) =>
-    unwrap<Question>(http.post(`/papers/${paperId}/questions`, data)),
-  finalizePaper: (paperId: number) => unwrap<Paper>(http.patch(`/papers/${paperId}/finalize`)),
-}
-
-export const scanApi = {
-  batches: (paper_id?: number) =>
-    unwrap<ScanBatch[]>(http.get('/scans/batches', { params: { paper_id } })),
-  createBatch: (data: { paper_id: number; file_name?: string; page_count?: number }) =>
-    unwrap<ScanBatch>(http.post('/scans/batches', data)),
-  split: (batchId: number) => unwrap<ScanBatch>(http.patch(`/scans/batches/${batchId}/split`)),
-  pages: (batchId: number) =>
-    unwrap<Array<{ id: number; batch_id: number; page_index: number; cos_url?: string | null }>>(
-      http.get(`/scans/batches/${batchId}/pages`),
-    ),
-  assign: (batchId: number, class_id?: number) =>
-    unwrap<{ batch_id: number; created: number; total: number }>(
-      http.post(`/scans/batches/${batchId}/assign`, { class_id }),
-    ),
-  confirm: (batchId: number) => unwrap<ScanBatch>(http.patch(`/scans/batches/${batchId}/confirm`)),
-}
-
-export const gradingApi = {
-  queue: (paperId: number) =>
-    unwrap<Submission[]>(http.get(`/grading/papers/${paperId}/submissions`)),
-  detail: (submissionId: number) =>
-    unwrap<SubmissionDetail>(http.get(`/grading/submissions/${submissionId}`)),
-  score: (submissionId: number, questionId: number, score: number) =>
-    unwrap<AnswerScore>(
-      http.put(`/grading/submissions/${submissionId}/questions/${questionId}`, { score }),
-    ),
-  finalize: (submissionId: number) =>
-    unwrap<Submission>(http.post(`/grading/submissions/${submissionId}/finalize`)),
 }
 
 export interface DashboardSummary {
   exams: Array<
-    Exam & { paper_count: number; ongoing: boolean }
+    Exam & { ongoing: boolean }
   >
   ongoing_count: number
-  papers: Array<{
-    id: number
-    title: string
-    subject_id: number
-    graded: number
-    total: number
-  }>
-  paper_count: number
-  graded_total: number
-  submission_total: number
-  batches: ScanBatch[]
-  pending_batch_count: number
 }
 
 export const dashboardApi = {
   summary: () => unwrap<DashboardSummary>(http.get('/dashboard/summary')),
-}
-
-export const statsApi = {
-  paperSummary: (paperId: number) =>
-    unwrap<PaperSummary>(http.get(`/stats/papers/${paperId}/summary`)),
-  paperByClass: (paperId: number) =>
-    unwrap<Array<Record<string, unknown>>>(http.get(`/stats/papers/${paperId}/classes`)),
-  paperByQuestion: (paperId: number) =>
-    unwrap<Array<Record<string, unknown>>>(http.get(`/stats/papers/${paperId}/questions`)),
 }
 
 /** 角色与权限（RBAC） */
@@ -1148,6 +1207,7 @@ export const fileCenterApi = {
     periods_per_day?: number
     evening_start_period?: number | null
     sheets?: string[]
+    student_zip?: boolean
   }) => unwrap<FileTransferJob>(http.post('/file-center/exports/timetable', data)),
   exportStudents: (data: {
     grade_id?: number | null

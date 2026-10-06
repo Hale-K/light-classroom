@@ -389,13 +389,18 @@ export function normalizeGridConfig(grid: SchedulingGridConfig): SchedulingGridC
   return {
     ...grid,
     daily_periods,
-    days: Math.max(5, activeDays),
+    days: Math.max(1, activeDays),
     periods_per_day,
     enable_saturday: daily_periods[5] > 0,
     enable_evening,
     evening_start_period: enable_evening ? periods_per_day + 1 : null,
     evening_daily_periods_odd,
     evening_daily_periods_even,
+    slot_overrides: (grid.slot_overrides ?? []).filter((slot) => {
+      if (slot.period <= daily_periods[slot.weekday - 1]) return slot.slot_type !== 'evening'
+      const count = Math.max(evening_daily_periods_odd[slot.weekday - 1], evening_daily_periods_even[slot.weekday - 1])
+      return enable_evening && slot.period > periods_per_day && slot.period <= periods_per_day + count && slot.slot_type !== 'daytime'
+    }),
   }
 }
 
@@ -408,7 +413,12 @@ export function getConfiguredSlotOptions(gridConfig: SchedulingGridConfig): stri
   return WEEKDAY_NAMES.flatMap((day, index) => {
     const formalCount = dailyPeriods[index]
     const eveningCount = normalized.enable_evening ? Math.max(oddEvening[index], evenEvening[index]) : 0
-    return Array.from({ length: formalCount + eveningCount }, (_, periodIndex) => `${day} · 第${periodIndex + 1}节`)
+    const periods = [...Array.from({ length: formalCount }, (_, i) => i + 1), ...Array.from({ length: eveningCount }, (_, i) => (normalized.evening_start_period ?? normalized.periods_per_day + 1) + i)]
+    return periods.filter((period) => ['odd', 'even'].some((leg) => {
+      const override = normalized.slot_overrides?.find((slot) => slot.weekday === index + 1 && slot.period === period && slot.week_parity === leg)
+      if (override) return override.slot_type !== 'disabled'
+      return period <= formalCount || period < (normalized.evening_start_period ?? 13) + (leg === 'odd' ? oddEvening[index] : evenEvening[index])
+    })).map((period) => `${day} · 第${period}节`)
   })
 }
 

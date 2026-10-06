@@ -11,6 +11,7 @@ import {
 } from "antd";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { schedulingApi } from "@/api";
+import { getConfiguredSlotOptions } from './scheduling-model';
 import { setAssistantContext, clearAssistantContext } from '@/assistant/context';
 import type {
   Grade,
@@ -385,14 +386,7 @@ const summarizeGroup = (item: RuleGroup) => {
       ).length,
     }),
   );
-  const typeSummary = [
-    ...new Set(
-      item.rules.map(
-        (rule) => RULE_FAMILY_LABELS[rule.family || familyForRule(rule)],
-      ),
-    ),
-  ].join(" · ");
-  return { enabled, hard, soft, familyCounts, typeSummary };
+  return { enabled, hard, soft, familyCounts };
 };
 
 const ruleCodeForRule = (
@@ -3838,10 +3832,10 @@ const hydrateGroupFromApi = (
 };
 
 export default function RuleGroupWorkbench({
-  slotOptions = [],
+  slotOptions: suppliedSlotOptions = [],
   academicYear = "2026-2027",
   term = "1",
-  gridConfig,
+  gridConfig: suppliedGridConfig,
   resources,
   grades = [],
   openGroupRequest = null,
@@ -3855,6 +3849,19 @@ export default function RuleGroupWorkbench({
     groups.find((item) => item.id === activeGroupId) ||
     groups[0] ||
     loadGroup();
+  const [scopeGrid, setScopeGrid] = useState<{ grade: number; year: string; term: string; value: SchedulingGridConfig } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!group.grade_id) return;
+    schedulingApi.gridConfig({ academic_year: academicYear, term, grade_id: group.grade_id })
+      .then((value) => { if (!cancelled) setScopeGrid({ grade: group.grade_id!, year: academicYear, term, value }); })
+      .catch(() => { if (!cancelled) setScopeGrid(null); });
+    return () => { cancelled = true; };
+  }, [group.grade_id, academicYear, term, catalogEpoch]);
+  const gridConfig = group.grade_id
+    ? (scopeGrid?.grade === group.grade_id && scopeGrid.year === academicYear && scopeGrid.term === term ? scopeGrid.value : undefined)
+    : suppliedGridConfig;
+  const slotOptions = group.grade_id ? (gridConfig?.configured ? getConfiguredSlotOptions(gridConfig) : []) : suppliedSlotOptions;
   useEffect(() => {
     if (!loadingCatalog && groups.length) setAssistantContext('rules', { rule_group_id: group.id, rule_group_name: group.name });
     return () => clearAssistantContext('rules');
@@ -4840,16 +4847,12 @@ export default function RuleGroupWorkbench({
     <div className="rule-group-page">
       <div className="rule-group-heading">
         <div>
-          <span className="rule-group-eyebrow">
-            RULE GROUP · GENERAL CONSTRAINTS
-          </span>
-          <h2>综合排课规则</h2>
-          <p>按年级维护综合规则；每条综合规则进工作台配置内部细则。</p>
+          <h2>规则组</h2>
         </div>
         <Space>
-          <Tag color="blue">{groups.length} 条规则</Tag>
+          <Tag color="blue">{groups.length} 组</Tag>
           <Button type="primary" onClick={openCreateGroup}>
-            ＋ 新增规则
+            ＋ 新建规则组
           </Button>
         </Space>
       </div>
@@ -4889,7 +4892,6 @@ export default function RuleGroupWorkbench({
                 </div>
               </div>
               <div>
-                <Tag color="cyan">作用范围</Tag>
                 <small>
                   {ruleGroupScopeLabel(
                     item,
@@ -4899,16 +4901,12 @@ export default function RuleGroupWorkbench({
                 </small>
               </div>
               <div>
-                <Tag color="geekblue">综合规则</Tag>
-                <small>{stats.typeSummary || "工作台内维护细则"}</small>
-              </div>
-              <div>
                 <small>
                   {stats.familyCounts
                     .filter((entry) => entry.count > 0)
                     .map(
                       (entry) =>
-                        `${RULE_FAMILY_LABELS[entry.family]} ${entry.count}`,
+                        `${RULE_FAMILY_LABELS[entry.family].replace(/规则$/, "")} ${entry.count}`,
                     )
                     .join(" · ") || "暂无细则"}
                 </small>
@@ -4919,17 +4917,16 @@ export default function RuleGroupWorkbench({
               </div>
               <div>
                 <Tag color={stats.enabled.length ? "green" : "default"}>
-                  {stats.enabled.length ? "启用" : "停用"}
+                  {stats.enabled.length
+                    ? `${stats.enabled.length}/${item.rules.length} 生效`
+                    : "未启用"}
                 </Tag>
-                <small>
-                  {stats.enabled.length}/{item.rules.length} 生效
-                </small>
               </div>
               <Button
                 type="primary"
                 onClick={() => enterWorkbench(item)}
               >
-                编辑进入工作台
+                编辑
               </Button>
             </div>
           );

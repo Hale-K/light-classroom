@@ -123,14 +123,11 @@ async def health():
 
 
 # ---------- 路由挂载（按模块陆续加） ----------
-from app.api.v1 import admin, auth, org, exam, scan, grading, stats, scheduling, seating, exam_scheduling, gaokao, student_auth, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge
+from app.api.v1 import admin, auth, org, exam, scheduling, seating, exam_scheduling, gaokao, student_auth, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(org.router, prefix="/api/v1")
 app.include_router(exam.router, prefix="/api/v1")
-app.include_router(scan.router, prefix="/api/v1")
-app.include_router(grading.router, prefix="/api/v1")
-app.include_router(stats.router, prefix="/api/v1")
 app.include_router(scheduling.router, prefix="/api/v1")
 app.include_router(seating.router, prefix="/api/v1")
 app.include_router(exam_scheduling.router, prefix="/api/v1")
@@ -151,7 +148,7 @@ app.include_router(page_agent_router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
 # from app.api.v1 import exam, grading, ...
-# 待业务实现后陆续挂载：权限/组织学籍/考试试卷/扫描进卷/打分/画像诊断/巩固卷/押题/AI编排/打印
+# 其他业务模块暂不挂载；核心保留排课、排考和助手。
 
 
 @app.get("/", tags=["system"])

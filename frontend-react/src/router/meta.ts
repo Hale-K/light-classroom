@@ -25,23 +25,19 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   '/teacher-notices': { title: '通知' },
   '/students': { title: '学生档案', roles: ['academic_director', 'school_admin', 'director'] },
   '/file-center': { title: '文件中心', roles: ['academic_director', 'school_admin', 'director'] },
-  '/grading': { title: '打分工作台' },
   '/teacher-preparation': { title: '备课' },
   '/teacher-classes': { title: '学生管理' },
   '/teacher-students': { title: '选课审核' },
-  '/stats': { title: '成绩统计' },
   '/onboarding': { title: '新手引导' },
   '/seating': { title: '班级排座', roles: ['head_teacher', 'academic_director', 'school_admin', 'director'] },
   '/classes': { title: '行政班管理', roles: ['head_teacher', 'academic_director', 'school_admin', 'director'] },
 
   // —— 教导主任+（含校长、管理员） ——
   '/scheduling': { title: '排课管理', roles: ['academic_director', 'school_admin', 'director'] },
-  '/exams': { title: '试卷库', roles: ['academic_director', 'school_admin', 'director'] },
-  '/scans': { title: '扫描进卷', roles: ['academic_director', 'school_admin', 'director'] },
+  '/exams': { title: '考试管理', roles: ['academic_director', 'school_admin', 'director'] },
   '/subjects': { title: '科目管理', roles: ['academic_director', 'school_admin', 'director'] },
   '/campus-buildings': { title: '空间资源', roles: ['academic_director', 'school_admin', 'director'] },
   '/gaokao': { title: '学生选课', roles: ['head_teacher', 'academic_director', 'school_admin', 'director'] },
-  '/meetings': { title: '会议管理', roles: ['academic_director', 'school_admin', 'director'] },
   '/staff': { title: '人员账号', roles: ['academic_director', 'school_admin', 'director'] },
   '/exam-scheduling': { title: '排考管理', roles: ['academic_director', 'school_admin', 'director'] },
   '/exam-rooms': { title: '考场管理', roles: ['academic_director', 'school_admin', 'director'] },
@@ -60,7 +56,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
 }
 
 /**
- * 取当前路由元数据：精确匹配优先，否则按前缀匹配动态路由（grading/:paperId 等）。
+ * 取当前路由元数据：精确匹配优先，否则按前缀匹配动态路由。
  * 找不到则返回默认值。
  */
 export function getRouteMeta(path: string): RouteMeta {
@@ -69,9 +65,6 @@ export function getRouteMeta(path: string): RouteMeta {
   for (const [prefix, meta] of Object.entries(ROUTE_META)) {
     if (path.startsWith(prefix + '/')) return meta
   }
-  // 动态路由兜底
-  if (path.startsWith('/grading')) return { title: '打分工作台' }
-  if (path.startsWith('/stats')) return { title: '成绩统计' }
   return { title: '工作台' }
 }
 

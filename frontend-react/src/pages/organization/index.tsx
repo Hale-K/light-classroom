@@ -155,7 +155,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
   }
   const archive = () => {
     if (!selected) return
-    modal.confirm({ title: `归档“${selected.name}”`, content: '归档后不再出现在当前组织树中，已有业务记录不会删除。',
+    modal.confirm({ title: `归档“${selected.name}”`, content: '该组织及其下级组织将从当前组织树中移除，相关当前任职关系将归档；历史业务记录保留。',
       okText: '确认归档', cancelText: '取消', onOk: async () => {
         await organizationApi.updateUnit(selected.id, { status: 'archived' })
         setSelectedId(undefined); await load(); message.success('组织节点已归档')
@@ -179,6 +179,7 @@ export default function OrganizationView({ embedded = false }: { embedded?: bool
             const parts = [detail.message]
             if (detail.children) parts.push(`${detail.children} 个子节点`)
             if (detail.active_appointments) parts.push(`${detail.active_appointments} 人任职`)
+            if (detail.historical_appointments) parts.push(`${detail.historical_appointments} 条历史任职记录`)
             message.error(parts.join('，'))
           } else {
             message.error(error instanceof Error ? error.message : '删除失败')

@@ -8,7 +8,7 @@ from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
 from app.models.org import Grade, OrganizationUnit, StaffAppointment, StudentGradeMembership, Subject, Tenant, TenantConfig, User
-from app.services.org.organization import build_organization_tree
+from app.services.org.organization import build_organization_tree, current_organization_units, organization_subtree_ids
 from app.services.org.cohort import normalize_cohort_label
 
 router = APIRouter(prefix="/organization", tags=["组织机构"])
@@ -92,6 +92,16 @@ async def _tenant_unit(session: AsyncSession, tenant_id: int, unit_id: int) -> O
     return unit
 
 
+async def _current_organization_unit_ids(session: AsyncSession, tenant_id: int) -> set[int]:
+    rows = list((await session.execute(
+        select(OrganizationUnit).where(OrganizationUnit.tenant_id == tenant_id)
+    )).scalars().all())
+    return {
+        int(item["id"])
+        for item in current_organization_units([row.model_dump() for row in rows])
+    }
+
+
 GRADE_CENTER_CONFIG_KEY = "org_grade_center"
 
 
@@ -150,18 +160,22 @@ async def organization_tree(
 ):
     _require_principal(user)
     school = await session.get(Tenant, tenant_id)
-    units = list((await session.execute(
-        select(OrganizationUnit).where(
-            OrganizationUnit.tenant_id == tenant_id,
-            OrganizationUnit.status == "active",
-        ).order_by(OrganizationUnit.sort_order, OrganizationUnit.id)
+    all_units = list((await session.execute(
+        select(OrganizationUnit).where(OrganizationUnit.tenant_id == tenant_id)
+        .order_by(OrganizationUnit.sort_order, OrganizationUnit.id)
     )).scalars().all())
+    visible_units = current_organization_units([item.model_dump() for item in all_units])
+    visible_unit_ids = {int(item["id"]) for item in visible_units}
     counts = dict((await session.execute(
         select(StaffAppointment.organization_unit_id, func.count(StaffAppointment.id))
-        .where(StaffAppointment.tenant_id == tenant_id, StaffAppointment.status == "active")
+        .where(
+            StaffAppointment.tenant_id == tenant_id,
+            StaffAppointment.status == "active",
+            StaffAppointment.organization_unit_id.in_(visible_unit_ids),
+        )
         .group_by(StaffAppointment.organization_unit_id)
     )).all())
-    tree = build_organization_tree([item.model_dump() for item in units], counts)
+    tree = build_organization_tree(visible_units, counts)
     return {"code": 0, "message": "ok", "data": {
         "school": {"id": tenant_id, "name": school.name if school else "当前学校"},
         "units": tree,
@@ -206,7 +220,9 @@ async def create_unit(
     if body.subject_id is not None:
         await _tenant_subject(session, tenant_id, body.subject_id)
     if body.parent_id is not None:
-        await _tenant_unit(session, tenant_id, body.parent_id)
+        parent = await _tenant_unit(session, tenant_id, body.parent_id)
+        if parent.id not in await _current_organization_unit_ids(session, tenant_id):
+            raise HTTPException(status_code=409, detail="不能在已归档的组织下新增节点")
     await _ensure_single_grade_center_name(session, tenant_id, body.name)
     unit = OrganizationUnit(tenant_id=tenant_id, **body.model_dump())
     session.add(unit)
@@ -242,11 +258,44 @@ async def update_unit(
     if values.get("parent_id") == unit_id:
         raise HTTPException(status_code=422, detail="组织节点不能成为自己的上级")
     if values.get("parent_id") is not None:
-        await _tenant_unit(session, tenant_id, values["parent_id"])
+        parent = await _tenant_unit(session, tenant_id, values["parent_id"])
+        if parent.id not in await _current_organization_unit_ids(session, tenant_id):
+            raise HTTPException(status_code=409, detail="不能移动到已归档的组织下")
+    if values.get("status") == "active" and unit.parent_id is not None:
+        if unit.parent_id not in await _current_organization_unit_ids(session, tenant_id):
+            raise HTTPException(status_code=409, detail="不能在已归档的上级组织下恢复节点")
     if values.get("name"):
         await _ensure_single_grade_center_name(session, tenant_id, values["name"], exclude_unit_id=unit_id)
+    archive_requested = values.pop("status", None) == "archived"
     for key, value in values.items():
         setattr(unit, key, value)
+    if archive_requested:
+        tenant_units = list((await session.execute(
+            select(OrganizationUnit.id, OrganizationUnit.parent_id).where(
+                OrganizationUnit.tenant_id == tenant_id,
+            )
+        )).all())
+        unit_ids = organization_subtree_ids(
+            unit_id,
+            [{"id": child_id, "parent_id": parent_id} for child_id, parent_id in tenant_units],
+        )
+        unit.status = "archived"
+        await session.execute(
+            update(OrganizationUnit)
+            .where(OrganizationUnit.tenant_id == tenant_id, OrganizationUnit.id.in_(unit_ids))
+            .values(status="archived")
+        )
+        await session.execute(
+            update(StaffAppointment)
+            .where(
+                StaffAppointment.tenant_id == tenant_id,
+                StaffAppointment.organization_unit_id.in_(unit_ids),
+                StaffAppointment.status == "active",
+            )
+            .values(status="archived")
+        )
+    elif body.status is not None and "status" in body.model_fields_set:
+        unit.status = body.status
     await session.commit()
     await session.refresh(unit)
     return {"code": 0, "message": "ok", "data": unit.model_dump()}
@@ -265,18 +314,22 @@ async def delete_unit(
     child_count = (await session.execute(select(func.count(OrganizationUnit.id)).where(
         OrganizationUnit.tenant_id == tenant_id,
         OrganizationUnit.parent_id == unit_id,
-        OrganizationUnit.status == "active",
     ))).scalar_one()
     appointment_count = (await session.execute(select(func.count(StaffAppointment.id)).where(
+        StaffAppointment.tenant_id == tenant_id,
+        StaffAppointment.organization_unit_id == unit_id,
+    ))).scalar_one()
+    active_appointment_count = (await session.execute(select(func.count(StaffAppointment.id)).where(
         StaffAppointment.tenant_id == tenant_id,
         StaffAppointment.organization_unit_id == unit_id,
         StaffAppointment.status == "active",
     ))).scalar_one()
     if child_count or appointment_count:
         raise HTTPException(status_code=409, detail={
-            "message": "组织节点存在子节点或老师任职，不能删除",
+            "message": "组织节点存在子节点或任职历史，不能删除",
             "children": child_count,
-            "active_appointments": appointment_count,
+            "active_appointments": active_appointment_count,
+            "historical_appointments": appointment_count - active_appointment_count,
         })
     await session.delete(unit)
     await session.commit()
@@ -291,9 +344,11 @@ async def list_appointments(
 ):
     """List current (active) staff appointments only."""
     _require_principal(user)
+    visible_unit_ids = await _current_organization_unit_ids(session, tenant_id)
     statement = select(StaffAppointment, User.name, OrganizationUnit.name).where(
         StaffAppointment.tenant_id == tenant_id,
         StaffAppointment.status == "active",
+        StaffAppointment.organization_unit_id.in_(visible_unit_ids),
     ).join(User, User.id == StaffAppointment.staff_id).join(OrganizationUnit, OrganizationUnit.id == StaffAppointment.organization_unit_id).order_by(OrganizationUnit.sort_order, User.name)
     rows = (await session.execute(statement)).all()
     return {"code": 0, "message": "ok", "data": [{
@@ -312,6 +367,9 @@ async def create_appointment(
     if body.position_code not in POSITION_CODES:
         raise HTTPException(status_code=422, detail="不支持的岗位")
     target_unit = await _tenant_unit(session, tenant_id, body.organization_unit_id)
+    active_unit_ids = await _current_organization_unit_ids(session, tenant_id)
+    if target_unit.id not in active_unit_ids:
+        raise HTTPException(status_code=409, detail="不能在已归档的组织或其下级组织中新增任职关系")
     staff = await session.get(User, body.staff_id)
     if staff is None or staff.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="人员账号不存在")

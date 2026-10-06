@@ -159,6 +159,28 @@ async def require_management_user(
     return user
 
 
+def resolve_choice_view_access(user_role: str, staff_role_codes: set[str]) -> str | None:
+    """Return the read scope for selection lists without granting review/edit rights."""
+    if user_role in {"director", "school_admin", "academic_director"} or "academic_director" in staff_role_codes:
+        return "management"
+    if user_role == "head_teacher" or "head_teacher" in staff_role_codes:
+        return "head_teacher"
+    return None
+
+
+async def require_choice_viewer(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    """Selection roster is readable by academic management; review actions stay head-teacher-only."""
+    from app.services.org.staff_roles import get_staff_role_codes
+
+    role_codes = set(await get_staff_role_codes(session, user.id))
+    if resolve_choice_view_access(user.role, role_codes) is None:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="仅班主任或教务管理人员可查看选科名单")
+    return user
+
+
 async def require_head_teacher(
     user: User = Depends(get_current_user),
     session: AsyncSession = Depends(get_session),
