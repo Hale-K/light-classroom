@@ -4,6 +4,8 @@ import type { ColumnsType } from 'antd/es/table'
 import { schedulingApi } from '@/api'
 import type { ClassInfo, CourseHourPlanInfo, EveningParity, SubjectInfo, WeekParity } from '@/types'
 import SelectEmptyGuide from '@/components/SelectEmptyGuide'
+import './walk-course-hours.css'
+import './course-hours.css'
 
 interface CourseHoursPanelProps {
   classes: ClassInfo[]
@@ -295,8 +297,8 @@ export default function CourseHoursPanel({
     { title: '班级', dataIndex: 'class_name', key: 'class_name', width: 180, render: (value) => <strong>{value || '未知班级'}</strong> },
     { title: '科目', dataIndex: 'subject_name', key: 'subject_name', width: 140 },
     { title: '工作日', dataIndex: 'weekday_periods', key: 'weekday_periods', width: 110, align: 'center', render: (value: number) => `${value} 节` },
-    { title: '周六', dataIndex: 'saturday_periods', key: 'saturday_periods', width: 100, align: 'center', render: (value: number) => `${value} 节` },
-    { title: '合计', dataIndex: 'weekly_periods', key: 'weekly_periods', width: 100, align: 'center', render: (value: number) => `${value} 节` },
+    { title: '周末', dataIndex: 'saturday_periods', key: 'saturday_periods', width: 100, align: 'center', render: (value: number) => `${value} 节` },
+    { title: '白天合计', dataIndex: 'weekly_periods', key: 'weekly_periods', width: 100, align: 'center', render: (value: number) => <strong className="walk-hours-total-number">{formatPeriods(value)}</strong> },
     { title: '晚课', key: 'evening_periods', width: 170, align: 'center', render: (_, row) => eveningText(row) },
     { title: '白天周次', dataIndex: 'week_parity', key: 'week_parity', width: 140, align: 'center', render: (value: WeekParity, row) => {
       const half = hasHalfDaytime(row.weekday_periods, row.saturday_periods)
@@ -324,12 +326,11 @@ export default function CourseHoursPanel({
   const daytimeAfterSave = classConfiguredOther + weekdayPeriods + saturdayPeriods
 
   return (
-    <section className="sk-hours">
+    <section className="sk-hours walk-hours admin-hours">
       <div className="sk-hours-intro">
         <div>
-          <div className="sk-hours-kicker">COURSE LOAD / 课时方案</div>
-          <h2>课时管理</h2>
-          <p>一条方案对应老师表的一行：工作日和周六属于白天课时，晚课单独维护。白天隔周类型同时作用于工作日与周六，不影响晚课单双周。</p>
+          <h2>行政班课时</h2>
+          <p>工作日、周末分别设置，晚自习单独安排。</p>
         </div>
         <Space wrap>
           <Select
@@ -350,19 +351,22 @@ export default function CourseHoursPanel({
           <Button type="primary" onClick={openCreate}>新增课时</Button>
         </Space>
       </div>
-      <div className="sk-hours-summary">
+      <div className="walk-hours-meta">
         <div><strong>{rows.length}</strong><span>条课时方案</span></div>
         <div><strong>{weekdayTotal}</strong><span>工作日课时</span></div>
-        <div><strong>{saturdayTotal}</strong><span>周六课时</span></div>
+        <div><strong>{saturdayTotal}</strong><span>周末课时</span></div>
         <div><strong>{daytimeTotal}</strong><span>白天课时合计</span></div>
-        <div className="sk-hours-summary-note">当前范围：{classId ? (classes.find((item) => item.id === classId)?.name || '当前班级') : '全部班级'} · {academicYear} · 第 {term} 学期</div>
+        <div className="walk-hours-term">{academicYear} · 第 {term} 学期</div>
       </div>
+      <div className="walk-hours-table-wrap">
+        <div className="walk-hours-table-heading"><h3>班级课时</h3><span>单位：节 · 周末当前排周六</span></div>
       <Table<CourseHourPlanInfo>
         className="sk-hours-table"
         rowKey="id"
         loading={loading}
         columns={columns}
         dataSource={rows}
+        scroll={{ x: 1070 }}
         pagination={{
           current: page,
           pageSize,
@@ -373,8 +377,10 @@ export default function CourseHoursPanel({
         }}
         locale={{ emptyText: '暂无课时方案，请先新增班级课程课时' }}
       />
+      </div>
       <Modal
-        title={isUpdate ? '更新课时方案' : '新增课时方案'}
+        title={isUpdate ? '编辑行政班课时' : '新增行政班课时'}
+        className="walk-hours-modal admin-hours-modal"
         open={open}
         centered
         width={560}
@@ -391,6 +397,7 @@ export default function CourseHoursPanel({
           </Space>
         ) : undefined}
       >
+        <div className="walk-hours-modal-context"><span>行政班课时方案</span><span>{academicYear} · 第 {term} 学期</span></div>
         <Form form={form} layout="vertical" onFinish={submit}>
           {autoTarget && !editing && (
             <Alert
@@ -412,26 +419,31 @@ export default function CourseHoursPanel({
 
           <div className="sk-hours-section">
             <span>白天课时</span>
-            <span className="sk-hours-section-hint">工作日 + 周六</span>
+            <span className="sk-hours-section-hint">工作日 + 周末</span>
           </div>
-          <div className="sk-evening-hours-fields">
-            <Form.Item name="weekday_periods" label="工作日课时" rules={[{ required: true, message: '请输入工作日课时' }]}>
-              <InputNumber min={0} max={20} step={0.5} addonAfter="节" style={{ width: '100%' }} />
+          <div className="walk-hours-input-grid">
+            <div className="walk-hours-input-group">
+            <Form.Item name="weekday_periods" label="工作日课时" extra="周一至周五合计" rules={[{ required: true, message: '请输入工作日课时' }]}>
+              <InputNumber min={0} max={20} step={0.5} size="large" suffix="节" />
             </Form.Item>
-            <Form.Item name="saturday_periods" label="周六课时" rules={[{ required: true, message: '请输入周六课时' }]}>
-              <InputNumber min={0} max={10} step={0.5} addonAfter="节" style={{ width: '100%' }} />
+            </div>
+            <div className="walk-hours-input-group">
+            <Form.Item name="saturday_periods" label="周末课时" extra="当前排课范围：周六" rules={[{ required: true, message: '请输入周末课时' }]}>
+              <InputNumber min={0} max={10} step={0.5} size="large" suffix="节" />
             </Form.Item>
+            </div>
           </div>
-          <div className="sk-hours-meter">
-            <div className="sk-hours-meter-text">
-              <span>白天合计 <strong>{formatPeriods(weekdayPeriods + saturdayPeriods)}</strong> 节</span>
+          <div className="walk-hours-total" aria-live="polite">
+            <div>白天每周合计<small>不含晚自习</small></div>
+            <div><strong>{formatPeriods(weekdayPeriods + saturdayPeriods)}</strong><span className="walk-hours-total-unit">节</span></div>
+          </div>
+          <div className="admin-hours-capacity">
               {daytimeCapacity != null && (
                 <span className={daytimeAfterSave > daytimeCapacity ? 'sk-hours-cap-warn' : undefined}>
                   本班 {formatPeriods(daytimeAfterSave)}/{formatPeriods(daytimeCapacity)} 节
-                  {daytimeAfterSave > daytimeCapacity ? ' · 已超出课位容量，可能排不入' : ''}
+                  {daytimeAfterSave > daytimeCapacity ? ' · 超出课位容量' : ' · 白天课位'}
                 </span>
               )}
-            </div>
             {daytimeCapacity != null && daytimeCapacity > 0 && (
               <Progress
                 size="small"
@@ -452,8 +464,8 @@ export default function CourseHoursPanel({
           ) : null}
 
           <div className="sk-hours-section">
-            <span>晚课 · 晚自习课位</span>
-            <span className="sk-hours-section-hint">语数外通常每周，其他通常隔周</span>
+            <span>晚自习</span>
+            <span className="sk-hours-section-hint">不计入白天课时</span>
           </div>
           <Form.Item name="evening_periods" style={{ marginBottom: eveningPeriods === 0.5 ? 12 : 0 }}>
             <Segmented
@@ -477,7 +489,7 @@ export default function CourseHoursPanel({
                   { value: 'even', label: '双周' },
                 ]}
               />
-              <span className="sk-hours-evening-parity-hint">无规定 = 由排课程序安排单双周（物理/历史可单物双史）</span>
+              <span className="sk-hours-evening-parity-hint">无规定：自动安排单双周</span>
             </div>
           )}
         </Form>
@@ -500,7 +512,7 @@ export default function CourseHoursPanel({
           value={inheritTypes}
           onChange={(values) => setInheritTypes(values as string[])}
           options={[
-            { label: '课时方案（工作日、周六、晚课、单双周）', value: 'course_hours' },
+            { label: '课时方案（工作日、周末、晚课、单双周）', value: 'course_hours' },
             { label: '任教关系（教师、班级、学科、周课时）', value: 'assignments' },
             { label: '排课规则（硬约束、软目标、启用状态）', value: 'rules' },
           ]}

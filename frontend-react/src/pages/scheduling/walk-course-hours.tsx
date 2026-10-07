@@ -1,13 +1,16 @@
 import { useEffect, useRef, useState } from 'react'
-import { Alert, App, Button, Form, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
+import { App, Button, Form, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
 import { Link } from 'react-router-dom'
 import { gaokaoApi, orgApi } from '@/api'
 import type { GaokaoOverview, WalkTeachingClass } from '@/api'
 import type { Grade, SubjectInfo } from '@/types'
+import './walk-course-hours.css'
 
+type HourPlan = { weekly_periods: number; weekday_periods: number | null; weekend_periods: number | null }
+type SplitHours = { weekday_periods: number; weekend_periods: number }
 type SubjectRow = {
   id: number; name: string; students: number; recommended: number
-  classes: WalkTeachingClass[]; planned?: number
+  classes: WalkTeachingClass[]; planned?: HourPlan
 }
 
 export default function WalkCourseHoursPanel({ academicYear, term, subjects, initialGradeId }: {
@@ -18,12 +21,14 @@ export default function WalkCourseHoursPanel({ academicYear, term, subjects, ini
   const [gradeId, setGradeId] = useState<number | undefined>(initialGradeId)
   const [overview, setOverview] = useState<GaokaoOverview>()
   const [classes, setClasses] = useState<WalkTeachingClass[]>([])
-  const [plans, setPlans] = useState<Record<string, number>>({})
+  const [plans, setPlans] = useState<Record<string, HourPlan>>({})
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [choosingSubject, setChoosingSubject] = useState(false)
   const [editing, setEditing] = useState<{ subject: SubjectRow; teachingClass?: WalkTeachingClass }>()
-  const [form] = Form.useForm<{ weekly_periods: number }>()
+  const [form] = Form.useForm<SplitHours>()
+  const weekdayHours = Form.useWatch('weekday_periods', form)
+  const weekendHours = Form.useWatch('weekend_periods', form)
   const requestId = useRef(0)
 
   useEffect(() => {
@@ -43,7 +48,7 @@ export default function WalkCourseHoursPanel({ academicYear, term, subjects, ini
     try {
       const scope = { grade_id: gradeId, academic_year: academicYear, term }
       const [nextOverview, nextClasses, nextPlans] = await Promise.all([
-        gaokaoApi.overview(scope), gaokaoApi.teachingClasses(scope), gaokaoApi.teachingSubjectHours(scope),
+        gaokaoApi.overview(scope), gaokaoApi.teachingClasses(scope), gaokaoApi.teachingSubjectHourDetails(scope),
       ])
       if (version !== requestId.current) return
       setOverview(nextOverview); setClasses(nextClasses); setPlans(nextPlans)
@@ -82,15 +87,19 @@ export default function WalkCourseHoursPanel({ academicYear, term, subjects, ini
 
   const open = (subject: SubjectRow, teachingClass?: WalkTeachingClass) => {
     setEditing({ subject, teachingClass })
-    const unique = [...new Set(subject.classes.map((item) => item.weekly_periods))]
-    form.setFieldsValue({ weekly_periods: teachingClass?.weekly_periods ?? subject.planned ?? (unique.length === 1 ? unique[0] : undefined) })
+    const unique = [...new Set(subject.classes.map((item) => `${item.weekday_periods}/${item.weekend_periods}/${item.weekly_periods}`))]
+    const source = teachingClass ?? subject.planned ?? (unique.length === 1 ? subject.classes[0] : undefined)
+    // Legacy totals are not an inferred weekday/weekend distribution.
+    form.resetFields()
+    form.setFieldsValue({ weekday_periods: source?.weekday_periods ?? undefined,
+      weekend_periods: source?.weekend_periods ?? undefined })
   }
 
-  const save = async ({ weekly_periods }: { weekly_periods: number }) => {
+  const save = async ({ weekday_periods, weekend_periods }: SplitHours) => {
     if (!gradeId || !editing) return
     setSaving(true)
     try {
-      const scope = { grade_id: gradeId, academic_year: academicYear, term, weekly_periods }
+      const scope = { grade_id: gradeId, academic_year: academicYear, term, weekday_periods, weekend_periods }
       const result = editing.teachingClass
         ? await gaokaoApi.updateTeachingClassHours(editing.teachingClass.id, scope)
         : await gaokaoApi.updateTeachingSubjectHours({ ...scope, subject_id: editing.subject.id })
@@ -101,42 +110,44 @@ export default function WalkCourseHoursPanel({ academicYear, term, subjects, ini
     finally { setSaving(false) }
   }
 
-  return <section className="sk-hours">
+  const originalHours = editing?.teachingClass ?? editing?.subject.planned
+  return <section className="sk-hours walk-hours">
     <div className="sk-hours-intro">
-      <div><div className="sk-hours-kicker">走班课时方案</div><h2>按科目设置教学班课时</h2>
-        <p>每周课时指每名学生在该教学班每周上课的节数。可先配置科目课时，生成教学班时自动带入；教师与教室在后续步骤安排。</p></div>
-      <Space wrap>
-        <Select aria-label="走班课时年级" style={{ width: 240 }} value={gradeId} disabled={saving} placeholder="选择年级"
+      <div><h2>走班课时</h2><p>按科目设置，教学班自动带入。</p></div>
+      <Space wrap className="walk-hours-toolbar">
+        <Select aria-label="走班课时年级" className="walk-hours-grade" value={gradeId} disabled={saving} placeholder="选择年级"
           onChange={setGradeId} options={grades.map((item) => ({ value: item.id, label: item.name }))} />
         <Button loading={loading} onClick={() => void load()}>刷新</Button>
-        <Button type="primary" disabled={!gradeId || saving} onClick={() => setChoosingSubject(true)}>新增走班科目课时</Button>
+        <Button type="primary" disabled={!gradeId || saving} onClick={() => setChoosingSubject(true)}>新增科目</Button>
       </Space>
     </div>
-    <div className="sk-hours-summary">
-      <div><strong>{data.length}</strong><span>门走班科目</span></div>
-      <div><strong>{classes.length}</strong><span>个教学班</span></div>
-      <div><strong>{classes.reduce((sum, item) => sum + item.weekly_periods, 0)}</strong><span>教学班周课时合计</span></div>
-      <div className="sk-hours-summary-note">{grades.find((item) => item.id === gradeId)?.name} · {academicYear} · 第 {term} 学期</div>
+    <div className="walk-hours-meta">
+      <span><strong>{data.length}</strong> 门科目</span>
+      <span><strong>{classes.length}</strong> 个教学班</span>
+      <span className="walk-hours-term">{academicYear} · 第 {term} 学期</span>
     </div>
-    <Table<SubjectRow> rowKey="id" loading={loading} dataSource={data} pagination={false}
+    <div className="walk-hours-table-wrap">
+    <div className="walk-hours-table-heading"><h3>科目课时</h3><span>单位：节 / 教学班</span></div>
+    <Table<SubjectRow> rowKey="id" loading={loading} dataSource={data} pagination={false} scroll={{ x: 780 }}
       locale={{ emptyText: '暂无走班科目，可先新增科目课时，或确认选科后生成教学班。' }} columns={[
         { title: '科目', dataIndex: 'name', render: (value) => <strong>{value}</strong> },
         { title: '选科人数', render: (_, row) => `${row.students || row.classes.reduce((sum, item) => sum + item.student_count, 0)} 人` },
         { title: '教学班数', render: (_, row) => row.classes.length ? `${row.classes.length} 个` : <Tag>未生成{row.recommended ? `（建议 ${row.recommended} 个）` : ''}</Tag> },
-        { title: '科目周课时', render: (_, row) => row.planned ? `${row.planned} 节 / 班` : '未设置' },
-        { title: '教学班实际周课时', render: (_, row) => {
-          const values = [...new Set(row.classes.map((item) => item.weekly_periods))]
-          return values.length === 1 ? `${values[0]} 节 / 班` : values.length > 1 ? <Tag color="orange">各班不同，展开查看</Tag> : '生成后带入'
-        } },
-        { title: '操作', render: (_, row) => <Button type="link" onClick={() => open(row)}>设置课时</Button> },
+        { title: '工作日', align: 'center', render: (_, row) => row.planned?.weekday_periods != null ? <span className="walk-hours-number">{row.planned.weekday_periods}</span> : <span className="walk-hours-muted">{row.planned ? '未拆分' : '未设置'}</span> },
+        { title: '周末', align: 'center', render: (_, row) => row.planned?.weekend_periods != null ? <span className="walk-hours-number">{row.planned.weekend_periods}</span> : <span className="walk-hours-muted">{row.planned ? '未拆分' : '未设置'}</span> },
+        { title: '每周合计', align: 'center', render: (_, row) => row.planned ? <strong className="walk-hours-total-number">{row.planned.weekly_periods}</strong> : <span className="walk-hours-muted">未设置</span> },
+        { title: '操作', align: 'right', render: (_, row) => <Button onClick={() => open(row)}>设置课时</Button> },
       ]} expandable={{ rowExpandable: (row) => row.classes.length > 0, expandedRowRender: (row) =>
         <Table<WalkTeachingClass> rowKey="id" dataSource={row.classes} size="small" pagination={false} columns={[
           { title: '教学班', dataIndex: 'name' }, { title: '人数', dataIndex: 'student_count' },
-          { title: '周课时', dataIndex: 'weekly_periods', render: (value) => `${value} 节` },
+          { title: '工作日', dataIndex: 'weekday_periods', render: (value) => value == null ? '未拆分' : `${value} 节` },
+          { title: '周末', dataIndex: 'weekend_periods', render: (value) => value == null ? '未拆分' : `${value} 节` },
+          { title: '每周合计', dataIndex: 'weekly_periods', render: (value) => `${value} 节` },
           { title: '课时来源', render: (_, item) => <Tag color={item.hours_overridden ? 'orange' : 'blue'}>{item.hours_overridden ? '单班调整' : '教学班课时'}</Tag> },
           { title: '操作', render: (_, item) => <Button type="link" onClick={() => open(row, item)}>单独调整</Button> },
         ]} /> }} />
-    <p style={{ marginTop: 16, color: 'var(--text-3)' }}>尚未组建教学班？<Link to="/gaokao">前往学生选课确认选科并生成教学班</Link>。走班科目请勿重复添加到行政班课时。</p>
+    </div>
+    <div className="walk-hours-footnote"><span>展开科目，可单独调整教学班。</span><Link to="/gaokao">前往学生选课</Link></div>
     <Modal title="选择走班科目" open={choosingSubject} centered footer={null} onCancel={() => setChoosingSubject(false)} destroyOnHidden>
       <Select aria-label="走班科目" style={{ width: '100%' }} placeholder="选择需要走班授课的科目"
         options={subjects.filter((item) => item.course_type !== 'activity').map((item) => ({ value: item.id, label: item.name }))}
@@ -146,15 +157,23 @@ export default function WalkCourseHoursPanel({ academicYear, term, subjects, ini
           open(rows.get(id) || { id, name: item.name, students: 0, recommended: 0, classes: [] })
         }} />
     </Modal>
-    <Modal title={editing?.teachingClass ? `调整 ${editing.teachingClass.name} 课时` : `设置 ${editing?.subject.name || ''} 走班课时`}
+    <Modal title={editing?.teachingClass ? '调整教学班课时' : '设置走班课时'} className="walk-hours-modal" width={560}
       open={Boolean(editing)} centered onCancel={() => { if (!saving) setEditing(undefined) }}
-      onOk={() => form.submit()} confirmLoading={saving} okText="保存" cancelText="取消" destroyOnHidden>
-      <Form form={form} layout="vertical" onFinish={save}>
-        <Form.Item name="weekly_periods" label="每个教学班每周课时" rules={[{ required: true, message: '请输入每周课时' }, { type: 'integer', min: 1, max: 12, message: '请输入 1 到 12 的整数' }]}>
-          <InputNumber min={1} max={12} precision={0} addonAfter="节" style={{ width: '100%' }} />
-        </Form.Item>
-        <Alert type="info" showIcon message={editing?.teachingClass ? '仅修改这个教学班，科目默认课时保持不变。' : '保存为该科目默认课时，并同步到本年级本学期的所有该科教学班。'} />
-        {Boolean(editing?.subject.classes.length) && <Alert style={{ marginTop: 12 }} type="warning" showIcon message="课时发生变化时，会清除受影响教学班的已有走班课表，需重新排课。" />}
+      onOk={() => form.submit()} confirmLoading={saving} okText="保存课时" cancelText="取消" cancelButtonProps={{ disabled: saving }} maskClosable={!saving} keyboard={!saving} closable={!saving} destroyOnHidden>
+      <div className="walk-hours-modal-context"><strong>{editing?.teachingClass?.name ?? editing?.subject.name}</strong><span>{grades.find((item) => item.id === gradeId)?.name} · 第 {term} 学期</span></div>
+      {originalHours?.weekday_periods == null && originalHours && <p className="walk-hours-legacy">原每周 {originalHours.weekly_periods} 节，请确认分配。</p>}
+      <Form form={form} layout="vertical" onFinish={save} requiredMark={false} disabled={saving}>
+        <div className="walk-hours-input-grid">
+          <div className="walk-hours-input-group"><Form.Item name="weekday_periods" label="工作日课时" extra="周一至周五" rules={[{ required: true, message: '请输入工作日课时' }, { type: 'integer', min: 0, max: 12, message: '请输入0到12的整数' }]}>
+            <InputNumber min={0} max={12} precision={0} size="large" suffix="节" placeholder="填写课时" />
+          </Form.Item></div>
+          <div className="walk-hours-input-group"><Form.Item name="weekend_periods" label="周末课时" extra="周六、周日，无课填0" dependencies={['weekday_periods']} rules={[{ required: true, message: '请输入周末课时，无课填0' }, { type: 'integer', min: 0, max: 12, message: '请输入0到12的整数' },
+            { validator: async (_, value) => { const work = form.getFieldValue('weekday_periods'); if (work != null && value != null && (work + value < 1 || work + value > 12)) throw new Error('每周合计须为1到12节') } }]}>
+            <InputNumber min={0} max={12} precision={0} size="large" suffix="节" placeholder="填写课时" />
+          </Form.Item></div>
+        </div>
+        <div className="walk-hours-total" role="status" aria-live="polite"><span>每周合计<small>工作日 + 周末</small></span><span><strong>{weekdayHours != null && weekendHours != null ? weekdayHours + weekendHours : '—'}</strong><span className="walk-hours-total-unit">节 / 班</span></span></div>
+        <p className="walk-hours-save-note">{editing?.teachingClass ? '仅调整此教学班。' : editing?.subject.classes.length ? `同步到 ${editing.subject.classes.length} 个同科教学班。` : '生成教学班时自动带入。'}{Boolean(editing?.subject.classes.length) && '课时变更后需重新排课。'}</p>
       </Form>
     </Modal>
   </section>

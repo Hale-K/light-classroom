@@ -1,4 +1,4 @@
-from scripts.check_walk_coordination import check
+from app.services.scheduling.walk_coordination_check import check
 
 
 def sample(rooms):

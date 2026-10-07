@@ -133,7 +133,7 @@ async def preview_walk_regroup(body: WalkRegroupPreviewIn,
             selected, admin_by_student, result))
     return {'code': 0, 'message': 'ok', 'data': {**result, 'saved': False,
         'student_count': len(selected),
-        'warnings': ['分组及课表仅预览，未修改原数据；正式启用需同步替换旧走班预留规则']}}
+        'warnings': ['分组及课表仅预览，未修改原数据；联合排课不创建或修改用户规则']}}
 
 
 async def _regroup_roster(body, session, tenant_id):
@@ -183,8 +183,9 @@ async def _student_term_classes(session, tenant_id, student_ids, academic_year, 
 
 
 async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, admins, draft):
-    from app.api.v1.scheduling import GenerateIn, _generation_assignment_payloads, _load_rule_group
-    from app.services.scheduling.walk_regroup_calendar import trial_calendar, audit_draft
+    from app.api.v1.scheduling import GenerateIn, _generation_assignment_payloads, _load_rule_group, _load_grid_config
+    from app.services.scheduling.grid_slots import allowed_slots as configured_slots
+    from app.services.scheduling.walk_regroup_calendar import trial_calendar, audit_draft, check_hour_bounds
     from app.services.scheduling.rules import generation_subject_allowed_slots, rules_for_schedule
     assignments = await _generation_assignment_payloads(session, GenerateIn(
         academic_year=body.academic_year, term=body.term,
@@ -201,17 +202,39 @@ async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, a
     if {p.subject_id for p in plans} != subjects or len({p.weekly_periods for p in plans}) != 1:
         raise HTTPException(status_code=422, detail='请配置两个走班学科等课时；当前分组预览不支持不等课时')
     hours = plans[0].weekly_periods
-    slots = [(d, p) for d in body.weekdays for p in body.periods]
+    plans_by_subject = {p.subject_id: p for p in plans}
+    for c in draft['classes']:
+        plan = plans_by_subject[c['subject_id']]
+        c['weekday_periods'] = plan.weekday_periods
+        c['weekend_periods'] = plan.weekend_periods
+    required_slots = {(d, p) for d in body.weekdays for p in body.periods}
+    grid = await _load_grid_config(session, tenant_id, body.academic_year, body.term, body.grade_id)
+    daytime = configured_slots(grid, 'daytime')
+    slots = sorted(s for s in daytime['odd'] & daytime['even'] if s[0] in body.weekdays)
+    if not grid['configured'] or not required_slots.issubset(slots):
+        raise HTTPException(status_code=422, detail='最低排满范围包含未开放的白天课位，请先检查课位配置')
     totals = defaultdict(lambda: [0, 0])
     for a in assignments:
         totals[a['class_id']][0] += a['weekday_periods']
         totals[a['class_id']][1] += a['saturday_periods']
-    if set(totals) != set(admins.values()) or any(sum(h) + 2 * hours != len(slots) for h in totals.values()):
-        raise HTTPException(status_code=422, detail='行政课加走班课总课时必须等于所选不空节范围；请先调整课时')
+    if set(totals) != set(admins.values()):
+        raise HTTPException(status_code=422, detail='存在行政班未配置公共课课时，请先检查课时和任教关系')
+    profiles = {(admins[sid], tuple(sorted(choices))) for sid, choices in selected.items()}
+    for admin_id, choices in sorted(profiles):
+        work = totals[admin_id][0]
+        weekend = totals[admin_id][1]
+        selected_plans = [plans_by_subject[sid] for sid in choices]
+        split = all(p.weekday_periods is not None and p.weekend_periods is not None for p in selected_plans)
+        error = check_hour_bounds(sum(totals[admin_id]) + sum(p.weekly_periods for p in selected_plans),
+            work + sum(p.weekday_periods for p in selected_plans) if split else None,
+            weekend + sum(p.weekend_periods for p in selected_plans) if split else None,
+            slots, required_slots)
+        if error:
+            raise HTTPException(status_code=422, detail=f'行政班ID {admin_id}的学生：{error}（公共课{int(sum(totals[admin_id]))}节＋走班{sum(p.weekly_periods for p in selected_plans)}节）')
     saturday_totals = {int(h[1]) for h in totals.values()}
     if len(saturday_totals) != 1:
         raise HTTPException(status_code=422, detail='当前联合预览要求各行政班周六公共课课时相同')
-    saturday_walk = sum(d == 6 for d, _ in slots) - saturday_totals.pop()
+    saturday_walk = max(0, sum(d == 6 for d, _ in required_slots) - saturday_totals.pop())
     saturday_hours = {'A': saturday_walk // 2, 'B': saturday_walk - saturday_walk // 2}
     if any(h < 0 or h > hours for h in saturday_hours.values()):
         raise HTTPException(status_code=422, detail='周六课时不满足走班分组要求')
@@ -244,12 +267,13 @@ async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, a
     allowed = generation_subject_allowed_slots(rules_for_schedule(group, 'admin'))
     calendar = await asyncio.to_thread(trial_calendar, draft, assignments, set(admins.values()),
         body.a_groups, body.b_groups, teachers, len(rooms), external, slots=slots,
-        phase_hours=hours, saturday_hours=saturday_hours, subject_allowed=allowed, blocked_rooms=blocked_rooms)
+        phase_hours=hours, saturday_hours=saturday_hours, subject_allowed=allowed, blocked_rooms=blocked_rooms,
+        required_slots=required_slots)
     if calendar['status'] not in ('OPTIMAL', 'FEASIBLE'):
         return {'status': calendar['status'].lower(), 'schedule_validated': False}
     report, placements = audit_draft(draft, calendar, selected, admins, assignments,
         [{'id': r.id, 'capacity': r.capacity} for r in rooms], external, slots=slots,
-        phase_hours=hours, blocked_rooms=blocked_rooms)
+        phase_hours=hours, blocked_rooms=blocked_rooms, required_slots=required_slots)
     # The legacy blanket reservation/prefix rules are deliberately NOT treated as satisfied.
     # No rule is silently changed: the preview describes the required coordinated replacement.
     return {'schedule_validated': True, 'calendar': calendar, 'placements': placements,
@@ -386,8 +410,9 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
         GaokaoScheme.tenant_id == tenant_id, GaokaoScheme.id.in_({c.scheme_id for c in choices})))).scalars().all()}
     by_id = {c.id: c for c in classes}
     teacher_ids = {c.teacher_id for c in classes if c.teacher_id is not None}
-    active_teachers = set((await session.execute(select(User.id).where(User.tenant_id == tenant_id,
-        User.id.in_(teacher_ids), User.role == BaseUserRole.teacher, User.status == UserStatus.active))).scalars().all())
+    teacher_names = dict((await session.execute(select(User.id, User.name).where(User.tenant_id == tenant_id,
+        User.id.in_(teacher_ids), User.role == BaseUserRole.teacher, User.status == UserStatus.active))).all())
+    active_teachers = set(teacher_names)
     if active_teachers != teacher_ids:
         raise HTTPException(status_code=422, detail="部分教学班教师已停用或不属于当前学校，请重新安排教师")
     student_subjects = defaultdict(Counter)
@@ -506,7 +531,10 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
                 if admin_class.id in admin_members and admin_class.home_room_id:
                     blocked_rooms[admin_class.home_room_id].update(study_slots)
     result = await asyncio.to_thread(recommend_walk_slots,
-        [dict(id=c.id, name=c.name, subject_id=c.subject_id, teacher_id=c.teacher_id, weekly_periods=c.weekly_periods) for c in classes],
+        [dict(id=c.id, name=c.name, subject_id=c.subject_id, teacher_id=c.teacher_id,
+              teacher_name=teacher_names.get(c.teacher_id),
+              weekly_periods=c.weekly_periods, weekday_periods=c.weekday_periods,
+              weekend_periods=c.weekend_periods) for c in classes],
         members, [dict(id=r.id, name=r.name, capacity=r.capacity) for r in rooms], sorted(slots - blocked_slots),
         blocked_students=blocked_students, blocked_teachers=blocked_teachers, blocked_rooms=blocked_rooms,
         blocked_subjects=blocked_subjects, blocked_slots=blocked_slots,
@@ -732,30 +760,52 @@ class GenerateTeachingClassesIn(BaseModel):
     )
 
 
-class UpdateTeachingSubjectHoursIn(BaseModel):
+class WalkHoursIn(BaseModel):
+    weekly_periods: int | None = Field(default=None, ge=1, le=12)
+    weekday_periods: int | None = Field(default=None, ge=0, le=12, strict=True)
+    weekend_periods: int | None = Field(default=None, ge=0, le=12, strict=True)
+
+    @model_validator(mode='after')
+    def validate_hours(self):
+        if self.weekday_periods is not None or self.weekend_periods is not None:
+            if self.weekday_periods is None or self.weekend_periods is None:
+                raise ValueError('请同时填写工作日和周末课时')
+            total = self.weekday_periods + self.weekend_periods
+            if not 1 <= total <= 12:
+                raise ValueError('每周合计须为1到12节')
+            if self.weekly_periods is not None and self.weekly_periods != total:
+                raise ValueError('每周合计必须等于工作日加周末课时')
+            self.weekly_periods = total
+        elif self.weekly_periods is None:
+            raise ValueError('请填写课时')
+        return self
+
+
+class UpdateTeachingSubjectHoursIn(WalkHoursIn):
     grade_id: int
     academic_year: str = Field(min_length=4, max_length=20)
     term: str = Field(pattern=r"^[12]$")
     subject_id: int
-    weekly_periods: int = Field(ge=1, le=12)
 
 
-class UpdateTeachingClassHoursIn(BaseModel):
+class UpdateTeachingClassHoursIn(WalkHoursIn):
     grade_id: int
     academic_year: str = Field(min_length=4, max_length=20)
     term: str = Field(pattern=r"^[12]$")
-    weekly_periods: int = Field(ge=1, le=12)
 
 
 async def _walk_subject_hours(session: AsyncSession, tenant_id: int, grade_id: int,
-                              academic_year: str, term: str) -> dict[str, int]:
+                              academic_year: str, term: str, detailed: bool = False) -> dict:
     plans = (await session.execute(select(TeachingSubjectHourPlan).where(
         TeachingSubjectHourPlan.tenant_id == tenant_id,
         TeachingSubjectHourPlan.grade_id == grade_id,
         TeachingSubjectHourPlan.academic_year == academic_year,
         TeachingSubjectHourPlan.term == term,
     ))).scalars().all()
-    return {str(item.subject_id): item.weekly_periods for item in plans}
+    return {str(item.subject_id): {
+        'weekly_periods': item.weekly_periods, 'weekday_periods': item.weekday_periods,
+        'weekend_periods': item.weekend_periods,
+    } if detailed else item.weekly_periods for item in plans}
 
 
 async def _shared_teaching_rooms(session: AsyncSession, tenant_id: int, grade: Grade,
@@ -1380,6 +1430,7 @@ async def generate_teaching_classes(
     ))).scalars().all())
     saved_hours = {str(item.subject_id): item.weekly_periods for item in saved_plans}
     plan_ids = {item.subject_id: item.id for item in saved_plans}
+    plan_by_subject = {item.subject_id: item for item in saved_plans}
     effective_hours = {draft.subject_id: body.weekly_periods_by_subject.get(
         draft.subject_id, saved_hours.get(str(draft.subject_id), body.weekly_periods),
     ) for draft in drafts}
@@ -1387,6 +1438,7 @@ async def generate_teaching_classes(
         "scope": [tenant_id, grade.id, body.academic_year, body.term, body.capacity],
         "drafts": [[d.subject_id, d.sequence, d.student_ids] for d in drafts],
         "hours": effective_hours,
+        "split_hours": [(p.subject_id, p.weekday_periods, p.weekend_periods) for p in saved_plans],
         "existing": sorted((c.id, c.weekly_periods, c.teacher_id, c.room, c.updated_at.isoformat()) for c in old_classes),
     }, sort_keys=True).encode()).hexdigest()
     warnings = []
@@ -1417,6 +1469,9 @@ async def generate_teaching_classes(
     created_classes: list[TeachingClass] = []
     member_count = 0
     for draft in drafts:
+        inherited = plan_by_subject.get(draft.subject_id)
+        if inherited and effective_hours[draft.subject_id] != inherited.weekly_periods:
+            inherited = None
         teaching_class = TeachingClass(
             tenant_id=tenant_id,
             grade_id=body.grade_id,
@@ -1430,6 +1485,8 @@ async def generate_teaching_classes(
                 draft.subject_id, saved_hours.get(str(draft.subject_id), body.weekly_periods),
             ),
             hour_plan_id=plan_ids.get(draft.subject_id),
+            weekday_periods=inherited.weekday_periods if inherited else None,
+            weekend_periods=inherited.weekend_periods if inherited else None,
             hours_overridden=(draft.subject_id in body.weekly_periods_by_subject
                               and body.weekly_periods_by_subject[draft.subject_id] != saved_hours.get(str(draft.subject_id))),
             teacher_id=None,
@@ -1459,6 +1516,7 @@ async def generate_teaching_classes(
 @router.get("/teaching-classes/subject-hours", summary="读取走班科目课时方案")
 async def get_teaching_subject_hours(
     grade_id: int, academic_year: str, term: str = Query(pattern=r"^[12]$"),
+    detailed: bool = False,
     session: AsyncSession = Depends(get_session), user=Depends(get_current_user),
     tenant_id: int = Depends(get_current_tenant),
 ):
@@ -1466,7 +1524,7 @@ async def get_teaching_subject_hours(
     if not grade or grade.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="年级不存在")
     return {"code": 0, "message": "ok", "data": await _walk_subject_hours(
-        session, tenant_id, grade_id, academic_year, term,
+        session, tenant_id, grade_id, academic_year, term, detailed,
     )}
 
 
@@ -1505,14 +1563,20 @@ async def update_teaching_subject_hours(
             weekly_periods=body.weekly_periods)
         session.add(plan)
     await session.flush()
+    plan.weekday_periods = body.weekday_periods
+    plan.weekend_periods = body.weekend_periods
     for item in classes:
         item.hour_plan_id = plan.id
         item.hours_overridden = False
-    changed_classes = [item for item in classes if item.weekly_periods != body.weekly_periods]
+    changed_classes = [item for item in classes if
+        (item.weekly_periods, item.weekday_periods, item.weekend_periods) !=
+        (body.weekly_periods, body.weekday_periods, body.weekend_periods)]
     cleared_schedule_count = 0
     if changed_classes:
         for item in changed_classes:
             item.weekly_periods = body.weekly_periods
+            item.weekday_periods = body.weekday_periods
+            item.weekend_periods = body.weekend_periods
         class_ids = [item.id for item in changed_classes]
         result = await session.execute(delete(TeachingClassSchedule).where(
             TeachingClassSchedule.tenant_id == tenant_id,
@@ -1541,8 +1605,11 @@ async def update_teaching_class_hours(
     if not item:
         raise HTTPException(status_code=404, detail="当前学期教学班不存在")
     cleared = 0
-    if item.weekly_periods != body.weekly_periods:
+    if (item.weekly_periods, item.weekday_periods, item.weekend_periods) != (
+        body.weekly_periods, body.weekday_periods, body.weekend_periods):
         item.weekly_periods = body.weekly_periods
+        item.weekday_periods = body.weekday_periods
+        item.weekend_periods = body.weekend_periods
         result = await session.execute(delete(TeachingClassSchedule).where(
             TeachingClassSchedule.tenant_id == tenant_id,
             TeachingClassSchedule.teaching_class_id == class_id,
@@ -1630,6 +1697,8 @@ async def list_walk_teaching_classes(
         "sequence": item.sequence,
         "capacity": item.capacity,
         "weekly_periods": item.weekly_periods,
+        "weekday_periods": item.weekday_periods,
+        "weekend_periods": item.weekend_periods,
         "hours_overridden": item.hours_overridden,
         "teacher_id": item.teacher_id,
         "room": item.room,
@@ -1680,6 +1749,7 @@ async def generate_schedules(
         detail = {
             "message": result.get("message", "没有找到满足当前条件的走班课表"),
             "status": result.get("status"),
+            "diagnostics": result.get("diagnostics", []),
             "rule_failures": result.get("rule_failures", []),
             "warnings": result.get("warnings", []),
         }
@@ -1704,6 +1774,12 @@ async def generate_schedules(
     if len(placements) != expected_periods:
         raise HTTPException(status_code=422, detail="排课结果未覆盖全部教学班课时，原课表未修改")
     class_period_counts = Counter(int(item["teaching_class_id"]) for item in placements)
+    for item_id, item in teaching_by_id.items():
+        if item.weekday_periods is not None or item.weekend_periods is not None:
+            work = sum(p['teaching_class_id'] == item_id and 1 <= int(p['weekday']) <= 5 for p in placements)
+            weekend = sum(p['teaching_class_id'] == item_id and int(p['weekday']) in (6, 7) for p in placements)
+            if (work, weekend) != (item.weekday_periods, item.weekend_periods):
+                raise HTTPException(status_code=422, detail='工作日或周末课时不符，原课表未修改')
     if any(class_period_counts.get(item_id, 0) != int(item.weekly_periods)
            for item_id, item in teaching_by_id.items()):
         raise HTTPException(status_code=422, detail="部分教学班课时未排足，原课表未修改")

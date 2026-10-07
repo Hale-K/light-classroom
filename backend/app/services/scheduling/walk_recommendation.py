@@ -62,6 +62,51 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
             model.Add(x[c['id'], slot] <= active[slot])
         variables = [v for (cid, _), v in x.items() if cid == c['id']]
         model.Add(sum(variables) == c['weekly_periods'])
+        if c.get('weekday_periods') is not None or c.get('weekend_periods') is not None:
+            work, weekend = c.get('weekday_periods'), c.get('weekend_periods')
+            if not isinstance(work, int) or not isinstance(weekend, int) or min(work, weekend) < 0 or work + weekend != c['weekly_periods']:
+                return {'status': 'blocked', 'message': '工作日与周末课时配置不完整或合计不一致'}
+            model.Add(sum(v for (cid, s), v in x.items() if cid == c['id'] and 1 <= s[0] <= 5) == work)
+            model.Add(sum(v for (cid, s), v in x.items() if cid == c['id'] and s[0] in (6, 7)) == weekend)
+    # Explain provable capacity shortages before solving combined constraints.
+    # Candidate slots already exclude locked administrative lessons, teacher
+    # bans, subject rules and rooms that are occupied or too small.
+    candidates = {c['id']: {slot for cid, slot in x if cid == c['id']} for c in classes}
+    diagnostics = []
+
+    def check_capacity(code, label, ids):
+        shortages = []
+        for part, days, field in [('每周', set(range(1, 8)), 'weekly_periods'),
+                                  ('工作日', set(range(1, 6)), 'weekday_periods'),
+                                  ('周末', {6, 7}, 'weekend_periods')]:
+            if any(by_id[cid].get(field) is None for cid in ids):
+                continue
+            required = sum(by_id[cid][field] for cid in ids)
+            available = len({slot for cid in ids for slot in candidates[cid] if slot[0] in days})
+            if required > available:
+                shortages.append(dict(code=code, teaching_class_ids=sorted(ids), part=part,
+                    required=required, available=available, shortfall=required - available,
+                    message=f'{label}：{part}需{required}节，可用{available}节，缺{required - available}节'))
+        # Prefer the split that needs adjustment over its duplicate weekly total.
+        diagnostics.extend([item for item in shortages if item['part'] != '每周'] or shortages)
+
+    for c in classes:
+        check_capacity('class_slot_shortage', c['name'], {c['id']})
+    for ids in by_teacher.values():
+        if len(ids) > 1:
+            teacher_name = by_id[min(ids)].get('teacher_name')
+            label = f'{teacher_name}老师（{len(ids)}个教学班）' if teacher_name else f'同一教师任教的{by_id[min(ids)]["name"]}等{len(ids)}个教学班'
+            check_capacity('teacher_slot_shortage', label, ids)
+    for ids in {tuple(sorted(ids)) for ids in by_student.values() if len(ids) > 1}:
+        names = '、'.join(by_id[cid]['name'] for cid in ids)
+        check_capacity('student_slot_shortage', f'同时选读{names}的学生', ids)
+    if diagnostics:
+        summary = '；'.join(item['message'] for item in diagnostics[:3])
+        if len(diagnostics) > 3:
+            summary += f'（另有{len(diagnostics) - 3}项不足）'
+        return dict(status='infeasible', diagnostics=diagnostics,
+            message=f'走班课位不足：{summary}。可用数已扣除行政课、禁排和教室限制；请核对课时分配，或使用联合排课协调行政课。')
+
     conflict_groups = {tuple(sorted(ids)) for ids in [*by_student.values(), *by_teacher.values()] if len(ids) > 1}
     for slot in slots:
         for ids in conflict_groups:
@@ -112,7 +157,7 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
     status = solver.Solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return {'status': 'infeasible' if status == cp_model.INFEASIBLE else 'unknown',
-                'message': ('公共课锁定后无法满足学生课程连续及资源限制，需检查或协调重排行政课表' if student_contiguous_periods else '当前课位、教师、学生或教室条件无法同时满足') if status == cp_model.INFEASIBLE else '计算尚未找到可行方案，请调整配置或延长求解时间后重试',
+                'message': ('固定行政课后，走班与学生连续上课规则无法同时满足，请使用联合排课协调行政课；未定位到单项课时不足。' if student_contiguous_periods else '固定行政课后，走班的学生、教师或教室约束组合无解；未定位到单项课时不足，请使用联合排课协调，或检查教师禁排和共享教室。') if status == cp_model.INFEASIBLE else '计算超时，尚未找到可行方案；这不代表课时过多，请延长求解时间或使用联合排课重试。',
                 'lower_bound': lower_bound, 'bounds': bounds, 'total_class_periods': total}
     placements = []
     used_rooms = set()

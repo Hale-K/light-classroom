@@ -22,16 +22,15 @@ setup_logging()
 async def lifespan(app: FastAPI):
     # 启动
     logger.info(f"🚀 {settings.app_name} 启动中 (env={settings.app_env})")
-    if settings.app_env == "dev":
-        # 开发期自动建表；生产走 Alembic 迁移
-        await init_db()
-        # 同步权限点目录 + 内置角色与默认权限
-        from app.db.session import AsyncSessionLocal
-        from app.services.rbac import ensure_builtin_roles, ensure_menu_permissions
-        async with AsyncSessionLocal() as session:
-            await ensure_builtin_roles(session)
-            await ensure_menu_permissions(session)  # 菜单结构 + 菜单权限映射
-            await session.commit()
+    # 表结构以 app/models 为唯一真相，启动时自动创建（幂等）；全量结构参考 db/baseline_schema.sql
+    await init_db()
+    # 同步权限点目录 + 内置角色与默认权限（幂等）
+    from app.db.session import AsyncSessionLocal
+    from app.services.rbac import ensure_builtin_roles, ensure_menu_permissions
+    async with AsyncSessionLocal() as session:
+        await ensure_builtin_roles(session)
+        await ensure_menu_permissions(session)  # 菜单结构 + 菜单权限映射
+        await session.commit()
     try:
         from app.workers.scheduling.generate import recover_incomplete_jobs
 
@@ -41,7 +40,7 @@ async def lifespan(app: FastAPI):
                 f"已恢复 {recovered} 个排课任务"
             )
     except Exception as exc:
-        # 首次部署可能由 schema-init 随后建表；恢复失败不能阻止 API 提供服务。
+        # 表结构异常等情况下恢复失败不能阻止 API 提供服务。
         logger.bind(event="scheduling_recovery_unavailable").warning(f"排课任务恢复暂不可用: {exc}")
     yield
     # 关闭

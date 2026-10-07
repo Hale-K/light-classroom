@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     admin_password: str = "admin123"
     admin_name: str = "平台管理员"
 
+    # 启动时结构同步：模型中删除的列是否从数据库自动 DROP（True 跟随模型，False 保留数据列）
+    schema_sync_drop: bool = True
+
     # LLM（OpenAI 兼容协议，可配 DeepSeek/GLM/通义）
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""

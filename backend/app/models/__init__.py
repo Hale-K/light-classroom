@@ -8,9 +8,6 @@ from app.models.org import *  # noqa: F401,F403
 from app.models.facility import *  # noqa: F401,F403
 from app.models.exam import *  # noqa: F401,F403
 from app.models.gaokao import *  # noqa: F401,F403
-from app.models.analysis import *  # noqa: F401,F403
-from app.models.practice import *  # noqa: F401,F403
-from app.models.prediction import *  # noqa: F401,F403
 from app.models.audit import *  # noqa: F401,F403
 from app.models.transfer import *  # noqa: F401,F403
 from app.models.scheduling import *  # noqa: F401,F403

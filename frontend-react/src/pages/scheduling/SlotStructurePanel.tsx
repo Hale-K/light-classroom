@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Button, Modal, Radio, Select, Segmented, Slider, Space, Spin, Tag } from 'antd'
 import { SaveOutlined } from '@ant-design/icons'
 import type { Grade, SchedulingGridConfig } from '@/types'
 import { normalizeGridConfig, resolveEveningStartPeriod } from './scheduling-model'
+import { applySlotSelection, selectSlotRectangle, slotKey } from './slot-selection'
+import type { SelectableSlot, SlotPoint } from './slot-selection'
 import './slot-structure-sliders.css'
 
 interface Props {
@@ -21,10 +23,13 @@ interface Props {
 const DAYS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
 export default function SlotStructurePanel({ config, academicYear, term, gradeId, grades = [], configured, loading, saving, onGradeChange, onChange, onSave }: Props) {
-  const [editing, setEditing] = useState<{ day: number; period: number } | null>(null)
+  const [editing, setEditing] = useState<SelectableSlot[] | null>(null)
+  const [selected, setSelected] = useState<SelectableSlot[]>([])
+  const drag = useRef<{ start: SlotPoint; moved: boolean } | null>(null)
+  const suppressClick = useRef(false)
   const [slotMode, setSlotMode] = useState<'all' | 'odd' | 'even' | 'disabled'>('all')
   const [parity, setParity] = useState<'odd' | 'even'>('odd')
-  useEffect(() => { setEditing(null); setParity('odd') }, [gradeId, academicYear, term])
+  useEffect(() => { setEditing(null); setSelected([]); drag.current = null; setParity('odd') }, [gradeId, academicYear, term])
   const daily = Array.from({ length: 7 }, (_, i) => config.daily_periods[i] ?? 0)
   const odd = Array.from({ length: 7 }, (_, i) => config.evening_daily_periods_odd[i] ?? 0)
   const even = Array.from({ length: 7 }, (_, i) => config.evening_daily_periods_even[i] ?? 0)
@@ -32,6 +37,15 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
   const specialMax = Math.max(...odd, ...even, 0)
   const specialStart = resolveEveningStartPeriod(config)
   const rows = Math.max(formalMax, specialStart ? specialStart + specialMax - 1 : 0)
+  const cells: SelectableSlot[] = DAYS.flatMap((_, i) => Array.from({ length: rows }, (_, p) => p + 1).flatMap<SelectableSlot>(period =>
+    period <= daily[i] ? [{ day: i + 1, period, kind: 'daytime' as const }]
+      : specialStart !== null && period >= specialStart && period < specialStart + Math.max(odd[i], even[i])
+        ? [{ day: i + 1, period, kind: 'evening' as const }] : []))
+  const selectedKeys = new Set(selected.map(slotKey))
+  // A changed structure invalidates the selection; never apply stale cell types.
+  useEffect(() => { setSelected([]); setEditing(null); drag.current = null }, [
+    config.daily_periods.join(','), config.evening_daily_periods_odd.join(','), config.evening_daily_periods_even.join(','), specialStart,
+  ])
   const changeDay = (i: number, value: number) => {
     const next = [...daily]; next[i] = value
     const shift = Math.max(...next) - formalMax
@@ -59,15 +73,13 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
     const oddOn = slotType(day, period, 'odd') !== 'disabled'
     const evenOn = slotType(day, period, 'even') !== 'disabled'
     setSlotMode(oddOn && evenOn ? 'all' : oddOn ? 'odd' : evenOn ? 'even' : 'disabled')
-    setEditing({ day, period })
+    const selection = cells.filter(cell => cell.day === day && cell.period === period)
+    setSelected(selection)
+    setEditing(selection)
   }
   const applySlot = () => {
     if (!editing) return
-    const { day, period } = editing
-    const kind = period <= daily[day - 1] ? 'daytime' : 'evening'
-    const overrides = (config.slot_overrides ?? []).filter((slot) => slot.weekday !== day || slot.period !== period)
-    for (const leg of ['odd', 'even'] as const) overrides.push({ weekday: day, period, week_parity: leg, slot_type: slotMode === 'all' || slotMode === leg ? kind : 'disabled' })
-    onChange({ ...config, slot_overrides: overrides })
+    onChange({ ...config, slot_overrides: applySlotSelection(config.slot_overrides ?? [], editing, slotMode) })
     setEditing(null)
   }
   return <section className="slot-structure-panel slot-slider-panel">
@@ -92,12 +104,37 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
           <div className="slot-slider-total">{daily.filter(Boolean).length} 个教学日 · 每周 <strong>{daily.reduce((a, b) => a + b, 0)}</strong> 个正式课位</div>
         </section>
         <section className="slot-structure-section slot-slider-preview">
-          <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>一周课位预览</h3><p>拖动滑块批量设置，点击课位单独设置周次。</p></div>
+          <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>一周课位预览</h3><p>拖动框选，或点击星期 / 节次选择整列 / 整行；单击课位可单独编辑。</p></div>
             <Segmented aria-label="课位预览周次" value={parity} options={[{ label: '单周', value: 'odd' }, { label: '双周', value: 'even' }]} onChange={(value) => setParity(value as 'odd' | 'even')} />
           </div>
           <div className="slot-slider-legend"><span><i className="is-formal" />正式课位</span><span><i className="is-special" />晚自习</span><span>— 不启用</span><span>单 / 双 · 仅对应周次启用</span></div>
-          <div className="slot-slider-matrix-scroll"><table className="slot-slider-matrix"><thead><tr><th>节次</th>{DAYS.map((day) => <th key={day}>{day}</th>)}</tr></thead>
-            <tbody>{Array.from({ length: rows }, (_, i) => i + 1).map((period) => <tr key={period}><th>第 {period} 节</th>{DAYS.map((day, i) => {
+          <div className="slot-slider-selection-bar">
+            <span aria-live="polite">{selected.length ? `已选择 ${selected.length} 个课位` : '选择多个课位后，可统一设置'}</span>
+            <Space><Button size="small" disabled={saving || loading || !cells.length} onClick={() => setSelected(cells)}>全选课位</Button>
+              <Button size="small" disabled={!selected.length || saving || loading} onClick={() => setSelected([])}>清除选择</Button>
+              <Button size="small" type="primary" disabled={!selected.length || saving || loading} onClick={() => { setSlotMode('all'); setEditing(selected) }}>批量设置</Button></Space>
+          </div>
+          <div className="slot-slider-matrix-scroll"><table className="slot-slider-matrix"
+            onPointerMove={event => {
+              if (!drag.current) return
+              const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-slot-day]')
+              if (!target || !event.currentTarget.contains(target)) return
+              const end = { day: Number(target.dataset.slotDay), period: Number(target.dataset.slotPeriod) }
+              if (slotKey(end) !== slotKey(drag.current.start)) drag.current.moved = true
+              setSelected(selectSlotRectangle(cells, drag.current.start, end))
+            }}
+            onPointerUp={event => {
+              suppressClick.current = !!drag.current?.moved
+              const point = drag.current?.start
+              drag.current = null
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+              // Capture retargets clicks to the table, so open a single cell here.
+              if (point && !suppressClick.current) editSlot(point.day, point.period)
+            }}
+            onPointerCancel={() => { drag.current = null; suppressClick.current = true }}
+            onLostPointerCapture={() => { drag.current = null }}
+          ><thead><tr><th>节次</th>{DAYS.map((day, i) => <th key={day}><button type="button" aria-label={`选择${day}全部课位`} disabled={saving || loading || !cells.some(cell => cell.day === i + 1)} onClick={() => setSelected(cells.filter(cell => cell.day === i + 1))}>{day}</button></th>)}</tr></thead>
+            <tbody>{Array.from({ length: rows }, (_, i) => i + 1).map((period) => <tr key={period}><th><button type="button" aria-label={`选择第${period}节全部课位`} disabled={saving || loading || !cells.some(cell => cell.period === period)} onClick={() => setSelected(cells.filter(cell => cell.period === period))}>第 {period} 节</button></th>{DAYS.map((day, i) => {
               const kind = slotType(i + 1, period, parity)
               const formal = kind === 'daytime'
               const special = kind === 'evening'
@@ -105,8 +142,17 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
               const oddOn = slotType(i + 1, period, 'odd') !== 'disabled'
               const evenOn = slotType(i + 1, period, 'even') !== 'disabled'
               const badge = oddOn !== evenOn ? oddOn ? '单' : '双' : ''
-              return <td key={day}><button type="button" disabled={saving || loading || !editable} onClick={() => editSlot(i + 1, period)}
-                className={formal ? 'is-formal' : special ? 'is-special' : 'is-off'}
+              return <td key={day} data-slot-day={i + 1} data-slot-period={period}><button type="button" disabled={saving || loading || !editable}
+                onPointerDown={event => {
+                  if (event.button !== 0) return
+                  const start = { day: i + 1, period }
+                  drag.current = { start, moved: false }; suppressClick.current = false
+                  setSelected(selectSlotRectangle(cells, start, start))
+                  event.currentTarget.closest('table')?.setPointerCapture(event.pointerId)
+                }}
+                onClick={event => { if (event.detail === 0 && !saving && !loading) editSlot(i + 1, period) }}
+                aria-pressed={selectedKeys.has(slotKey({ day: i + 1, period }))}
+                className={`${formal ? 'is-formal' : special ? 'is-special' : 'is-off'}${selectedKeys.has(slotKey({ day: i + 1, period })) ? ' is-selected' : ''}`}
                 aria-label={`${parity === 'odd' ? '单周' : '双周'}${day}第${period}节${formal ? '正式课位' : special ? '晚自习' : '不启用'}`}>{formal ? '正式' : special ? '晚自习' : '—'}{badge && <small>{badge}</small>}</button></td>
             })}</tr>)}</tbody></table></div>
           {!rows && <p className="slot-slider-no-days">尚未启用任何课位，请拖动左侧滑块。</p>}
@@ -124,9 +170,9 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
         <div className="slot-slider-parity"><span>首周周次</span><Select aria-label="学期首周周次" value={config.first_week_parity} disabled={saving || loading} options={[{ value: 'odd', label: '单周' }, { value: 'even', label: '双周' }]} onChange={(value) => onChange({ ...config, first_week_parity: value })} /><span>正式与晚自习合计不超过每日 12 节。</span></div>
       </section>
     </Spin>
-    <Modal title={editing ? `${DAYS[editing.day - 1]} · 第 ${editing.period} 节${editing.period > formalMax ? ' · 晚自习' : ''}` : '课位设置'}
-      open={!!editing} onCancel={() => setEditing(null)} onOk={applySlot} okText="应用到预览" cancelText="取消">
-      <p>选择这个课位在哪些周次启用，保存课位结构后生效。</p>
+    <Modal title={editing?.length === 1 ? `${DAYS[editing[0].day - 1]} · 第 ${editing[0].period} 节${editing[0].kind === 'evening' ? ' · 晚自习' : ''}` : `批量设置 ${editing?.length ?? 0} 个课位`}
+      open={!!editing} onCancel={() => setEditing(null)} onOk={applySlot} okText="应用到预览" cancelText="取消" confirmLoading={saving} okButtonProps={{ disabled: loading || saving }}>
+      <p>统一设置选中课位的启用周次，正式课与晚自习类型保持不变。点击“保存课位结构”后生效。</p>
       <Radio.Group value={slotMode} onChange={(e) => setSlotMode(e.target.value)} options={[
         { label: '每周', value: 'all' }, { label: '仅单周', value: 'odd' }, { label: '仅双周', value: 'even' }, { label: '停用', value: 'disabled' },
       ]} />

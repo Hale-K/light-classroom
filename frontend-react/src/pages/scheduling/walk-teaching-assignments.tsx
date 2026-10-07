@@ -3,6 +3,7 @@ import { Alert, App, Button, Modal, Select, Space, Table, Tag } from 'antd'
 import { gaokaoApi, orgApi } from '@/api'
 import type { WalkTeachingClass } from '@/api'
 import type { Grade } from '@/types'
+import { filterWalkAssignments } from './walk-assignment-filter'
 
 export default function WalkTeachingAssignments({ academicYear, term, initialGradeId }: {
   academicYear: string; term: string; initialGradeId?: number
@@ -13,6 +14,8 @@ export default function WalkTeachingAssignments({ academicYear, term, initialGra
   const [classes, setClasses] = useState<WalkTeachingClass[]>([])
   const [teachers, setTeachers] = useState<Awaited<ReturnType<typeof gaokaoApi.teachingClassTeachers>>>([])
   const [subjectId, setSubjectId] = useState<number>()
+  const [filterTeacherId, setFilterTeacherId] = useState<number>()
+  const [page, setPage] = useState(1)
   const [selectedIds, setSelectedIds] = useState<React.Key[]>([])
   const [editing, setEditing] = useState<WalkTeachingClass[]>([])
   const [teacherId, setTeacherId] = useState<number>()
@@ -31,7 +34,7 @@ export default function WalkTeachingAssignments({ academicYear, term, initialGra
   useEffect(() => { if (initialGradeId) setGradeId(initialGradeId) }, [initialGradeId])
   useEffect(() => {
     let active = true
-    setClasses([]); setTeachers([]); setSelectedIds([]); setEditing([]); setError(''); setSubjectId(undefined)
+    setClasses([]); setTeachers([]); setSelectedIds([]); setEditing([]); setError(''); setSubjectId(undefined); setFilterTeacherId(undefined); setPage(1)
     if (!gradeId) return
     setLoading(true)
     Promise.all([gaokaoApi.teachingClasses({ grade_id: gradeId, academic_year: academicYear, term }),
@@ -57,6 +60,10 @@ export default function WalkTeachingAssignments({ academicYear, term, initialGra
     finally { setSaving(false) }
   }
   const teacher = teachers.find((item) => item.id === teacherId)
+  const visibleClasses = filterWalkAssignments(classes, subjectId, filterTeacherId)
+  const filterTeacherOptions = Array.from(new Map(classes.filter(item => item.teacher_id != null).map(item => [item.teacher_id!,
+    item.teacher_name || teachers.find(teacher => teacher.id === item.teacher_id)?.name || '已绑定（姓名不可用）'])),
+    ([value, label]) => ({ value, label })).sort((a, b) => a.label.localeCompare(b.label, 'zh-CN'))
   const addedHours = editing.reduce((total, item) => total + (item.teacher_id === teacherId ? 0 : item.weekly_periods), 0)
   return <section>
     <p>{academicYear} · 第 {term} 学期 · 教学班任教关系</p>
@@ -64,15 +71,18 @@ export default function WalkTeachingAssignments({ academicYear, term, initialGra
     {error && <Alert type="error" showIcon message={error} />}
     <Space wrap style={{ margin: '16px 0' }}>
       <Select aria-label="教学班任教年级" style={{ width: 180 }} value={gradeId} disabled={saving} onChange={setGradeId} options={grades.map((item) => ({ value: item.id, label: item.name }))} />
-      <Select aria-label="教学班任教学科" style={{ width: 150 }} value={subjectId} allowClear placeholder="全部科目" onChange={(value) => { setSubjectId(value); setSelectedIds([]) }}
+      <Select aria-label="教学班任教学科" style={{ width: 150 }} value={subjectId} allowClear disabled={loading || saving} placeholder="全部科目" onChange={(value) => { setSubjectId(value); setSelectedIds([]); setPage(1) }}
         options={Array.from(new Map(classes.map((item) => [item.subject_id, item.subject_name])), ([value, label]) => ({ value, label }))} />
+      <Select aria-label="教学班教师筛选" style={{ width: 180 }} value={filterTeacherId} allowClear showSearch optionFilterProp="label"
+        disabled={loading || saving} placeholder="全部教师" options={filterTeacherOptions} notFoundContent="没有匹配的教师"
+        onChange={(value) => { setFilterTeacherId(value); setSelectedIds([]); setPage(1) }} />
       <Button disabled={!selectedIds.length || loading || saving} onClick={() => edit(classes.filter((item) => selectedIds.includes(item.id)))}>批量安排教师</Button>
       <Button loading={loading} disabled={saving} onClick={() => setRevision((value) => value + 1)}>刷新</Button>
-      {!loading && !error && <span>共 {classes.length} 个班 · 已安排 {classes.filter((item) => item.teacher_id).length} 个 · 未安排 {classes.filter((item) => !item.teacher_id).length} 个</span>}
+      {!loading && !error && <span>{subjectId !== undefined || filterTeacherId !== undefined ? '筛选结果' : '共'} {visibleClasses.length} 个班 · 已安排 {visibleClasses.filter((item) => item.teacher_id).length} 个 · 未安排 {visibleClasses.filter((item) => !item.teacher_id).length} 个</span>}
     </Space>
-    <Table<WalkTeachingClass> rowKey="id" loading={loading} dataSource={classes.filter((item) => !subjectId || item.subject_id === subjectId)} scroll={{ x: 850 }}
+    <Table<WalkTeachingClass> rowKey="id" loading={loading} dataSource={visibleClasses} scroll={{ x: 850 }}
       rowSelection={{ selectedRowKeys: selectedIds, onChange: setSelectedIds, getCheckboxProps: () => ({ disabled: saving }) }}
-      pagination={{ pageSize: 10, showSizeChanger: false }} locale={{ emptyText: error ? '加载失败，请刷新' : '本年级本学期尚未生成教学班' }} columns={[
+      pagination={{ current: page, onChange: setPage, pageSize: 10, showSizeChanger: false }} locale={{ emptyText: error ? '加载失败，请刷新' : classes.length ? '没有符合筛选条件的教学班，请调整科目或教师筛选' : '本年级本学期尚未生成教学班' }} columns={[
         { title: '科目', dataIndex: 'subject_name' }, { title: '教学班', dataIndex: 'name' },
         { title: '人数', dataIndex: 'student_count' }, { title: '每周课时', dataIndex: 'weekly_periods' },
         { title: '任课教师', render: (_, item) => item.teacher_name || (item.teacher_id ? '已绑定（姓名不可用）' : '未安排') },

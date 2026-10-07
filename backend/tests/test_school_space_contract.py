@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from app.api.v1.facilities import CampusIn
 from app.api.v1.org import ClassIn, GradeIn
-from scripts.seed_campus_grade_classrooms import balanced_sizes
+from app.services.org.seed_utils import balanced_sizes
 
 
 def test_campus_accepts_planned_student_capacity():

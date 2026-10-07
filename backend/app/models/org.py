@@ -10,16 +10,19 @@ from sqlalchemy import JSON, UniqueConstraint
 
 from app.db.base import TimestampMixin, TenantMixin
 from app.models.enums import (
-    BaseUserRole, CheckInMethod, CheckInStatus, EnrollmentStatus, EveningParity,
+    BaseUserRole, CheckInStatus, EnrollmentStatus, EveningParity,
     Gender, SeatLayout, SeatRule, SeatStatus, StudentStatus, TenantType, UserStatus, WeekParity,
 )
 
 
 class Tenant(SQLModel, table=True):
     """租户 = 学校"""
-    __table_args__ = {"comment": "租户(学校)"}
+    __table_args__ = (
+        UniqueConstraint("code", name="uq_tenant_code"),
+        {"comment": "租户(学校)"},
+    )
     id: int | None = Field(default=None, primary_key=True)
-    code: str = Field(max_length=32, unique=True, index=True, description="学校代码(业务标识)")
+    code: str = Field(max_length=32, index=True, description="学校代码(业务标识)")
     name: str = Field(max_length=100, description="学校名称")
     type: TenantType = Field(default=TenantType.org)
     province: str = Field(default="全国通用", max_length=50, description="学校所在省份")
@@ -257,17 +260,6 @@ class CourseHourPlan(TenantMixin, SQLModel, table=True):
     )
 
 
-class KnowledgePoint(SQLModel, table=True):
-    """知识点（树形，九科×年级预置）"""
-    __table_args__ = {"comment": "知识点"}
-    id: int | None = Field(default=None, primary_key=True)
-    subject_id: int = Field(index=True)
-    grade_level: int = Field(default=0, description="对应年级层")
-    parent_id: int | None = Field(default=None, index=True, description="父节点：章节→小节")
-    name: str = Field(max_length=100)
-    code: str = Field(max_length=50, index=True, description="唯一编码")
-
-
 class EnrollmentBatch(TimestampMixin, TenantMixin, SQLModel, table=True):
     """新生导入批次（报名录入）"""
     __table_args__ = {"comment": "新生导入批次"}
@@ -279,18 +271,6 @@ class EnrollmentBatch(TimestampMixin, TenantMixin, SQLModel, table=True):
     fail_count: int = Field(default=0)
     errors: dict | None = Field(default=None, sa_type=JSON, description="错误明细(行号+原因)")
     status: EnrollmentStatus = Field(default=EnrollmentStatus.importing)
-    created_by: int | None = Field(default=None)
-
-
-class CheckinRecord(TimestampMixin, TenantMixin, SQLModel, table=True):
-    """报到记录（校门口扫码）"""
-    __table_args__ = {"comment": "报到记录"}
-    id: int | None = Field(default=None, primary_key=True)
-    student_id: int = Field(index=True)
-    batch: str | None = Field(default=None, max_length=50, description="报到批次/日期")
-    method: CheckInMethod = Field(default=CheckInMethod.scan)
-    verify_fields: dict | None = Field(default=None, sa_type=JSON, description="核验字段")
-    verified_at: datetime | None = Field(default=None)
     created_by: int | None = Field(default=None)
 
 

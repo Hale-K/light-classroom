@@ -1763,7 +1763,6 @@ export default function SchedulingView() {
                       }}
                       placeholder="全部班级"
                       style={{ width: 200 }}
-                      popupMatchSelectWidth={280}
                       options={resources.classes.map(classOption)}
                     />
                     <Input
@@ -1851,7 +1850,6 @@ export default function SchedulingView() {
                       placeholder="选择班级"
                       className="sk-schedule-class-select"
                       style={{ width: 200 }}
-                      popupMatchSelectWidth={260}
                       options={resources.classes.map(classOption)}
                     />
                     <Dropdown

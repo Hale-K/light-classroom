@@ -1,13 +1,11 @@
 # 智衡后端 部署环境编排（Deploy 面板使用；文件位于 docker/ 子目录，路径相对本文件）
 # 与开发版 docker-compose.yml 的区别：
 #   - 去掉 Kafka + Zookeeper（代码中尚无任何生产/消费者，纯占位基础设施，省 ~1.5G 内存）
-#   - migrate：启动 API 前自动执行 Alembic 迁移，补齐新增表和字段
-#   - schema-init：把 db/schema/*.sql 灌进 Postgres（可重复执行，含 ai_provider）
-#   - db-seed：首部署导入学校业务数据（默认注释）
+#   - 表结构由 API 启动时自动创建（以 app/models 为准，幂等；全量结构见 db/baseline_schema.sql）
+#   - 首部署导入演示数据：把 db/seed_tummi_data.sql 灌进 Postgres 即可
 #   - api 去掉 --reload 与源码挂载（用镜像内代码）
 #   - postgres/redis 不对宿主机暴露端口；RabbitMQ 管理台、MinIO 对外
 # 启动：docker compose -f docker/docker-compose.deploy.yml up -d --build
-# migrate 先补齐 Alembic 迁移；schema-init 在 api 健康后再灌 SQL，补齐服务商表/菜单
 name: light-classroom-api
 
 services:
@@ -24,15 +22,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-
-  migrate:
-    build:
-      context: ../backend
-    depends_on:
-      postgres: {condition: service_healthy}
-    env_file: ../backend/.env
-    command: alembic upgrade head
-    restart: "no"
 
   redis:
     image: redis:7-alpine
@@ -80,56 +69,12 @@ services:
       retries: 8
       start_period: 10s
 
-  # 等 API 把基础表建好后，再灌 db/schema（服务商表 + 菜单权限）
-  schema-init:
-    image: postgres:16-alpine
-    depends_on:
-      postgres: {condition: service_healthy}
-      api: {condition: service_healthy}
-    environment:
-      PGHOST: postgres
-      PGUSER: zhiheng
-      PGPASSWORD: zhiheng
-      PGDATABASE: zhiheng
-    volumes:
-      - ../db/schema:/schema:ro
-    command:
-      - bash
-      - -c
-      - |
-        set -e
-        for f in /schema/*.sql; do
-          echo "apply $$f"
-          psql -v ON_ERROR_STOP=1 -f "$$f"
-        done
-        echo "schema-init done"
-    restart: "no"
-
-  # 学校业务数据导入：有 db/nstmy_tumi.sql 后再打开
-  # db-seed:
-  #   image: postgres:16-alpine
-  #   depends_on:
-  #     schema-init: {condition: service_completed_successfully}
-  #   environment:
-  #     PGHOST: postgres
-  #     PGUSER: zhiheng
-  #     PGPASSWORD: zhiheng
-  #     PGDATABASE: zhiheng
-  #   volumes:
-  #     - ../db/nstmy_tumi.sql:/seed/nstmy_tumi.sql:ro
-  #   command: >
-  #     bash -c "psql -tAc \"SELECT count(*) FROM tenant WHERE code='nstmy'\" | grep -q 1
-  #     && echo 'nstmy 数据已存在，跳过导入'
-  #     || psql -v ON_ERROR_STOP=1 -f /seed/nstmy_tumi.sql"
-  #   restart: "no"
-
   api:
     build:
       context: ../backend
     mem_limit: 1280m
     depends_on:
       postgres: {condition: service_healthy}
-      migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
       minio: {condition: service_healthy}
@@ -151,7 +96,6 @@ services:
       context: ../backend
     depends_on:
       postgres: {condition: service_healthy}
-      migrate: {condition: service_completed_successfully}
       redis: {condition: service_healthy}
       rabbitmq: {condition: service_healthy}
     mem_limit: 1792m

@@ -106,6 +106,8 @@ class TeachingSubjectHourPlan(TimestampMixin, TenantMixin, SQLModel, table=True)
     academic_year: str = Field(max_length=20, index=True)
     term: str = Field(max_length=20)
     weekly_periods: int = Field(ge=1, le=12)
+    weekday_periods: int | None = Field(default=None, ge=0, le=12)
+    weekend_periods: int | None = Field(default=None, ge=0, le=12)
 
 
 class TeachingClass(TimestampMixin, TenantMixin, SQLModel, table=True):
@@ -125,6 +127,8 @@ class TeachingClass(TimestampMixin, TenantMixin, SQLModel, table=True):
     sequence: int = Field(default=1)
     capacity: int = Field(default=40)
     weekly_periods: int = Field(default=3)
+    weekday_periods: int | None = Field(default=None, ge=0, le=12)
+    weekend_periods: int | None = Field(default=None, ge=0, le=12)
     hour_plan_id: int | None = Field(default=None, foreign_key="teaching_subject_hour_plan.id",
                                      ondelete="SET NULL", index=True)
     hours_overridden: bool = Field(default=False, nullable=False,

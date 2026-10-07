@@ -13,6 +13,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { schedulingApi } from "@/api";
 import { conciseRuleMeaning } from "./rule-meaning";
+import { scopeOptionsForRule, type RuleScope } from './rule-scope-options';
 import { getConfiguredSlotOptions } from './scheduling-model';
 import { setAssistantContext, clearAssistantContext } from '@/assistant/context';
 import type {
@@ -23,7 +24,6 @@ import type {
   SchedulingRuleDefinition,
   SchedulingRuleGroup,
 } from "@/types";
-type RuleScope = "全局" | "课位" | "学科" | "教师" | "班级";
 type RuleCategory = "global" | "subject" | "teacher" | "class" | "evening";
 type RuleKind = "禁排" | "固定" | "偏好" | "连续" | "配对" | "课时";
 type RulePriority = "hard" | "soft";
@@ -1781,32 +1781,6 @@ const RULE_KIND_BY_ACTION: Record<string, RuleKind> = {
   白天单双周对课: "配对",
   互斥排课: "配对",
   保持相邻: "配对",
-};
-const RULE_SCOPE_OPTIONS_BY_FAMILY: Record<RuleFamily, RuleScope[]> = {
-  slot: ["全局", "课位", "学科", "教师", "班级"],
-  distribution: ["学科", "班级", "教师"],
-  teacher: ["教师"],
-  class: ["班级"],
-  combination: ["全局", "课位", "学科", "教师", "班级"],
-};
-
-/** 每日课时上限：可选教师，或按学科覆盖该学科全部任课教师。 */
-const scopeOptionsForRule = (
-  family: RuleFamily,
-  code: SchedulingRuleCode,
-): RuleScope[] => {
-    if (code === "student_gap_minimize" || code === "student_contiguous") return ["全局"];
-  if (code === "teacher_daily_limit" || code === "teacher_gap_free")
-    return ["教师", "学科"];
-  if (code === "slot_forbidden") return ["学科", "教师", "班级", "全局"];
-  if (code === "subject_allowed_slots") return ["学科"];
-  if (code === "slot_teacher_role_required") return ["全局"];
-  if (code === "teacher_period_minimum") return ["教师"];
-  if (code === "subject_consecutive" || code === "class_slot_pattern")
-    return ["学科"];
-  if (code === "teacher_consecutive") return ["教师"];
-  if (code === "subject_daytime_parity_pair") return ["学科"];
-  return RULE_SCOPE_OPTIONS_BY_FAMILY[family];
 };
 const WEEKDAY_ENUMS = WEEKDAY_OPTIONS.slice(0, 7);
 const weekdaySelections = (value: string) => {

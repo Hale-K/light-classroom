@@ -122,11 +122,153 @@ async def tenant_middleware(request, call_next):
     return response
 
 
+def _sync_schema(conn) -> None:
+    """启动时把实际表结构对齐到 app/models（同步上下文，经 run_sync 调用）。
+
+- 缺失的表整表创建
+- 已有表缺失的列 ADD COLUMN，类型变更 ALTER COLUMN TYPE，模型中已删除的列 DROP COLUMN
+- 缺失的索引 CREATE INDEX（pgvector HNSW 索引仅 PostgreSQL 创建）
+- 幂等：以 inspector 实测为准，重复启动无操作
+- PostgreSQL 枚举列先补建 ENUM 类型；所有变更打结构同步日志
+"""
+    from sqlalchemy import Enum as SaEnum, inspect
+    from sqlalchemy.schema import CreateColumn, CreateTable
+
+    dialect = conn.dialect
+    is_pg = dialect.name == "postgresql"
+    preparer = dialect.identifier_preparer
+    q = preparer.quote
+
+    if is_pg:
+        conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+        # 补建缺失的枚举类型（DO block 幂等；新表/新列的建表语句不负责 CREATE TYPE）
+        seen_enums: set[str] = set()
+        for table in SQLModel.metadata.sorted_tables:
+            for col in table.columns:
+                if not isinstance(col.type, SaEnum):
+                    continue
+                name = getattr(col.type, "name", None)
+                if not name or name in seen_enums:
+                    continue
+                seen_enums.add(name)
+                labels = ", ".join(f"'{v}'" for v in col.type.enums)
+                conn.execute(text(
+                    f"DO $enum$ BEGIN CREATE TYPE {q(name)} AS ENUM ({labels}); "
+                    f"EXCEPTION WHEN duplicate_object THEN NULL; END $enum$;"
+                ))
+
+    inspector = inspect(conn)
+    existing_tables = set(inspector.get_table_names())
+    created_tables: list[str] = []
+    added_columns: list[str] = []
+    dropped_columns: list[str] = []
+    altered_types: list[str] = []
+    created_indexes: list[str] = []
+
+    for table in SQLModel.metadata.sorted_tables:
+        if table.name not in existing_tables:
+            # CreateTable 编译仅生成 CREATE TABLE（枚举已由上方 DO block 保证存在）
+            conn.execute(text(str(CreateTable(table).compile(dialect=dialect))))
+            for idx in table.indexes:
+                ddl = _index_ddl(idx, dialect)
+                if ddl:
+                    conn.execute(text(ddl))
+            created_tables.append(table.name)
+            continue
+
+        db_cols = {c["name"]: c for c in inspector.get_columns(table.name)}
+        model_cols = {col.name: col for col in table.columns}
+
+        # 1) 新增列
+        for col in table.columns:
+            if col.name not in db_cols:
+                ddl = str(CreateColumn(col).compile(dialect=dialect))
+                conn.execute(text(f"ALTER TABLE {q(table.name)} ADD COLUMN {ddl}"))
+                added_columns.append(f"{table.name}.{col.name}")
+
+        # 2) 类型变更（仅 PostgreSQL；SQLite 不支持原地改类型）
+        if is_pg:
+            for col in table.columns:
+                info = db_cols.get(col.name)
+                if info is None:
+                    continue
+                try:
+                    db_type = str(info["type"].compile(dialect=dialect)).lower().replace(" ", "")
+                    model_type = str(col.type.compile(dialect=dialect)).lower().replace(" ", "")
+                except Exception:
+                    continue  # 无法编译比较的类型（如 VECTOR）跳过
+                # PG 中 FLOAT 即 double precision，属同一类型，避免每次启动空转 ALTER
+                db_type = db_type.replace("doubleprecision", "float")
+                if db_type and model_type and db_type != model_type:
+                    new_type = str(col.type.compile(dialect=dialect))
+                    conn.execute(text(
+                        f"ALTER TABLE {q(table.name)} ALTER COLUMN {q(col.name)} "
+                        f"TYPE {new_type} USING {q(col.name)}::text::{new_type}"
+                    ))
+                    altered_types.append(f"{table.name}.{col.name}: {db_type} -> {model_type}")
+
+        # 3) 删除模型中已移除的列（可经 SCHEMA_SYNC_DROP=false 关闭）
+        if settings.schema_sync_drop:
+            for name in list(db_cols):
+                if name not in model_cols:
+                    conn.execute(text(
+                        f"ALTER TABLE {q(table.name)} DROP COLUMN {q(name)} CASCADE"
+                    ))
+                    dropped_columns.append(f"{table.name}.{name}")
+
+        # 4) 缺失索引
+        try:
+            db_indexes = {i["name"] for i in inspector.get_indexes(table.name)}
+        except Exception:
+            db_indexes = set()
+        for idx in table.indexes:
+            if idx.name in db_indexes:
+                continue
+            ddl = _index_ddl(idx, dialect)
+            if ddl is None:
+                continue  # HNSW 等 dialect 专属索引在 SQLite 跳过
+            conn.execute(text(ddl))
+            created_indexes.append(idx.name)
+
+    if created_tables:
+        logger.info(f"[schema] 新建表: {', '.join(created_tables)}")
+    if added_columns:
+        logger.info(f"[schema] 新增列: {', '.join(added_columns)}")
+    if altered_types:
+        logger.info(f"[schema] 类型变更: {', '.join(altered_types)}")
+    if dropped_columns:
+        logger.warning(f"[schema] 已删除列: {', '.join(dropped_columns)}")
+    if created_indexes:
+        logger.info(f"[schema] 新建索引: {', '.join(created_indexes)}")
+    if not (created_tables or added_columns or altered_types or dropped_columns or created_indexes):
+        logger.info("[schema] 表结构已与模型一致")
+
+
+def _index_ddl(idx, dialect) -> str | None:
+    """编译建索引语句；带 dialect 专属参数（如 hnsw）在不支持的方言上返回 None。"""
+    using = idx.dialect_options["postgresql"]["using"]
+    if using and dialect.name != "postgresql":
+        return None
+    preparer = dialect.identifier_preparer
+    q = preparer.quote
+    cols = ", ".join(q(c.name) for c in idx.columns)
+    unique = "UNIQUE " if idx.unique else ""
+    if using:
+        ops = idx.dialect_options["postgresql"]["ops"] or {}
+        col_sql = ", ".join(
+            f"{q(c.name)} {ops[c.name]}" if c.name in ops else q(c.name) for c in idx.columns)
+        return f"CREATE {unique}INDEX IF NOT EXISTS {q(idx.name)} ON {q(idx.table.name)} USING {using} ({col_sql})"
+    return f"CREATE {unique}INDEX IF NOT EXISTS {q(idx.name)} ON {q(idx.table.name)} ({cols})"
+
+
 async def init_db() -> None:
-    """初始化数据库（建表 + 默认租户/平台超管种子，开发期用；生产走 Alembic 迁移）"""
+    """初始化数据库：建表 + 补列补索引（含 pgvector 扩展）+ 默认租户/平台超管/学科字典种子。
+
+表结构以 app/models 为唯一真相，启动时自动对齐：缺失的表整表创建；已有表缺失的列/索引
+自动补齐（ADD COLUMN / CREATE INDEX，幂等）。这样客户拉取新代码后重启即可完成升级，
+无需手工迁移。列删除与类型变更不做自动处理（避免数据丢失），仅记录告警日志。"""
     async with engine.begin() as conn:
-        await conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-        await conn.run_sync(SQLModel.metadata.create_all)
+        await conn.run_sync(_sync_schema)
 
     # 开发期种子：默认租户，保证 default_school_code 可解析（A3）
     from app.models.org import Subject, Tenant

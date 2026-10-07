@@ -1,4 +1,4 @@
-from scripts.seed_unassigned_campus_students import grade_population
+from app.services.org.seed_utils import grade_population
 
 
 def test_5000_students_are_balanced_across_three_grades():

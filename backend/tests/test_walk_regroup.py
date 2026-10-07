@@ -50,7 +50,7 @@ def _complete_calendar():
 
 
 def test_independent_audit_accepts_full_merged_timetable():
-    from scripts.preview_walk_regroup import audit_draft
+    from app.services.scheduling.walk_regroup_calendar import audit_draft
     draft, calendar = _complete_calendar()
     report, placements = audit_draft(draft, calendar, {1: {10, 20}}, {1: 100},
         [{'id': 4, 'weekly_periods': 34}], [{'id': 1, 'capacity': 45}], set())
@@ -73,7 +73,7 @@ def test_calendar_reads_required_periods_and_walk_hours_from_configuration():
 
 @pytest.mark.parametrize('corruption', ['student_choice', 'teacher', 'external_teacher', 'hours', 'room'])
 def test_independent_audit_rejects_corrupted_candidate(corruption):
-    from scripts.preview_walk_regroup import audit_draft
+    from app.services.scheduling.walk_regroup_calendar import audit_draft
     draft, calendar = _complete_calendar()
     external = set()
     rooms = [{'id': 1, 'capacity': 45}]

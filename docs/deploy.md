@@ -49,7 +49,7 @@
 
 | 变量 | 要求 |
 |------|------|
-| `APP_ENV` | `prod`。仅 `dev` 会在启动时 `init_db` 自动建表；生产必须走 Alembic |
+| `APP_ENV` | `prod`。所有环境启动时都会 `init_db` 自动建表与同步结构（幂等） |
 | `APP_DEBUG` | `false` |
 | `JWT_SECRET_KEY` | 足够长的随机串，禁止沿用 example |
 | `ADMIN_PASSWORD` | 改掉代码默认 `admin123`（`app/core/config.py`） |
@@ -77,8 +77,8 @@ pnpm build
 
 1. **CORS 全开**：`backend/app/main.py` 里 `allow_origins=["*"]` 且 `allow_credentials=True`。生产改为具体前端域名。
 2. **Dockerfile 是开发镜像**：`pip install -e ".[dev]"`、`CMD` 带 `--reload`。生产应多阶段构建、只装运行依赖、无 reload、非 root。
-3. **`ortools` 未写入 `pyproject.toml`**，但排课 CP-SAT 依赖它。镜像/服务器必须显式安装 `ortools`，否则 Worker 一排课就崩。
-4. **生产不要自动建表**：`APP_ENV=prod` 后执行 `alembic upgrade head`（在 `backend/`，`alembic.ini` 的 `script_location=migrations`）。
+3. ~~`ortools` 未写入 `pyproject.toml`~~（已声明在依赖中，此条已解决）。
+4. **建表策略**：表结构以 `backend/app/models` 为唯一真相，API 启动时自动创建（幂等，全环境生效）；全量结构参考 `db/baseline_schema.sql`。不再使用迁移工具。
 5. **默认超管口令、MinIO 示例账号、Grafana `admin123`** 全部更换；`/docs` 是否对公网开放要单独决定。
 6. **compose 里 Kafka advertised 是 `localhost`**，容器互访会有问题。若本期排课/文件中心不依赖 Kafka，生产可先不部署 Kafka。
 7. **限流**是进程内内存窗口（`RATE_LIMIT_*`）。多副本 API 时各算各的，报到高峰按需调大或改为 Redis。
@@ -100,24 +100,11 @@ pnpm build
 - **Nginx**：静态资源 + `/api/v1` 反代；SSE / 长请求关闭缓冲，例如 `proxy_buffering off;`、`X-Accel-Buffering: no`（开发代理已按此处理）。
 - **监控（可选）**：`monitoring/docker-compose.yml`。把 `prometheus.yml` 里的 `host.docker.internal:8001` 改成生产 API 地址；改 Grafana 密码。
 
-数据库：当前 Docker 部署用 `docker/docker-compose.deploy.yml`。`migrate` 服务在 API 和 Worker 之前执行 `alembic upgrade head`；已执行的迁移会自动跳过，迁移失败则阻止应用启动。随后 `schema-init` 再灌 `db/schema/*.sql`。API 使用 `APP_ENV=prod`，启动不再 `create_all`。
+数据库：Docker 部署用 `docker/docker-compose.deploy.yml`，编排只含基础设施（PostgreSQL/Redis/RabbitMQ/MinIO）与应用容器；表结构与基础种子（超管、内置角色、菜单、学科字典）由 API 容器启动时自动创建（幂等）。导入演示数据：`docker compose -f docker/docker-compose.deploy.yml exec -T postgres psql -U zhiheng -d zhiheng < db/seed_tummi_data.sql`。
 
-学生端选科功能依赖 `studentcredential` 表。发布包含学生端功能的版本时，不要手工建表，只需让发布流程完成 `alembic upgrade head`；当前迁移会自动创建学生登录凭证表及租户范围内的唯一约束。迁移成功后，再启动 API 和 Worker。
+本机不经过 Compose 时：配置 `backend/.env` 后直接启动 `uvicorn app.main:app`，建表与种子同样自动完成。
 
-本机不经过 Compose 时：
-
-```bash
-cd backend
-alembic upgrade head
-```
-
-或：
-
-```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema/ai_provider.sql
-```
-
-内置角色与菜单权限：开发环境在 `lifespan` 里自动 `ensure_builtin_roles` / `ensure_menu_permissions`。生产由 `migrate` 容器在 Alembic 之后执行 `python -m app.bootstrap_deploy`。
+内置角色与菜单权限：所有环境都在 `lifespan` 启动时自动 `ensure_builtin_roles` / `ensure_menu_permissions`（幂等）。
 
 ## 6. 上线当天检查清单
 
@@ -127,7 +114,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema/ai_provider.sql
 - [ ] `APP_ENV=prod`，`APP_DEBUG=false`
 - [ ] CORS 白名单 = 实际前端 origin
 - [ ] `ortools` 已装进 Worker 镜像
-- [ ] `alembic upgrade head` 成功；抽查关键表存在
+- [ ] API 启动无建表报错；抽查关键表存在
 - [ ] RBAC 目录 / 超管账号可登录
 - [ ] MinIO/COS 桶可写，下载 URL 浏览器能打开
 - [ ] RabbitMQ 队列 `scheduling`、`academic` 有消费者
@@ -148,7 +135,7 @@ psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f db/schema/ai_provider.sql
 
 - **前端**：切回上一版 `dist` 或 CDN 目录。
 - **API / Worker**：部署上一版镜像；**先停 Worker 再切 API**，避免新任务打到旧代码或相反。
-- **数据库**：Alembic 迁移没有统一「一键 downgrade」保证。上线前记下 `alembic current`；有破坏性迁移时准备好备份恢复，而不是盲目 `downgrade`。
+- **数据库**：上线前做好 `pg_dump` 备份；有破坏性变更时用备份恢复，而不是手工改表。
 - **对象存储**：不要清桶；回滚应用即可。
 
 触发回滚的经验阈值：登录失败、排课任务全部立刻失败、5xx 相对基线翻倍、出现数据串租户。
@@ -185,7 +172,7 @@ pnpm dev
 ## 9. 建议的发布顺序
 
 1. 基础设施（库、Redis、MQ、对象存储）+ 备份  
-2. `migrate` 自动执行迁移 + RBAC 种子
+2. API 启动自动建表 + RBAC 种子（日志确认无错误）
 3. Worker（先起来，避免 API 入队无人消费）  
 4. API + 探活  
 5. 前端静态资源  

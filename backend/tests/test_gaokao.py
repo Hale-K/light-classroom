@@ -145,7 +145,7 @@ def test_unknown_subject_choice_strategy_is_rejected():
 
 @pytest.mark.asyncio
 async def test_subject_hours_update_preserves_classes_and_clears_only_their_schedules():
-    teaching_class = SimpleNamespace(id=41, weekly_periods=3)
+    teaching_class = SimpleNamespace(id=41, weekly_periods=3, weekday_periods=3, weekend_periods=0)
     classes_result = MagicMock()
     classes_result.scalars.return_value.all.return_value = [teaching_class]
     delete_result = SimpleNamespace(rowcount=2)

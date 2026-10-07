@@ -1,5 +1,5 @@
 import pytest
-from app.services.scheduling.walk_regroup_save import partition_candidates, coordinated_rules, fingerprint
+from app.services.scheduling.walk_regroup_save import partition_candidates, fingerprint
 from app.services.scheduling.rules import RuleDefinition, RuleTarget, RuleGroupDocument
 
 
@@ -16,28 +16,45 @@ def test_fingerprint_detects_changes_and_is_order_independent():
     assert fingerprint({'a': 1}) != fingerprint({'a': 2})
 
 
-def test_new_rules_reserve_exact_per_class_slots_without_admin_prefix():
+def test_joint_scheduling_keeps_user_rules_without_generating_coordination_rules():
+    from app.services.scheduling.walk_regroup_save import user_rule_group
     group = RuleGroupDocument(id='g', name='rules', academic_year='2026-2027', term='2', grade_id=12,
         rules=[RuleDefinition(id='student-gap-minimize', title='old', code='class_gap_free',
             schedule_scope='admin', priority='hard', target=RuleTarget(type='global'))])
-    candidate = {'a_groups': {101: 0}, 'b_groups': {101: 1}, 'weekdays': [1, 2], 'periods': [1, 2, 3],
-        'calendar': {'phase_slots': {"('A', 0)": [[1, 2]], "('B', 1)": [[2, 1]]}}}
-    rules = coordinated_rules(group, candidate, {101: '一班'})
-    assert not next(r for r in rules if r.id == 'student-gap-minimize').enabled
-    reserved = [r for r in rules if r.id.startswith('regroup-reserve-')]
-    assert {(r.target.ids[0], r.weekdays[0], p) for r in reserved for p in r.periods} == {
-        (101, 1, 2), (101, 2, 1)}
-    full = next(r for r in rules if r.code == 'student_contiguous' and r.enabled)
-    assert full.params == {}
-    assert full.periods == [1, 2, 3]
+    original = group.model_dump()
+    assert user_rule_group(group).model_dump() == original
+    assert group.model_dump() == original
 
 
 def test_unreviewed_enabled_rules_fail_closed():
+    from app.services.scheduling.walk_regroup_save import check_supported_user_rules
     group = RuleGroupDocument(id='g', name='rules', academic_year='2026-2027', term='2', grade_id=12,
         rules=[RuleDefinition(id='custom', title='custom', code='teacher_daily_limit',
             priority='hard', target=RuleTarget(type='global'), params={'max_per_day': 1})])
     with pytest.raises(ValueError, match='custom'):
-        coordinated_rules(group, {}, {})
+        check_supported_user_rules(group)
+
+
+def test_cleanup_removes_only_known_generated_rules_in_requested_scope():
+    from app.services.scheduling.walk_regroup_save import clean_generated_rule_catalog
+    value = {'2026-2027:2': {'id': 'g', 'grade_id': 12, 'active_id': 'g',
+        'rules': [{'id': 'regroup-reserve-101-1'}], 'groups': [
+        {'id': 'g', 'grade_id': 12, 'rules': [
+            {'id': 'R01'}, {'id': 'regroup-reserve-101-1'},
+            {'id': 'regroup-daytime-range'}, {'id': 'regroup-student-contiguous'},
+            {'id': 'regroup-custom'}, {'id': 'student-gap-minimize', 'enabled': False}]},
+        {'id': 'other', 'grade_id': 13, 'rules': [{'id': 'regroup-reserve-201-1'}]}]},
+        '2026-2027:1': {'groups': [{'id': 'g', 'grade_id': 12,
+                                  'rules': [{'id': 'regroup-reserve-101-1'}]}]}}
+    original = fingerprint(value)
+    cleaned, count = clean_generated_rule_catalog(value, '2026-2027', '2', 12)
+    assert count == 3
+    assert [r['id'] for r in cleaned['2026-2027:2']['groups'][0]['rules']] == [
+        'R01', 'regroup-custom', 'student-gap-minimize']
+    assert cleaned['2026-2027:2']['groups'][1] == value['2026-2027:2']['groups'][1]
+    assert cleaned['2026-2027:1'] == value['2026-2027:1']
+    assert cleaned['2026-2027:2']['rules'] == cleaned['2026-2027:2']['groups'][0]['rules']
+    assert fingerprint(value) == original
 
 
 @pytest.mark.parametrize('change', ['token', 'scope', 'stale', 'expired'])
@@ -96,6 +113,9 @@ async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students
             db.add(Schedule(tenant_id=tenant, class_id=101, subject_id=25, academic_year='2026-2027',
                 term=term, weekday=1, period=1))
         db.commit()
+        catalog = {'2026-2027:2': {'groups': [{'id': 'g', 'rules': [{'id': 'R01'}]}]}}
+        db.add(TenantConfig(tenant_id=7, config_key='scheduling_rule_group', config_value=catalog))
+        db.commit()
         class Adapter:
             async def execute(self, stmt): return db.execute(stmt)
             async def get(self, model, key): return db.get(model, key)
@@ -121,6 +141,9 @@ async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students
         assert sorted((r.tenant_id, r.term, r.period) for r in db.execute(select(Schedule)).scalars()) == [
             (7, '1', 1), (7, '2', 2), (8, '2', 1)]
         keys = [r.config_key for r in db.execute(select(TenantConfig)).scalars()]
+        stored = db.execute(select(TenantConfig).where(
+            TenantConfig.config_key == 'scheduling_rule_group')).scalar_one()
+        assert stored.config_value == catalog
         assert not any('snapshot' in k or 'backup' in k or 'history' in k for k in keys)
         # An exception before commit can restore the complete original transaction state.
         await persist_candidate(body, candidate, Adapter(), 7, 100)

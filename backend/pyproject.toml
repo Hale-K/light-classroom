@@ -32,7 +32,6 @@ dependencies = [
     # 监控埋点（Prometheus /metrics）
     "prometheus-fastapi-instrumentator>=7.0.0",
     # 数据库迁移
-    "alembic>=1.13.0",
     # LLM 客户端（OpenAI 兼容协议，可配 DeepSeek/GLM/通义）
     "openai>=1.12.0",
     # PDF 渲染

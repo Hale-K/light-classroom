@@ -1,0 +1,50 @@
+.walk-hours { padding-top: 12px; }
+.walk-hours .sk-hours-intro { align-items: center; padding: 0 0 20px; }
+.walk-hours .sk-hours-intro h2 { margin: 0 0 4px; font-size: 22px; color: var(--text-1); }
+.walk-hours .sk-hours-intro p { color: var(--text-3); font-size: 13px; }
+.walk-hours-grade { width: 240px; }
+.walk-hours-meta { display: flex; flex-wrap: wrap; gap: 24px; align-items: center; padding: 0 0 16px; color: var(--text-2); font-size: 13px; }
+.walk-hours-meta strong { color: var(--text-1); font-size: 16px; margin-right: 4px; font-variant-numeric: tabular-nums; }
+.walk-hours-term { margin-left: auto; color: var(--text-3); }
+.walk-hours-table-wrap { overflow: hidden; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.walk-hours-table-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--border); }
+.walk-hours-table-heading h3 { margin: 0; font-size: 15px; color: var(--text-1); }
+.walk-hours-table-heading > span { font-size: 12px; color: var(--text-3); }
+.walk-hours-table-wrap .ant-table-thead > tr > th { font-size: 13px; font-weight: 500; color: var(--text-2); }
+.walk-hours-table-wrap .ant-table-tbody > tr > td { padding-top: 20px; padding-bottom: 20px; }
+.walk-hours-table-wrap .ant-table-tbody > tr:last-child > td { border-bottom: 0; }
+.walk-hours-number, .walk-hours-total-number { font-size: 17px; font-variant-numeric: tabular-nums; }
+.walk-hours-total-number { color: var(--blue-ink); }
+.walk-hours-muted { color: var(--text-3); font-size: 13px; }
+.walk-hours-footnote { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; margin-top: 12px; font-size: 12px; color: var(--text-3); }
+.walk-hours-modal .ant-modal-title { font-size: 20px; }
+.walk-hours-modal .ant-modal-content { padding: 28px; }
+.walk-hours-modal .ant-modal-footer { margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--border); }
+.walk-hours-modal-context { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; margin: 12px 0 24px; font-size: 13px; color: var(--text-3); }
+.walk-hours-modal-context strong { color: var(--blue-ink); font-size: 14px; }
+.walk-hours-legacy { margin: -12px 0 20px; font-size: 12px; color: var(--text-3); }
+.walk-hours-input-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.walk-hours-input-group { padding: 16px 16px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
+.walk-hours-input-group .ant-form-item { margin-bottom: 0; }
+.walk-hours-input-group .ant-form-item-label > label { font-weight: 600; }
+.walk-hours-input-group .ant-input-number,
+.walk-hours-input-group .ant-input-number-affix-wrapper { width: 100%; }
+.walk-hours-input-group .ant-input-number-input { font-size: 20px; font-variant-numeric: tabular-nums; }
+.walk-hours-input-group .ant-form-item-extra { padding-top: 8px; font-size: 12px; color: var(--text-3); }
+.walk-hours-total { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; margin: 20px 0 12px; border-radius: 8px; background: var(--surface-2); color: var(--text-2); }
+.walk-hours-total small { display: block; margin-top: 4px; font-size: 12px; color: var(--text-3); }
+.walk-hours-total strong { font-size: 32px; line-height: 1; color: var(--blue-ink); font-variant-numeric: tabular-nums; }
+.walk-hours-total-unit { margin-left: 8px; font-size: 12px; color: var(--text-3); }
+.walk-hours-save-note { margin: 0; font-size: 12px; line-height: 1.6; color: var(--text-3); }
+@media (max-width: 767px) {
+  .walk-hours .sk-hours-intro { align-items: stretch; flex-direction: column; }
+  .walk-hours-toolbar { width: 100%; }
+  .walk-hours-grade { width: 100%; min-width: 180px; }
+  .walk-hours-term { margin-left: 0; width: 100%; }
+  .walk-hours-table-heading { padding: 12px 16px; }
+}
+@media (max-width: 479px) {
+  .walk-hours-modal .ant-modal-content { padding: 20px; }
+  .walk-hours-input-grid { grid-template-columns: 1fr; }
+  .walk-hours-modal-context { flex-direction: column; }
+}

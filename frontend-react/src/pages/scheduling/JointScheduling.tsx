@@ -61,22 +61,24 @@ export default function JointScheduling({ gradeId, gradeName, academicYear, term
         <Space wrap>
           <label>教学班人数上限 <InputNumber aria-label="教学班人数上限" min={1} max={100} precision={0} value={capacity}
             disabled={!!busy} onChange={v => { setCapacity(v ?? 45); invalidate() }} /></label>
-          <label>每天从第1节排到 <InputNumber aria-label="每天最后一节" min={1} max={9} precision={0} value={lastPeriod}
+          <label>每天至少从第1节排到 <InputNumber aria-label="每天最低排满节次" min={1} max={12} precision={0} value={lastPeriod}
             disabled={!!busy} onChange={v => { setLastPeriod(v ?? 7); invalidate() }} /> 节</label>
         </Space>
         <Select aria-label="排课星期" mode="multiple" value={weekdays} disabled={!!busy} className="w-full"
           options={['周一', '周二', '周三', '周四', '周五', '周六'].map((label, i) => ({ value: i + 1, label }))}
           onChange={v => { setWeekdays(v.sort((a, b) => a - b)); invalidate() }} />
+        <Alert type="info" showIcon message={`所选日期第1–${lastPeriod}节必须有实际课程；多出的课时可排到基础课位中开放的其他白天节次。`}
+          description="这里设置最低排满范围，不要求周总课时刚好等于该范围，也不会创建或修改规则。课时上限按保存的课位配置计算。" />
         {busy === 'preview' && <Alert type="info" showIcon message="正在联合计算分组与课表，请稍候…" />}
         {error && <Alert type="error" showIcon message={error} />}
         {preview && <>
           <Alert type="success" showIcon message="预览通过 · 尚未保存"
-            description={`${preview.student_count}名学生 · ${preview.class_count}个教学班；所选节次全部有课，冲突、课时和新规则校验通过。`} />
+            description={`${preview.student_count}名学生 · ${preview.class_count}个教学班；所选节次全部有课，冲突、课时和用户规则校验通过。`} />
           <Table size="small" rowKey="id" dataSource={preview.classes} pagination={{ pageSize: 8, showSizeChanger: false }}
             columns={[{ title: '科目', dataIndex: 'subject_name' }, { title: '人数', dataIndex: 'student_count' },
               { title: '班额上限', dataIndex: 'capacity' }]} />
           <Checkbox checked={confirmed} disabled={!!busy} onChange={e => setConfirmed(e.target.checked)}>
-            替换本年级、本学期的教学班、课表及走班协调规则，不备份旧数据。
+            替换本年级、本学期的教学班和课表，不修改用户规则，不备份旧数据。
           </Checkbox>
         </>}
       </Space>

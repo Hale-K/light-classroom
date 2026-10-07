@@ -1,0 +1,29 @@
+.admin-hours-modal .sk-evening-hours-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.admin-hours-modal .sk-hours-section {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 20px 0 12px;
+  padding: 0;
+  border: 0;
+  font-size: 14px;
+  font-weight: 600;
+}
+.admin-hours-modal .sk-hours-section-hint {
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+.admin-hours-capacity { color: var(--text-3); font-size: 12px; }
+.admin-hours-modal .sk-hours-cap-warn { color: var(--danger); }
+.admin-hours-modal .sk-hours-evening-parity-hint { font-size: 12px; }
+.admin-hours .ant-table-pagination { margin-right: 16px; }
+@media (max-width: 479px) {
+  .admin-hours-modal .sk-evening-hours-fields { grid-template-columns: 1fr; gap: 0; }
+  .admin-hours-modal .sk-hours-section { align-items: flex-start; }
+}

@@ -1,19 +1,19 @@
-"""Coordinated regrouping: explicit rules, scope-bound previews, atomic replacement.
+"""Joint scheduling reads user rules; only groups and timetables are replaced.
 
 No old-data snapshots are created. Student records and choices are never updated.
 """
 from collections import Counter, defaultdict
+from copy import deepcopy
 import hashlib
 import json
 import math
 import random
+import re
 import time
 from uuid import uuid4
 
 from fastapi import HTTPException
 from sqlalchemy import delete, select, or_
-
-from app.services.scheduling.rules import RuleDefinition, RuleTarget
 
 
 def fingerprint(value):
@@ -49,37 +49,41 @@ def partition_candidates(counts, subjects, capacity, attempts=12):
         yield (*partitions, {i: subjects[(i + attempt) % len(subjects)] for i in range(group_count)})
 
 
-def coordinated_rules(group, candidate, names):
-    """Keep subject allowlists; replace only known legacy coordination rules."""
-    legacy_ids = {'student-gap-minimize', 'walk-contiguous-hard',
-                  *(f'walk-coordinated-{i}' for i in range(1, 6))}
-    unknown = [r.id for r in group.rules if r.enabled and r.code != 'subject_allowed_slots'
-               and r.id not in legacy_ids and not r.id.startswith('regroup-')]
+def is_generated_coordination_rule(rule_id):
+    """Recognize only IDs emitted by the retired joint-rule writer."""
+    return rule_id in {'regroup-daytime-range', 'regroup-student-contiguous'} or bool(
+        re.fullmatch(r'regroup-reserve-[1-9]\d*-[1-7]', rule_id))
+
+
+def user_rule_group(group):
+    if group is None:
+        return None
+    return group.model_copy(deep=True, update={'rules': [r.model_copy(deep=True)
+        for r in group.rules if not is_generated_coordination_rule(r.id)]})
+
+
+def clean_generated_rule_catalog(value, academic_year, term, grade_id):
+    """Explicit one-time cleanup; never called by preview or save."""
+    cleaned, count = deepcopy(value), 0
+    entry = cleaned.get(f'{academic_year}:{term}', {})
+    groups = entry.get('groups', [entry])
+    for group in groups:
+        if group.get('grade_id') != grade_id:
+            continue
+        rules = group.get('rules', [])
+        kept = [r for r in rules if not is_generated_coordination_rule(r.get('id', ''))]
+        count += len(rules) - len(kept)
+        group['rules'] = kept
+        # Multi-group catalogs also carry a flattened copy of the active group.
+        if entry is not group and entry.get('id') == group.get('id'):
+            entry['rules'] = deepcopy(kept)
+    return cleaned, count
+
+
+def check_supported_user_rules(group):
+    unknown = [r.id for r in group.rules if r.enabled and r.code != 'subject_allowed_slots'] if group else []
     if unknown:
         raise ValueError('联合排课暂不支持这些规则，请先检查：' + '、'.join(unknown))
-    rules = [r.model_copy(update={'enabled': False}) if r.id in legacy_ids else r.model_copy(deep=True)
-             for r in group.rules if not r.id.startswith('regroup-')]
-    for cid, name in sorted(names.items()):
-        windows = defaultdict(set)
-        for label in ('A', 'B'):
-            groups = candidate[f'{label.lower()}_groups']
-            index = groups.get(cid, groups.get(str(cid)))
-            for day, period in candidate['calendar']['phase_slots'][str((label, index))]:
-                windows[day].add(period)
-        for day, periods in sorted(windows.items()):
-            rules.append(RuleDefinition(id=f'regroup-reserve-{cid}-{day}',
-                title=f'{name}走班预留：周{day}第' + '、'.join(map(str, sorted(periods))) + '节',
-                code='slot_forbidden', priority='hard', schedule_scope='admin',
-                target=RuleTarget(type='class', ids=[cid]), weekdays=[day], periods=sorted(periods)))
-    outside = sorted(set(range(1, 10)) - set(candidate['periods']))
-    if outside:
-        rules.append(RuleDefinition(id='regroup-daytime-range', title='所选节次外不排白天课',
-            code='slot_forbidden', priority='hard', target=RuleTarget(type='global'),
-            weekdays=candidate['weekdays'], periods=outside))
-    rules.append(RuleDefinition(id='regroup-student-contiguous', title='行政课＋走班连续（末尾可空）',
-        code='student_contiguous', priority='hard', schedule_scope='walk',
-        target=RuleTarget(type='global'), weekdays=candidate['weekdays'], periods=candidate['periods']))
-    return rules
 
 
 def validate_preview(cached, token, scope, current_fingerprint, now):
@@ -99,7 +103,7 @@ async def source_fingerprint(session, tenant_id, lock=False):
     from app.models.gaokao import (StudentSubjectChoice, TeachingClass, TeachingClassStudent,
         TeachingClassSchedule, TeachingSubjectHourPlan, WalkSchedulingPlan, GaokaoScheme)
     from app.models.facility import Room, Building, ResourceAllocationRule, RoomCohortAllocation
-    state = {'roster_version': 'semester-membership-v1'}
+    state = {'roster_version': 'semester-membership-v1', 'joint_workflow_version': 'minimum-range-v3'}
     for model in (Grade, Class, Student, StudentGradeMembership, StudentClassMembership, StudentSubjectChoice,
                   TeachingAssignment, CourseHourPlan, Schedule, TeachingClass, TeachingClassStudent,
                   TeachingClassSchedule, TeachingSubjectHourPlan, WalkSchedulingPlan, GaokaoScheme,
@@ -117,6 +121,8 @@ async def source_fingerprint(session, tenant_id, lock=False):
 
 
 def validate_candidate_rules(group, candidate, admins):
+    if group is None:
+        return
     from app.services.scheduling.core import ScheduleItem
     from app.services.scheduling.rules import evaluate_rule_group
     public = [ScheduleItem(assignment_id=r['id'], class_id=r['class_id'],
@@ -150,7 +156,7 @@ async def preview_plan(body, session, tenant_id):
     import asyncio
     from app.api.v1.gaokao import (_regroup_roster, WalkRegroupPreviewIn, _preview_regroup_calendar)
     from app.api.v1.scheduling import _load_rule_group, _load_grid_config
-    from app.models.org import Class, Subject, User, TenantConfig
+    from app.models.org import Subject, User, TenantConfig
     from app.models.enums import BaseUserRole, UserStatus
     from app.services.scheduling.grid_slots import allowed_slots
     from app.services.scheduling.walk_regroup import regroup_walk_students
@@ -161,14 +167,11 @@ async def preview_plan(body, session, tenant_id):
     if not grid['configured'] or not {(d, p) for d in body.weekdays for p in body.periods}.issubset(
             daytime['odd'] & daytime['even']):
         raise HTTPException(status_code=422, detail='所选节次不在已保存的基础课位中')
-    names = dict((await session.execute(select(Class.id, Class.name).where(
-        Class.tenant_id == tenant_id, Class.id.in_(set(admins.values()))))).all())
-    group = await _load_rule_group(session, tenant_id, body.academic_year, body.term, grade_id=body.grade_id)
-    if not group:
-        raise HTTPException(status_code=422, detail='请先保存当前年级的规则组')
+    group = user_rule_group(await _load_rule_group(
+        session, tenant_id, body.academic_year, body.term, grade_id=body.grade_id))
     # Refuse unreviewed rules before spending time solving.
     try:
-        coordinated_rules(group, {'periods': body.periods, 'weekdays': body.weekdays}, {})
+        check_supported_user_rules(group)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     candidate = None
@@ -184,9 +187,7 @@ async def preview_plan(body, session, tenant_id):
         if not calendar.get('schedule_validated'):
             continue
         candidate = {**draft, **calendar, **config.model_dump(), 'admin_by_student': admins}
-        proposed = group.model_copy(update={'rules': coordinated_rules(group, candidate, names)})
-        validate_candidate_rules(proposed, candidate, admins)
-        candidate['rules'] = proposed.model_dump(mode='json')
+        validate_candidate_rules(group, candidate, admins)
         break
     if candidate is None:
         raise HTTPException(status_code=422, detail='当前班额、课时和资源下未找到联合方案，原数据未修改')
@@ -213,19 +214,17 @@ async def preview_plan(body, session, tenant_id):
         session.add(TenantConfig(tenant_id=tenant_id, config_key=cache_key(body), config_value=cached))
     await session.commit()
     return {'preview_token': token, 'student_count': len(selected), 'class_count': len(candidate['classes']),
-        'audit': candidate['audit'], 'replaced_rule_ids': candidate['rules_requiring_review'],
+        'audit': candidate['audit'], 'replaced_rule_ids': [],
         'classes': [{'id': c['id'], 'subject_name': subject_names[c['subject_id']],
                      'student_count': c['size'], 'capacity': c['capacity']} for c in candidate['classes']]}
 
 
 async def persist_candidate(body, candidate, session, tenant_id, user_id):
     """Replace the exact scope in the caller's transaction; never creates a backup."""
-    from app.api.v1.scheduling import _load_rule_catalog, _persist_rule_catalog
     from app.models.org import Schedule, Subject, Grade
     from app.models.gaokao import (TeachingClass, TeachingClassStudent, TeachingClassSchedule,
         TeachingSubjectHourPlan, WalkSchedulingPlan, WalkSchedulingRoom, WalkSchedulingSlot)
     from app.models.facility import Room
-    from app.services.scheduling.rules import RuleGroupDocument
     scope = (TeachingClass.tenant_id == tenant_id, TeachingClass.grade_id == body.grade_id,
              TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.term)
     old_ids = list((await session.execute(select(TeachingClass.id).where(*scope))).scalars())
@@ -252,6 +251,7 @@ async def persist_candidate(body, candidate, session, tenant_id, user_id):
             term=body.term, subject_id=sid, sequence=sequence[sid], capacity=c['capacity'],
             name=f'{grade.name}{subjects[sid]}走班{sequence[sid]:02d}',
             weekly_periods=plans[sid].weekly_periods, hour_plan_id=plans[sid].id,
+            weekday_periods=plans[sid].weekday_periods, weekend_periods=plans[sid].weekend_periods,
             teacher_id=candidate['calendar']['teachers'].get(c['id'],
                 candidate['calendar']['teachers'].get(str(c['id']))), source='selection', status='generated')
         session.add(row); await session.flush()
@@ -269,10 +269,6 @@ async def persist_candidate(body, candidate, session, tenant_id, user_id):
         class_id=r['class_id'], subject_id=r['subject_id'], teacher_id=r['teacher_id'],
         weekday=r['weekday'], period=r['period'], room=r['room'], week_parity='all')
         for r in candidate['calendar']['public']])
-    proposed = RuleGroupDocument.model_validate(candidate['rules'])
-    groups, active = await _load_rule_catalog(session, tenant_id, body.academic_year, body.term)
-    groups = [proposed if g.id == proposed.id else g for g in groups]
-    await _persist_rule_catalog(session, tenant_id, user_id, body.academic_year, body.term, groups, active)
     plan = (await session.execute(select(WalkSchedulingPlan).where(WalkSchedulingPlan.tenant_id == tenant_id,
         WalkSchedulingPlan.grade_id == body.grade_id, WalkSchedulingPlan.academic_year == body.academic_year,
         WalkSchedulingPlan.term == body.term).with_for_update())).scalar_one_or_none()
@@ -307,8 +303,10 @@ async def save_plan(body, session, tenant_id, user_id):
         return cached['saved_result']
     validate_preview(cached, body.preview_token, scope, await source_fingerprint(session, tenant_id, lock=True), time.time())
     candidate = cached['candidate']
-    from app.services.scheduling.rules import RuleGroupDocument
-    validate_candidate_rules(RuleGroupDocument.model_validate(candidate['rules']), candidate,
+    from app.api.v1.scheduling import _load_rule_group
+    group = user_rule_group(await _load_rule_group(
+        session, tenant_id, body.academic_year, body.term, grade_id=body.grade_id))
+    validate_candidate_rules(group, candidate,
                              {int(k): v for k, v in candidate['admin_by_student'].items()})
     try:
         result = await persist_candidate(body, candidate, session, tenant_id, user_id)

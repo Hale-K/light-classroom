@@ -42,7 +42,7 @@ PostgreSQL 保存业务数据、会话历史、结构化助手记忆和任务状
 | 层 | 技术 |
 | --- | --- |
 | 前端 | React 19 · TypeScript · Vite · Ant Design · TanStack Query |
-| 后端 | Python 3.11+ · FastAPI · SQLModel · SQLAlchemy · Alembic |
+| 后端 | Python 3.11+ · FastAPI · SQLModel · SQLAlchemy |
 | 数据 | PostgreSQL · Redis · RabbitMQ · MinIO |
 | 排课 | OR-Tools CP-SAT |
 | AI | OpenAI 兼容模型服务、Tool Calling、本地意图与知识模块 |

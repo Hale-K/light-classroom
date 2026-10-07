@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import Column, Text, UniqueConstraint
+from sqlalchemy import Column, Index, Text, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 from app.db.base import TenantMixin, TimestampMixin
@@ -40,6 +40,11 @@ class KnowledgeDocument(TimestampMixin, TenantMixin, SQLModel, table=True):
 
 class KnowledgeChunk(TimestampMixin, TenantMixin, SQLModel, table=True):
     __tablename__ = "knowledge_chunk"
+    __table_args__ = (
+        Index("ix_knowledge_chunk_base", "tenant_id", "knowledge_base_id"),
+        Index("ix_knowledge_chunk_embedding_hnsw", "embedding",
+              postgresql_using="hnsw", postgresql_ops={"embedding": "vector_cosine_ops"}),
+    )
 
     id: int | None = Field(default=None, primary_key=True)
     knowledge_base_id: int = Field(index=True, foreign_key="knowledge_base.id")

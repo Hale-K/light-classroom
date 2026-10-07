@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import Column, UniqueConstraint
+from sqlalchemy import Column, Index, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
 
@@ -12,6 +12,8 @@ class AiIntentExample(SQLModel, table=True):
     __tablename__ = "ai_intent_example"
     __table_args__ = (
         UniqueConstraint("intent", "utterance", name="uq_ai_intent_example_intent_utterance"),
+        Index("ix_ai_intent_example_embedding_hnsw", "embedding",
+              postgresql_using="hnsw", postgresql_ops={"embedding": "vector_cosine_ops"}),
     )
 
     id: int | None = Field(default=None, primary_key=True)

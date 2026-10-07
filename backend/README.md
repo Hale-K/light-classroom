@@ -15,7 +15,6 @@ FastAPI · SQLModel / SQLAlchemy · PostgreSQL · Redis · RabbitMQ（Celery）�
 ```
 backend/
 ├── app/                 # 入口、路由、模型、服务、Worker
-├── migrations/          # Alembic
 ├── tests/
 ├── docker-compose.yml   # 开发编排（含 --reload，非生产镜像）
 ├── Dockerfile
@@ -40,4 +39,4 @@ uvicorn app.main:app --reload
 celery -A app.workers.celery_app worker -Q scheduling,academic --loglevel=info
 ```
 
-`APP_ENV=dev` 时启动会自动建表并写入内置角色与菜单权限。生产必须 `APP_ENV=prod` 并执行 `alembic upgrade head`，见部署文档。
+启动时自动建表并同步结构（新增/修改/删除字段随模型生效，幂等），写入内置角色、菜单权限、平台超管与学科字典；全环境生效，见部署文档与 `db/README-sql.md`。
