@@ -17,6 +17,8 @@ export const facilityApi = {
     unwrap<Building>(http.post('/facilities/buildings', data)),
   updateBuildingStatus: (id: number, status: 'active' | 'maintenance' | 'disabled') =>
     unwrap<Building>(http.patch(`/facilities/buildings/${id}/status`, { status })),
+  updateBuilding: (id: number, data: { floor_count?: number; name?: string; code?: string | null; status?: 'active' | 'maintenance' | 'disabled' }) =>
+    unwrap<Building>(http.patch(`/facilities/buildings/${id}`, data)),
   rooms: (params?: { building_id?: number; room_type?: RoomResource['room_type']; keyword?: string; academic_year?: string; term?: '1' | '2' }) =>
     unwrap<RoomResource[]>(http.get('/facilities/rooms', { params })),
   createRoom: (data: {

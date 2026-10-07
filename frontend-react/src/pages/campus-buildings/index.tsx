@@ -393,6 +393,16 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     finally { setStatusSavingId(undefined) }
   }
 
+  const addFloorsTo = async (building: Building, count: number) => {
+    setStatusSavingId(building.id)
+    try {
+      const result = await facilityApi.updateBuilding(building.id, { floor_count: building.floor_count + count })
+      message.success(`已为${building.name}新增 ${count} 层（当前 ${result.floor_count} 层），新层可用「批量生成教室」填充场室`)
+      await load()
+    } catch (error) { message.error(error instanceof Error ? error.message : '加层失败') }
+    finally { setStatusSavingId(undefined) }
+  }
+
   const openClassPlan = (room: RoomResource) => {
     const currentClass = room.class_assignments?.[0]
     classPlanForm.setFieldsValue({ class_id: currentClass?.id, class_type: classes.find((item) => item.id === currentClass?.id)?.class_type || 'regular' })
@@ -691,15 +701,27 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
             : (data?.campuses || [])
                 .map((campus) => ({ campusId: campus.id, campusName: campus.name, buildings: (data?.buildings || []).filter((building) => building.campus_id === campus.id) }))
                 .filter((group) => group.buildings.length)
-          return <Facility3D
-            groups={groups}
-            rooms={scopeRooms}
-            highlightBuildingId={highlightBuildingId}
-            highlightFloor={highlightFloor}
-            highlightRoomId={highlightRoomId}
-            onPickBuilding={(buildingId) => setSelectedKey(`building-${buildingId}`)}
-            onPickRoom={(room) => setSelectedKey(`room-${room.id}`)}
-          />
+          return <>
+            {(nodeType === 'building') && selectedNode?.building && (
+              <div className="facility3d-toolbar">
+                <span>正在查看 {selectedNode.building.name}（{selectedNode.building.floor_count} 层）</span>
+                <Button size="small" loading={statusSavingId === selectedNode.building.id}
+                  onClick={() => void addFloorsTo(selectedNode.building!, 1)}>＋ 加一层</Button>
+                <Button size="small" onClick={() => { batchRoomForm.setFieldsValue({ building_id: selectedNode.building!.id, floor: selectedNode.building!.floor_count }); setBatchRoomOpen(true) }}>
+                  往最高层生成教室
+                </Button>
+              </div>
+            )}
+            <Facility3D
+              groups={groups}
+              rooms={scopeRooms}
+              highlightBuildingId={highlightBuildingId}
+              highlightFloor={highlightFloor}
+              highlightRoomId={highlightRoomId}
+              onPickBuilding={(buildingId) => setSelectedKey(`building-${buildingId}`)}
+              onPickRoom={(room) => setSelectedKey(`room-${room.id}`)}
+            />
+          </>
         })()
         : <div className={`facility-visual${loading ? ' is-loading' : ''}`} style={loading ? { opacity: 0.6, pointerEvents: 'none' } : undefined}>
           {(() => {
@@ -739,7 +761,11 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
                         <footer onClick={(event) => event.stopPropagation()}>
                           <Select size="small" value={building.status} loading={statusSavingId === building.id} options={BUILDING_STATUS}
                             style={{ width: 104 }} onChange={(value) => void updateStatus(building, value as BuildingStatus)} />
-                          <Button type="link" size="small">查看楼层 →</Button>
+                          <Space size={0}>
+                            <Button type="link" size="small" loading={statusSavingId === building.id}
+                              onClick={() => void addFloorsTo(building, 1)}>加一层</Button>
+                            <Button type="link" size="small" onClick={() => setSelectedKey(`building-${building.id}`)}>查看楼层 →</Button>
+                          </Space>
                         </footer>
                       </article>
                     })}

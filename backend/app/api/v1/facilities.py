@@ -41,6 +41,13 @@ class BuildingStatusIn(BaseModel):
     status: str = Field(pattern=r"^(active|maintenance|disabled)$")
 
 
+class BuildingUpdateIn(BaseModel):
+    floor_count: int | None = Field(default=None, ge=1, le=100)
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    code: str | None = Field(default=None, max_length=30)
+    status: str | None = Field(default=None, pattern=r"^(active|maintenance|disabled)$")
+
+
 class RoomIn(BaseModel):
     building_id: int
     name: str = Field(min_length=1, max_length=100)
@@ -159,6 +166,40 @@ async def update_building_status(building_id: int, body: BuildingStatusIn,
     await require_manager(session, user, principal_only=True)
     item = await tenant_item(session, Building, building_id, tenant_id, "楼宇")
     item.status = body.status
+    session.add(item); await session.commit(); await session.refresh(item)
+    return {"code": 0, "message": "ok", "data": item.model_dump()}
+
+
+@router.patch("/facilities/buildings/{building_id}")
+async def update_building(building_id: int, body: BuildingUpdateIn,
+    tenant_id: int = Depends(get_current_tenant), session: AsyncSession = Depends(get_session),
+    user: User = Depends(get_current_user)):
+    """编辑楼宇：楼层数/编号/名称/状态。缩小楼层数时不得低于已有场室的最高楼层。"""
+    await require_manager(session, user, principal_only=True)
+    item = await tenant_item(session, Building, building_id, tenant_id, "楼宇")
+    if body.floor_count is not None and body.floor_count != item.floor_count:
+        max_room_floor = (await session.execute(
+            select(func.max(Room.floor)).where(
+                Room.tenant_id == tenant_id, Room.building_id == building_id,
+            ))).scalar()
+        if max_room_floor is not None and body.floor_count < max_room_floor:
+            raise HTTPException(status_code=422,
+                detail=f"已有场室位于 {max_room_floor} 层，楼层数不能低于 {max_room_floor}")
+        item.floor_count = body.floor_count
+    if body.code is not None:
+        item.code = body.code.strip() or None
+    if body.name is not None:
+        name = normalize_entity_name(body.name) or ""
+        if name and name != item.name:
+            duplicate = (await session.execute(select(Building.id).where(
+                Building.tenant_id == tenant_id, Building.campus_id == item.campus_id,
+                Building.name == name, Building.id != item.id,
+            ))).scalar()
+            if duplicate:
+                raise HTTPException(status_code=422, detail=f"该校区下楼宇「{name}」已存在")
+            item.name = name
+    if body.status is not None:
+        item.status = body.status
     session.add(item); await session.commit(); await session.refresh(item)
     return {"code": 0, "message": "ok", "data": item.model_dump()}
 
