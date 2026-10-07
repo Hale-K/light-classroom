@@ -861,13 +861,49 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           const hasExclusive = allocations.some((item) => item.allocation_mode === 'exclusive')
           const hasShared = allocations.some((item) => item.allocation_mode === 'shared')
           const hasClasses = Boolean(room.class_assignments?.length)
-          return <article className="facility-class-resource-card" key={room.id}>
-          <div className="facility-class-resource-card-top"><div><span className="facility-class-resource-kicker">{room.building_name} · {room.floor}层</span><strong>{room.name}</strong></div><Space size={4} wrap>{hasExclusive && <Tag color="blue">行政班独占</Tag>}{hasShared && <Tag color="purple">走班共享池</Tag>}{hasClasses && <Tag color="green">已生成班级</Tag>}</Space></div>
-          <div className="facility-class-resource-meta"><span>{room.code || '未设置编号'}</span><span>{room.capacity}人容量</span></div>
-          <div className="facility-class-resource-cohorts"><span>所属届别</span><Space size={[4, 4]} wrap>{room.cohort_allocations?.map((item) => <Tag color="blue" key={`${item.rule_id}-${item.cohort_label}`}>{item.cohort_label}</Tag>)}</Space></div>
-          <div className="facility-class-resource-assignment">{hasClasses ? <Space size={[4, 4]} wrap>{room.class_assignments!.map((item) => <Tag key={item.id}>{item.name}</Tag>)}</Space> : hasShared && !hasExclusive ? <span className="pending-text">用于走班教学，不生成行政班</span> : <span className="pending-text">这间教室还没有生成行政班</span>}</div>
-          {hasExclusive && <Button type={hasClasses ? 'default' : 'primary'} block onClick={() => hasClasses ? openClassPlan(room) : openCreateClass(room)}>{hasClasses ? '调整班级' : '根据此教室生成行政班'}</Button>}
-        </article>})}
+          const status = hasClasses ? 'assigned'
+            : hasExclusive ? 'pending-class'
+            : hasShared ? 'shared'
+            : 'unassigned'
+          return <article className={`fcp-card fcp-${status}`} key={room.id}>
+            <header className="fcp-head">
+              <span className="fcp-name">{room.name}</span>
+              <span className="fcp-capacity">{room.capacity} 座</span>
+            </header>
+            <div className="fcp-sub">{room.code || '未设编号'} · {room.building_name} {room.floor}层</div>
+            <div className="fcp-status">
+              {status === 'assigned' && <>
+                <i className="fcp-dot" />
+                <span className="fcp-class-name">
+                  {room.class_assignments!.map((item) => item.name).join('、')}
+                </span>
+                <span className="fcp-status-note">已生成行政班</span>
+              </>}
+              {status === 'pending-class' && <>
+                <i className="fcp-dot" />
+                <span className="fcp-class-name fcp-muted">待生成行政班</span>
+                <span className="fcp-status-note">届别已锁定此教室</span>
+              </>}
+              {status === 'shared' && <>
+                <i className="fcp-dot" />
+                <span className="fcp-class-name fcp-purple">走班教学共享池</span>
+                <span className="fcp-status-note">不生成行政班</span>
+              </>}
+              {status === 'unassigned' && <>
+                <i className="fcp-dot" />
+                <span className="fcp-class-name fcp-muted">未分配届别</span>
+              </>}
+            </div>
+            <footer className="fcp-foot">
+              <span className="fcp-cohort">{allocations.map((item) => item.cohort_label).join(' / ') || '—'}</span>
+              {hasExclusive
+                ? <Button type="link" size="small" onClick={() => hasClasses ? openClassPlan(room) : openCreateClass(room)}>
+                    {hasClasses ? '调整班级' : '生成班级'}
+                  </Button>
+                : null}
+            </footer>
+          </article>
+        })}
         {!filteredResourceRooms.length && <div className="facility-class-resource-empty"><EmptyState icon="building" title={assignedRooms.length ? '没有匹配的教室' : '暂无可划分教室'} desc={assignedRooms.length ? '请调整查询条件后重试。' : '请先在“资源分配规则”中将教室分配给届别。'} height={240} /></div>}
         {!!filteredResourceRooms.length && <div className="facility-resource-pagination"><span>共 {filteredResourceRooms.length} 间教室</span><Pagination current={resourcePage} pageSize={resourcePageSize} total={filteredResourceRooms.length} showTotal={(total, range) => `${range[0]}-${range[1]} / 共 ${total} 间`} showSizeChanger pageSizeOptions={[12, 24, 36, 48]} onChange={(nextPage, nextPageSize) => { const normalizedPageSize = nextPageSize || resourcePageSize; setResourcePageSize(normalizedPageSize); setResourcePage(normalizedPageSize !== resourcePageSize ? 1 : nextPage) }} /></div>}
       </div>}

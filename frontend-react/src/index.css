@@ -2658,9 +2658,7 @@ body[data-theme='tech'] .st-subject-self-study {
 .facility-resource-toolbar .facility-resource-filters { margin-bottom: 0; border: 0; padding: 7px 0 0; background: transparent; }
 .facility-filters-suffix-actions { display: flex; justify-self: end; justify-content: flex-end; align-items: center; gap: 8px; }
 .facility-resource-pagination { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 8px; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--border); color: var(--text-3); font-size: 12px; }
-.facility-class-resource-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 8px; padding: 2px 0 0; }
-.facility-class-resource-card { display: flex; flex-direction: column; gap: 5px; min-height: 168px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: linear-gradient(145deg, var(--surface), var(--bg-2)); }
-.facility-class-resource-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.facility-class-resource-grid { display: grid; padding: 2px 0 0; }
 .facility-class-resource-card-top strong { display: block; margin-top: 3px; color: var(--text-1); font-size: 15px; }
 .facility-class-resource-kicker { color: var(--blue-ink); font-size: 12px; }
 .facility-class-resource-meta, .facility-class-resource-cohorts { display: flex; align-items: center; justify-content: space-between; gap: 8px; color: var(--text-3); font-size: 12px; }
@@ -3349,24 +3347,37 @@ body[data-theme='tech'] .st-subject-self-study {
 .facility-class-resource-grid {
   gap: 7px;
   padding: 0;
-  grid-template-columns: repeat(6, minmax(200px, 1fr));
-  min-width: 1240px;
+  grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
 }
 .facility-class-resource-empty { grid-column: 1 / -1; width: 100%; }
 .facility-allocation-resource-list { overflow-x: auto; }
-.facility-class-resource-card {
-  min-height: 158px;
-  padding: 9px 11px;
-  gap: 4px;
-  border-radius: 9px;
-}
-.facility-class-resource-card-top strong { margin-top: 2px; font-size: 14px; }
-.facility-class-resource-card-top { display: block; }
-.facility-class-resource-card-top > div:first-child { min-width: 0; }
-.facility-class-resource-card-top > .ant-space { display: flex; flex-wrap: wrap; margin-top: 4px; align-items: flex-start; }
-.facility-class-resource-kicker { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11.5px; }
-.facility-class-resource-meta, .facility-class-resource-cohorts { font-size: 11.5px; }
-.facility-class-resource-cohorts { padding-top: 6px; }
+
+/* ---- 班级划分卡片 v2：状态为主角，班级名放大，操作弱化为链接 ---- */
+.fcp-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 10px 12px 8px; display: flex; flex-direction: column; gap: 7px; min-height: 108px; }
+.fcp-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.fcp-name { color: var(--ink); font-weight: 600; font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcp-capacity { margin-left: auto; color: var(--text-3); font-size: 11.5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.fcp-sub { color: var(--text-3); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcp-status { display: flex; align-items: center; gap: 7px; min-width: 0; padding: 5px 8px; border-radius: 7px; background: var(--surface-2); }
+.fcp-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
+.fcp-class-name { font-weight: 600; font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcp-status-note { margin-left: auto; color: var(--text-3); font-size: 11px; white-space: nowrap; }
+.fcp-muted { color: var(--text-3); font-weight: 500; }
+.fcp-purple { color: #7c3aed; }
+.fcp-foot { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
+.fcp-foot .ant-btn { padding: 0; height: auto; }
+.fcp-cohort { color: var(--text-2); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fcp-assigned .fcp-dot { background: #16a34a; }
+.fcp-assigned { border-left: 3px solid #16a34a; }
+.fcp-assigned .fcp-status { background: rgba(22,163,74,.08); }
+.fcp-pending-class .fcp-dot { background: #f59e0b; }
+.fcp-pending-class { border-left: 3px solid #f59e0b; }
+.fcp-pending-class .fcp-status { background: rgba(245,158,11,.10); }
+.fcp-shared .fcp-dot { background: #8b5cf6; }
+.fcp-shared { border-left: 3px solid #8b5cf6; }
+.fcp-shared .fcp-status { background: rgba(139,92,246,.08); }
+.fcp-unassigned .fcp-dot { background: #cbd5e1; }
+.fcp-unassigned { opacity: .82; }
 .facility-resource-pagination { margin-top: 6px; padding-top: 5px; }
 
 /* 表格紧凑化（覆盖上一轮值） */
