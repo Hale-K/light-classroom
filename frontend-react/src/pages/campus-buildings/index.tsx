@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import type { Key } from 'react'
 import {
@@ -200,9 +200,8 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [resourcePage, setResourcePage] = useState(1)
-  const [resourcePageSize, setResourcePageSize] = useState(12)
-  const classGridRef = useRef<HTMLDivElement>(null)
-  const [cardsPerRow, setCardsPerRow] = useState(0)
+  const [resourcePageSize, setResourcePageSize] = useState(24)
+
   const [resourceKeyword, setResourceKeyword] = useState('')
   const [resourceBuildingId, setResourceBuildingId] = useState<number>()
   const [resourceFloor, setResourceFloor] = useState<number>()
@@ -380,22 +379,6 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     const maxPage = Math.max(1, Math.ceil(filteredResourceRooms.length / resourcePageSize))
     if (resourcePage > maxPage) setResourcePage(maxPage)
   }, [filteredResourceRooms.length, resourcePage, resourcePageSize])
-  // 网格每行卡片数实测 → 每页固定为「列数 × 2」，保证翻页不出现参差半行
-  useEffect(() => {
-    const el = classGridRef.current
-    if (!el) return
-    const update = () => {
-      const cols = getComputedStyle(el).gridTemplateColumns.split(' ').filter(Boolean).length
-      if (cols > 0) setCardsPerRow(cols)
-    }
-    const observer = new ResizeObserver(update)
-    observer.observe(el)
-    update()
-    return () => observer.disconnect()
-  }, [focus])
-  useEffect(() => {
-    if (cardsPerRow > 0) setResourcePageSize(cardsPerRow * 2)
-  }, [cardsPerRow])
   useEffect(() => {
     const pages = Math.max(1, Math.ceil(filteredResourceRooms.length / Math.max(resourcePageSize, 1)))
     if (resourcePage > pages) setResourcePage(pages)
@@ -877,7 +860,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           { title: '操作', key: 'action', width: 290, render: (_, row) => <Space size={4}><Button type="link" size="small" onClick={() => { setViewAllocationRule(row); setRuleOpen(true) }}>查看资源</Button><Popconfirm title="释放这条规则占用的教室？" description="释放后教室可重新分配，并同时解除班级教室绑定和教师任教绑定；规则记录会保留。" okText="确认释放" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void releaseAllocationRule(row)}><Button type="link" danger size="small">释放资源</Button></Popconfirm><Popconfirm title="硬删除这条资源分配规则？" description="此操作不可恢复：会删除规则和教室分配记录，并解除班级教室绑定、删除教师任教绑定；班级、学生和教师账号不会删除。" okText="确认硬删除" cancelText="取消" okButtonProps={{ danger: true }} onConfirm={() => void deleteAllocationRule(row)}><Button type="link" danger size="small">硬删除</Button></Popconfirm></Space> },
         ]} locale={{ emptyText: <EmptyState icon="sitemap" title={`暂无${resourceTerm === '1' ? '上' : '下'}学期资源分配规则`} desc="切换学期查看对应资源，或点击右上角“新建分配规则”创建。" height={240} /> }} />
         </>}
-      {focus === 'class-planning' && <div className="facility-class-resource-grid" ref={classGridRef}>
+      {focus === 'class-planning' && <div className="facility-class-resource-grid">
         {pagedResourceRooms.map((room) => {
           // 卡片展示全部本学期分配，不依赖生成班级弹窗当前选中的届别。
           const allocations = room.cohort_allocations || []
