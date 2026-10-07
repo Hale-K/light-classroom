@@ -27,6 +27,7 @@ import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
 import type { Building, Campus, ClassInfo, FacilityOverview, Grade, OrganizationUnit, ResourceAllocationRule, RoomResource } from '@/types'
 import AllocationRuleDrawer from './allocation-rule-drawer'
+import Facility3D, { type CampusGroup } from './facility-3d'
 import { hasRoomFeature } from './room-features'
 
 type CampusForm = { name: string; address?: string; student_capacity?: number }
@@ -195,7 +196,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [statusSavingId, setStatusSavingId] = useState<number>()
   const [selectedKey, setSelectedKey] = useState('space')
   const [expandedKeys, setExpandedKeys] = useState<Key[]>(['space'])
-  const [resourceView, setResourceView] = useState<'visual' | 'list'>('visual')
+  const [resourceView, setResourceView] = useState<'3d' | 'visual' | 'list'>('3d')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [resourcePage, setResourcePage] = useState(1)
@@ -649,8 +650,8 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
             <span className="facility-muted">学校空间 → 校区 → 楼宇 → 楼层 → 场室</span>
             <Segmented
               value={resourceView}
-              onChange={(value) => setResourceView(value as 'visual' | 'list')}
-              options={[{ label: '可视化', value: 'visual' }, { label: '列表', value: 'list' }]}
+              onChange={(value) => setResourceView(value as '3d' | 'visual' | 'list')}
+              options={[{ label: '3D 视图', value: '3d' }, { label: '卡片', value: 'visual' }, { label: '列表', value: 'list' }]}
             />
           </Space>
         </header>
@@ -663,6 +664,43 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           showTotal: (total) => `共 ${total} 条`,
         } : false}
           locale={{ emptyText: <EmptyState icon="building" title="当前节点暂无下级资源" desc="可使用页面右上角按钮继续创建空间资源。" height={240} /> }} />
+        : resourceView === '3d' ? (() => {
+          const nodeType = selectedKey === 'space' ? 'space' : selectedNode?.node_type
+          let scopeBuildings: Building[] = data?.buildings || []
+          let highlightBuildingId: number | undefined
+          let highlightFloor: number | undefined
+          let highlightRoomId: number | undefined
+          if (nodeType === 'campus' && selectedNode?.campus) {
+            scopeBuildings = (data?.buildings || []).filter((building) => building.campus_id === selectedNode.campus!.id)
+          } else if ((nodeType === 'building' || nodeType === 'floor') && selectedNode?.building) {
+            highlightBuildingId = selectedNode.building.id
+            scopeBuildings = [selectedNode.building]
+          } else if (nodeType === 'room' && selectedNode?.room) {
+            highlightRoomId = selectedNode.room.id
+            highlightBuildingId = selectedNode.room.building_id
+            scopeBuildings = (data?.buildings || []).filter((building) => building.id === selectedNode.room!.building_id)
+          }
+          if (nodeType === 'floor') highlightFloor = selectedNode?.floorNumber
+          const scopeRooms = rooms.filter((room) => scopeBuildings.some((building) => building.id === room.building_id))
+          const groups: CampusGroup[] = scopeBuildings.length && (nodeType === 'building' || nodeType === 'floor' || nodeType === 'room')
+            ? [{
+                campusId: scopeBuildings[0].campus_id,
+                campusName: (data?.campuses || []).find((campus) => campus.id === scopeBuildings[0].campus_id)?.name || '楼宇',
+                buildings: scopeBuildings,
+              }]
+            : (data?.campuses || [])
+                .map((campus) => ({ campusId: campus.id, campusName: campus.name, buildings: (data?.buildings || []).filter((building) => building.campus_id === campus.id) }))
+                .filter((group) => group.buildings.length)
+          return <Facility3D
+            groups={groups}
+            rooms={scopeRooms}
+            highlightBuildingId={highlightBuildingId}
+            highlightFloor={highlightFloor}
+            highlightRoomId={highlightRoomId}
+            onPickBuilding={(buildingId) => setSelectedKey(`building-${buildingId}`)}
+            onPickRoom={(room) => setSelectedKey(`room-${room.id}`)}
+          />
+        })()
         : <div className={`facility-visual${loading ? ' is-loading' : ''}`} style={loading ? { opacity: 0.6, pointerEvents: 'none' } : undefined}>
           {(() => {
             const nodeType = selectedKey === 'space' ? 'space' : selectedNode?.node_type
