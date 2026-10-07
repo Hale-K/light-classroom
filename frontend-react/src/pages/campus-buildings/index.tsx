@@ -621,11 +621,32 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     finally { setClassPlanSaving(false) }
   }
 
+  const campusAggregates = (campus: Campus) => {
+    const buildings = (data?.buildings || []).filter((building) => building.campus_id === campus.id)
+    const campusRooms = rooms.filter((room) => buildings.some((building) => building.id === room.building_id))
+    const multimedia = campusRooms.filter((room) => hasRoomFeature(room.features, 'multimedia')).length
+    return { buildings, campusRooms, multimedia }
+  }
+
   const columns: ColumnsType<FacilityTreeNode> = [
-    { title: '空间节点', dataIndex: 'name', render: (name, row) => <><strong>{name}</strong><div className="facility-cell-note">{row.note || (row.node_type === 'campus' ? '校区' : '未设置楼宇编号')}</div></> },
+    { title: '空间节点', dataIndex: 'name', render: (name, row) => <><strong>{name}</strong><div className="facility-cell-note">{row.node_type === 'campus' ? (row.campus?.address || '校区') : row.note || (row.node_type === 'building' ? '未设置楼宇编号' : undefined)}</div></> },
     { title: '类型', dataIndex: 'node_type', width: 110, render: (_, row) => row.node_type === 'campus' ? '校区' : row.node_type === 'building' ? '楼宇' : row.node_type === 'floor' ? '楼层' : ROOM_TYPE[row.room!.room_type] },
-    { title: '规模', width: 120, render: (_, row) => row.campus?.student_capacity ? `${row.campus.student_capacity.toLocaleString()} 人` : row.node_type === 'building' ? `${row.building!.floor_count} 层` : row.node_type === 'floor' ? `${row.children?.length || 0} 间` : row.room ? `${row.room.capacity} 人` : '—' },
-    { title: '资源信息', render: (_, row) => row.node_type === 'building' ? `${row.building!.room_count} 间场室 · ${row.building!.multimedia_count} 间多媒体` : row.node_type === 'floor' ? <Space size={[4, 4]} wrap>{[...new Set((row.children || []).flatMap((child) => child.room?.cohort_allocations?.map((item) => item.cohort_label) || []))].map((label) => <Tag key={label}>{label}</Tag>)}</Space> : row.room ? <Space size={[4, 4]} wrap>{hasRoomFeature(row.room.features, 'multimedia') && <Tag>多媒体</Tag>}{row.room.cohort_allocations?.map((item) => <Tag color="blue" key={`${item.rule_id}-${item.cohort_label}`}>{item.cohort_label}·{item.allocation_mode === 'shared' ? '同届复用' : '独占'}</Tag>)}{row.room.is_schedulable && <Tag>排课</Tag>}{row.room.is_exam_enabled && <Tag>排考</Tag>}</Space> : '—' },
+    { title: '规模', width: 160, render: (_, row) => {
+      if (row.node_type === 'campus' && row.campus) {
+        const { buildings, campusRooms } = campusAggregates(row.campus)
+        const parts = [`${buildings.length} 栋楼宇`, `${campusRooms.length} 间场室`]
+        if (row.campus.student_capacity) parts.unshift(`规划 ${row.campus.student_capacity.toLocaleString()} 人`)
+        return parts.join(' · ')
+      }
+      return row.campus?.student_capacity ? `${row.campus.student_capacity.toLocaleString()} 人` : row.node_type === 'building' ? `${row.building!.floor_count} 层` : row.node_type === 'floor' ? `${row.children?.length || 0} 间` : row.room ? `${row.room.capacity} 人` : '—'
+    } },
+    { title: '资源信息', render: (_, row) => {
+      if (row.node_type === 'campus' && row.campus) {
+        const { buildings, campusRooms, multimedia } = campusAggregates(row.campus)
+        return `${buildings.length} 栋楼宇 · ${campusRooms.length} 间场室 · ${multimedia} 间多媒体`
+      }
+      return row.node_type === 'building' ? `${row.building!.room_count} 间场室 · ${row.building!.multimedia_count} 间多媒体` : row.node_type === 'floor' ? <Space size={[4, 4]} wrap>{[...new Set((row.children || []).flatMap((child) => child.room?.cohort_allocations?.map((item) => item.cohort_label) || []))].map((label) => <Tag key={label}>{label}</Tag>)}</Space> : row.room ? <Space size={[4, 4]} wrap>{hasRoomFeature(row.room.features, 'multimedia') && <Tag>多媒体</Tag>}{row.room.cohort_allocations?.map((item) => <Tag color="blue" key={`${item.rule_id}-${item.cohort_label}`}>{item.cohort_label}·{item.allocation_mode === 'shared' ? '同届复用' : '独占'}</Tag>)}{row.room.is_schedulable && <Tag>排课</Tag>}{row.room.is_exam_enabled && <Tag>排考</Tag>}</Space> : '—'
+    } },
     { title: '使用状态', width: 140, render: (_, row) => row.node_type === 'building' ? <Select size="small" value={row.building!.status} loading={statusSavingId === row.building!.id} options={BUILDING_STATUS} style={{ width: 110 }} onChange={(value) => void updateStatus(row.building!, value as BuildingStatus)} /> : <span className="facility-status"><i />{row.room?.status === 'available' || !row.room ? '正常使用' : row.room.status}</span> },
   ]
 
