@@ -39,8 +39,8 @@ DIAGNOSIS_TASKS: tuple[SupervisorTask, ...] = (
     SupervisorTask(
         id="rules",
         label="排课规则",
-        instruction="读取当前学期规则组、启用状态和硬约束。",
-        allowed_tools=frozenset({"lookup_rules"}),
+        instruction="读取当前学期规则组、启用状态和硬约束。对「学科课位限制」类硬规则，调用 lookup_subject_capacity 做容量验算（限排课位数对比该科单班周课时与教师并行容量）。",
+        allowed_tools=frozenset({"lookup_rules", "lookup_subject_capacity"}),
     ),
 )
 

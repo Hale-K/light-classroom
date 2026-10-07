@@ -72,6 +72,20 @@ SCHOOL_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "lookup_subject_capacity",
+            "description": "只读容量验算：按年级统计各科目的班级数、周课时合计、任课教师数，以及硬性「学科课位限制」允许课位数。用于判断某科课时需求能否排进限排课位（例如：每班 2 节但只允许 2 个课位、10 个班仅 3 位教师 ⇒ 必然无解）。不执行修改。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "grade": {"type": "string", "description": "年级名，如“高一”；省略时统计全校"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "lookup_playbook",
             "description": "取说明书正文（操作步骤细节）。编号必须来自 system 里的说明书目录。",
             "parameters": {
@@ -340,6 +354,98 @@ async def lookup_rules(session: AsyncSession, tenant_id: int, *, academic_year=N
     return "\n".join(lines)
 
 
+async def lookup_subject_capacity(session: AsyncSession, tenant_id: int, *, academic_year=None, term=None, grade=None) -> str:
+    """容量验算数据：按年级聚合各科 班级数/周课时/教师数 + 硬性学科限排课位。
+
+    供模型判断「某科课时需求能否排进限排课位」：限排课位数 < 该科每班周课时，
+    或 教师并行容量（课位数 × 教师数）< 周课时合计 ⇒ 必然无解。
+    """
+    from collections import defaultdict
+
+    from app.api.v1.scheduling import _load_rule_catalog
+    from app.services.scheduling.rules import generation_subject_allowed_slots
+
+    current_year, current_term = await _term(session, tenant_id)
+    year, term = academic_year or current_year, term or current_term
+    if not year:
+        return "本校还没设置当前学年。请先到系统设置核对学年学期。"
+
+    grade_id = None
+    grade_rows = (await session.execute(select(Grade).where(Grade.tenant_id == tenant_id))).scalars().all()
+    if grade:
+        matched = next((g for g in grade_rows if grade in g.name), None)
+        if matched is None:
+            names = "、".join(g.name for g in grade_rows) or "暂无"
+            return f"没有找到名称含「{grade}」的年级。现有年级：{names}。"
+        grade_id = matched.id
+    classes = (await session.execute(select(Class).where(Class.tenant_id == tenant_id))).scalars().all()
+    if grade_id is not None:
+        classes = [c for c in classes if c.grade_id == grade_id]
+    if not classes:
+        return "该范围内还没有班级，无法统计科目容量。请先完成班级划分。"
+    class_ids = [c.id for c in classes]
+
+    plans = (await session.execute(select(CourseHourPlan).where(
+        CourseHourPlan.tenant_id == tenant_id,
+        CourseHourPlan.academic_year == year, CourseHourPlan.term == term,
+        CourseHourPlan.class_id.in_(class_ids)))).scalars().all()
+    assignments = (await session.execute(select(TeachingAssignment).where(
+        TeachingAssignment.tenant_id == tenant_id,
+        TeachingAssignment.academic_year == year, TeachingAssignment.term == term,
+        TeachingAssignment.class_id.in_(class_ids)))).scalars().all()
+    subjects = {s.id: s.name for s in (await session.execute(select(Subject))).scalars().all()}
+
+    by_subject: dict[int, dict] = {}
+    max_per_class: dict[int, float] = {}
+    for p in plans:
+        d = by_subject.setdefault(p.subject_id, {"classes": set(), "periods": 0.0})
+        d["classes"].add(p.class_id)
+        periods = float(p.weekly_periods or 0)
+        d["periods"] += periods
+        max_per_class[p.subject_id] = max(max_per_class.get(p.subject_id, 0), periods)
+    teachers_by_subject: dict[int, set[int]] = {}
+    for a in assignments:
+        if a.teacher_id is not None:
+            teachers_by_subject.setdefault(a.subject_id, set()).add(a.teacher_id)
+
+    groups, _active_id = await _load_rule_catalog(session, tenant_id, year, term)
+    allowed: dict[int, set[tuple[int, int]]] = {}
+    for group in groups:
+        if group.grade_id is not None and group.grade_id != grade_id:
+            continue
+        for sid, pairs in generation_subject_allowed_slots(group).items():
+            allowed.setdefault(sid, set()).update(pairs)
+
+    def _when(pairs: set[tuple[int, int]]) -> str:
+        by_day: dict[int, list[int]] = {}
+        for wd, period in pairs:
+            by_day.setdefault(wd, []).append(period)
+        return "；".join(
+            f"周{_WEEK[day]}第{'、'.join(str(p) for p in sorted(periods))}节"
+            for day, periods in sorted(by_day.items())
+        )
+
+    scope_label = f"·{next((g.name for g in grade_rows if g.id == grade_id), grade or '')}" if grade_id is not None else "·全校"
+    lines = [f"{year}学年第{term}学期{scope_label}，共 {len(class_ids)} 个班。各科目容量验算："]
+    for sid, d in sorted(by_subject.items(), key=lambda kv: -kv[1]["periods"]):
+        name = subjects.get(sid, f"科目{sid}")
+        teacher_count = len({t for t in teachers_by_subject.get(sid, set())})
+        pairs = allowed.get(sid)
+        limit = f"限排课位 {len(pairs)} 个（{_when(pairs)}）" if pairs else "未限排课位"
+        hint = ""
+        if pairs:
+            demand = d["periods"]
+            capacity = len(pairs) * teacher_count
+            hint = f"｜每班周课时需 ≤ {len(pairs)}"
+            if teacher_count:
+                hint += f"；教师并行容量 ≈ {capacity:g} 节（{teacher_count} 人 × {len(pairs)} 课位），需求 {demand:g} 节"
+            if max_per_class.get(sid, 0) > len(pairs):
+                hint += f"｜单班周课时 {max_per_class[sid]:g} 已超课位数"
+        lines.append(f"- {name}：{len(d['classes'])} 个班 · 周课时合计 {d['periods']:g} · 教师 {teacher_count} 人 · {limit}{hint}")
+    lines.append("判读：限排课位数 < 该科单班周课时，或 教师并行容量 < 该科周课时合计 ⇒ 必然无解，需放宽课位、减少课时或增配教师。")
+    return "\n".join(lines)
+
+
 def lookup_playbook(arguments: str) -> str:
     keys: list[str] = []
     raw = _args(arguments).get("keys")
@@ -381,6 +487,9 @@ async def execute_school_tool(
         if name == "lookup_rules":
             result = await lookup_rules(session, tenant_id, rule_group_id=args.get("rule_group_id") or context.get("rule_group_id"), **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有规则组" in result or "未找到所选规则组" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
+        if name == "lookup_subject_capacity":
+            result = await lookup_subject_capacity(session, tenant_id, grade=str(args.get("grade") or ""), **scope)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有班级" in result or "没有找到名称含" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_playbook":
             result = lookup_playbook(arguments)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有对上" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})

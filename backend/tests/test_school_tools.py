@@ -1,4 +1,12 @@
 """教务只读工具：schema 完整性、说明书取回、派发兜底。数据库查询部分不在单测覆盖。"""
+
+def test_subject_capacity_tool_registered_with_capacity_hint():
+    names = [t["function"]["name"] for t in SCHOOL_TOOLS]
+    assert "lookup_subject_capacity" in names
+    tool = next(t for t in SCHOOL_TOOLS if t["function"]["name"] == "lookup_subject_capacity")
+    desc = tool["function"]["description"]
+    assert "容量验算" in desc and "教师数" in desc
+
 import asyncio
 import json
 from unittest.mock import AsyncMock
