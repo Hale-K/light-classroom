@@ -27,8 +27,8 @@ DIAGNOSIS_TASKS: tuple[SupervisorTask, ...] = (
     SupervisorTask(
         id="generation_status",
         label="排课任务状态",
-        instruction="读取最近一次排课任务的状态、阶段和失败信息。",
-        allowed_tools=frozenset({"lookup_generation_status"}),
+        instruction="读取最近一次排课任务的状态、阶段和失败信息；需要过程细节时用 lookup_generation_log 取求解事件原文。",
+        allowed_tools=frozenset({"lookup_generation_status", "lookup_generation_log"}),
     ),
     SupervisorTask(
         id="schedule_setup",
@@ -40,7 +40,7 @@ DIAGNOSIS_TASKS: tuple[SupervisorTask, ...] = (
         id="rules",
         label="排课规则",
         instruction="读取当前学期规则组、启用状态和硬约束。对「学科课位限制」类硬规则，调用 lookup_subject_capacity 做容量验算（限排课位数对比该科单班周课时与教师并行容量）。",
-        allowed_tools=frozenset({"lookup_rules", "lookup_subject_capacity"}),
+        allowed_tools=frozenset({"lookup_rules", "lookup_subject_capacity", "lookup_slot_role_capacity"}),
     ),
 )
 

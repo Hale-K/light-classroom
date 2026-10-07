@@ -86,6 +86,46 @@ SCHOOL_TOOLS: list[dict] = [
     {
         "type": "function",
         "function": {
+            "name": "lookup_slot_role_capacity",
+            "description": "只读验算「课位需指定教师角色」类硬规则（如某些课位必须由班主任上课）：按规则圈定的课位计算每班需要的节数，逐班对比该班班主任对本班的实际周课时，并核对班主任并行数量是否足够。用于判断该规则是否必然无解。不执行修改。",
+            "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_remaining_capacity",
+            "description": "只读计算：按班级对比课位结构容量与已排课时，给出每班剩余可排节数和已设科目明细。用于回答「还能加几门科目、新科目每班该设多少节」这类规划问题。不执行修改。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "grade": {"type": "string", "description": "年级名，如“高一”；省略时统计全校"},
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "lookup_generation_log",
+            "description": "只读读取本校排课生成长任务的求解事件日志（最近 40 条：阶段/进度/消息原文）。用于分析生成过程与失败过程。不会发起、重试或取消生成。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "job_id": {
+                        "type": "string",
+                        "pattern": "^[a-f0-9]{32}$",
+                        "description": "已知任务编号；不得编造。当前页面已有任务时可省略。",
+                    }
+                },
+                "additionalProperties": False,
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "lookup_playbook",
             "description": "取说明书正文（操作步骤细节）。编号必须来自 system 里的说明书目录。",
             "parameters": {
@@ -378,7 +418,10 @@ async def lookup_subject_capacity(session: AsyncSession, tenant_id: int, *, acad
             names = "、".join(g.name for g in grade_rows) or "暂无"
             return f"没有找到名称含「{grade}」的年级。现有年级：{names}。"
         grade_id = matched.id
-    classes = (await session.execute(select(Class).where(Class.tenant_id == tenant_id))).scalars().all()
+    classes = (await session.execute(select(Class).where(
+        Class.tenant_id == tenant_id,
+        Class.academic_year == year, Class.term == term,
+    ))).scalars().all()
     if grade_id is not None:
         classes = [c for c in classes if c.grade_id == grade_id]
     if not classes:
@@ -442,7 +485,192 @@ async def lookup_subject_capacity(session: AsyncSession, tenant_id: int, *, acad
             if max_per_class.get(sid, 0) > len(pairs):
                 hint += f"｜单班周课时 {max_per_class[sid]:g} 已超课位数"
         lines.append(f"- {name}：{len(d['classes'])} 个班 · 周课时合计 {d['periods']:g} · 教师 {teacher_count} 人 · {limit}{hint}")
-    lines.append("判读：限排课位数 < 该科单班周课时，或 教师并行容量 < 该科周课时合计 ⇒ 必然无解，需放宽课位、减少课时或增配教师。")
+    return "\n".join(lines)
+
+
+async def lookup_slot_role_capacity(session: AsyncSession, tenant_id: int, *, academic_year=None, term=None) -> str:
+    """验算「课位需指定教师角色」（slot_teacher_role_required）硬规则是否必然无解。
+
+    对每条启用的该类规则：课位数 = 每班需要由该角色教师上的节数；
+    逐班对比该班班主任对本班的实际周课时（任教关系），并核对班主任并行数量。
+    """
+    from app.api.v1.scheduling import _load_rule_catalog
+
+    current_year, current_term = await _term(session, tenant_id)
+    year, term = academic_year or current_year, term or current_term
+    if not year:
+        return "本校还没设置当前学年。请先到系统设置核对学年学期。"
+
+    groups, _active = await _load_rule_catalog(session, tenant_id, year, term)
+    rules = [
+        r
+        for g in groups
+        for r in g.rules
+        if r.enabled and r.priority == "hard" and r.code == "slot_teacher_role_required"
+    ]
+    if not rules:
+        return f"{year}学年第{term}学期没有启用的「课位需指定教师角色」类规则。"
+
+    classes = (await session.execute(select(Class).where(
+        Class.tenant_id == tenant_id,
+        Class.academic_year == year, Class.term == term,
+    ))).scalars().all()
+    if not classes:
+        return "该学年学期还没有班级，无法验算。"
+
+    assignments = (await session.execute(select(TeachingAssignment).where(
+        TeachingAssignment.tenant_id == tenant_id,
+        TeachingAssignment.academic_year == year, TeachingAssignment.term == term,
+    ))).scalars().all()
+    head_periods: dict[tuple[int, int], float] = {}
+    for a in assignments:
+        head_periods[(a.class_id, a.teacher_id)] = head_periods.get((a.class_id, a.teacher_id), 0) + float(a.weekly_periods or 0)
+    user_rows = (await session.execute(select(User))).scalars().all()
+    user_names = {u.id: u.name for u in user_rows}
+
+    lines = [f"{year}学年第{term}学期「课位需指定教师角色」验算："]
+    for rule in rules:
+        days = list(rule.weekdays or [])
+        periods = list(rule.periods or [])
+        required = len(days) * len(periods)
+        role_label = {"head_teacher": "班主任"}.get(rule.params.get("teacher_role", ""), "指定角色教师")
+        scope_classes = classes
+        if rule.target.type == "grade" and rule.target.ids:
+            scope_classes = [c for c in classes if c.grade_id in rule.target.ids]
+        elif rule.target.type == "class" and rule.target.ids:
+            scope_classes = [c for c in classes if c.id in rule.target.ids]
+        if not scope_classes:
+            lines.append(f"- 规则「{rule.title}」：范围内没有班级，跳过。")
+            continue
+
+        shortages: list[str] = []
+        heads: set[int] = set()
+        for c in scope_classes:
+            head_id = c.head_teacher_id
+            if head_id is None:
+                shortages.append(f"{c.name}（没有班主任）")
+                continue
+            heads.add(head_id)
+            own = head_periods.get((c.id, head_id), 0)
+            if own < required:
+                shortages.append(f"{c.name} 班主任 {user_names.get(head_id, '?')} 对本班仅 {own:g} 节（差 {required - own:g}）")
+        parallel_ok = len(heads) >= len(scope_classes)
+        lines.append(
+            f"- 规则「{rule.title}」：{_when(days, periods)} 共 {required} 个课位，"
+            f"要求 {len(scope_classes)} 个班每班这 {required} 节全部由{role_label}上课"
+            f"（并行需 {role_label} {len(scope_classes)} 人，实际 {len(heads)} 人，{'够' if parallel_ok else '不够'}）。"
+        )
+        if shortages:
+            detail = "；".join(shortages[:_LIST_CAP])
+            more = f"（其余 {len(shortages) - _LIST_CAP} 个班略）" if len(shortages) > _LIST_CAP else ""
+            lines.append(f"  缺口：{detail}{more}")
+        if not shortages and parallel_ok:
+            lines.append("  每班班主任课时充足，该规则本身可满足。")
+
+    return "\n".join(lines)
+
+
+async def lookup_remaining_capacity(session: AsyncSession, tenant_id: int, *, academic_year=None, term=None, grade=None) -> str:
+    """剩余课位容量：按班级对比课位结构容量与已排白天课时，附每科节数明细。
+
+    只回数据，不做方案判断；加科/课时分配方案由模型基于数字给出。
+    """
+    from app.api.v1.scheduling import _load_grid_config
+
+    current_year, current_term = await _term(session, tenant_id)
+    year, term = academic_year or current_year, term or current_term
+    if not year:
+        return "本校还没设置当前学年。请先到系统设置核对学年学期。"
+
+    grid = await _load_grid_config(session, tenant_id, year, term)
+    daily = [int(x or 0) for x in (grid.get("daily_periods") or [])[:7]]
+    weekday_days = sum(1 for x in daily[:5] if x > 0)
+    saturday = daily[5] if len(daily) > 5 else 0
+    capacity = sum(daily)
+
+    grade_id = None
+    grade_rows = (await session.execute(select(Grade).where(Grade.tenant_id == tenant_id))).scalars().all()
+    if grade:
+        matched = next((g for g in grade_rows if grade in g.name), None)
+        if matched is None:
+            names = "、".join(g.name for g in grade_rows) or "暂无"
+            return f"没有找到名称含「{grade}」的年级。现有年级：{names}。"
+        grade_id = matched.id
+    classes = (await session.execute(select(Class).where(
+        Class.tenant_id == tenant_id,
+        Class.academic_year == year, Class.term == term,
+    ))).scalars().all()
+    if grade_id is not None:
+        classes = [c for c in classes if c.grade_id == grade_id]
+    if not classes:
+        return "该范围内还没有班级，无法统计剩余容量。请先完成班级划分。"
+    class_ids = [c.id for c in classes]
+    class_names = {c.id: c.name for c in classes}
+
+    plans = (await session.execute(select(CourseHourPlan).where(
+        CourseHourPlan.tenant_id == tenant_id,
+        CourseHourPlan.academic_year == year, CourseHourPlan.term == term,
+        CourseHourPlan.class_id.in_(class_ids)))).scalars().all()
+    subjects = {s.id: s.name for s in (await session.execute(select(Subject))).scalars().all()}
+
+    per_class: dict[int, dict] = {cid: {"used": 0.0, "subjects": {}} for cid in class_ids}
+    for p in plans:
+        d = per_class.setdefault(p.class_id, {"used": 0.0, "subjects": {}})
+        daytime = float(p.weekday_periods or 0) + float(p.saturday_periods or 0)
+        d["used"] += daytime
+        name = subjects.get(p.subject_id, f"科目{p.subject_id}")
+        d["subjects"][name] = d["subjects"].get(name, 0) + daytime
+
+    used_list = sorted(d["used"] for d in per_class.values())
+    used_min, used_max = used_list[0], used_list[-1]
+    grade_label = f"·{next((g.name for g in grade_rows if g.id == grade_id), grade)}" if grade_id is not None else "·全校"
+    lines = [
+        f"{year}学年第{term}学期{grade_label}，{len(class_ids)} 个班。",
+        f"课位容量（白天）：{capacity} 节/班·周（{weekday_days} 个工作日各 {daily[0] if daily else 0} 节" + (f"，周六 {saturday} 节" if saturday else "") + "；晚自习课位另计）。",
+        f"已排白天课时：最少 {used_min:g} / 最多 {used_max:g} 节 ⇒ 每班剩余 {capacity - used_max:g} ~ {capacity - used_min:g} 节。",
+        "",
+    ]
+    for cid in sorted(per_class):
+        d = per_class[cid]
+        detail = " ".join(f"{name}{total:g}" for name, total in sorted(d["subjects"].items(), key=lambda kv: -kv[1]))
+        lines.append(f"- {class_names[cid]}：已排 {d['used']:g}/{capacity} 节，剩 {capacity - d['used']:g} 节｜{detail or '未设科目'}")
+    return "\n".join(lines)
+
+
+async def lookup_generation_log(job_id: str, tenant_id: int) -> str:
+    """读取生成长任务的求解事件日志（最近 40 条，含阶段/进度/消息），只读。"""
+    import asyncio
+    import time as _time
+    from app.services.scheduling.generate_jobs import _redis, _job_key, get_job
+
+    if not job_id:
+        return "请先提供任务编号，或到排课页发起生成后再查询日志。"
+    def snapshot():
+        client = _redis()
+        if client is not None:
+            raw = client.get(_job_key(job_id))
+            return json.loads(raw) if raw else None
+        job = get_job(job_id)
+        return job._snapshot() if job else None
+    job = await asyncio.wait_for(asyncio.to_thread(snapshot), timeout=5)
+    if not job or job.get("tenant_id") != tenant_id:
+        return "本校未找到该生成任务的日志，任务可能已过期。请到排课页核对任务编号。"
+    history = job.get("history") or []
+    if not history:
+        return "该任务还没有事件日志。"
+    recent = history[-40:]
+    lines = [f"生成任务日志（最近 {len(recent)} / 共 {len(history)} 条，状态：{job.get('status')}）："]
+    for event in recent:
+        ts = _time.strftime("%H:%M:%S", _time.localtime(event.get("ts") or _time.time()))
+        stage = event.get("phase") or event.get("stage") or "-"
+        percent = event.get("percent")
+        pct = f" {percent}%" if isinstance(percent, (int, float)) and percent else ""
+        message = (event.get("message") or "").strip()
+        lines.append(f"[{ts}] {stage}{pct}：{message}" if message else f"[{ts}] {stage}{pct}")
+    result = job.get("result")
+    if result:
+        lines.append(f"结果：已生成 {result.get('created', '?')} 节" + (f"，另有 {result.get('unplaced')} 节未排入" if result.get('unplaced') else ""))
+    lines.append("以上为求解器事件原文；分析时结合 13-diagnose 的容量验算与 14-algorithm 的流程口径。")
     return "\n".join(lines)
 
 
@@ -490,6 +718,15 @@ async def execute_school_tool(
         if name == "lookup_subject_capacity":
             result = await lookup_subject_capacity(session, tenant_id, grade=str(args.get("grade") or ""), **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有班级" in result or "没有找到名称含" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
+        if name == "lookup_remaining_capacity":
+            result = await lookup_remaining_capacity(session, tenant_id, grade=str(args.get("grade") or ""), **scope)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有班级" in result or "没有找到名称含" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
+        if name == "lookup_generation_log":
+            result = await lookup_generation_log(str(args.get("job_id") or context.get("job_id") or ""), tenant_id)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "未找到" in result or "请先提供" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
+        if name == "lookup_slot_role_capacity":
+            result = await lookup_slot_role_capacity(session, tenant_id, **scope)
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有启用" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_playbook":
             result = lookup_playbook(arguments)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有对上" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
