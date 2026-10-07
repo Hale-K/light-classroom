@@ -12,6 +12,7 @@ from app.api.deps import get_current_tenant, get_current_user
 from app.api.v1.scheduling import _load_grid_config
 from app.db.session import get_session
 from app.models.enums import BaseUserRole, EveningParity, UserStatus, WeekParity
+from app.models.gaokao import TeachingClass, TeachingClassSchedule
 from app.models.org import (
     Class,
     CourseHourPlan,
@@ -329,6 +330,21 @@ async def list_teacher_profiles(
         tas[ta.teacher_id].append((ta, cls, subj))
         teacher_class_ids[ta.teacher_id].add(cls.id)
 
+    # 4b) TeachingClass —— 走班教学班任教关系（选科走班课表模式的课时来源）
+    walk_classes: dict[int, list[TeachingClass]] = defaultdict(list)
+    if teacher_ids:
+        walk_stmt = select(TeachingClass).where(
+            TeachingClass.tenant_id == tenant_id,
+            TeachingClass.teacher_id.in_(teacher_ids),
+            TeachingClass.academic_year == academic_year,
+            TeachingClass.term == term,
+        )
+        for tc in (await session.execute(walk_stmt)).scalars().all():
+            walk_classes[tc.teacher_id].append(tc)
+
+    subject_rows = (await session.execute(select(Subject))).scalars().all()
+    subject_name_by_id: dict[int, str] = {s.id: s.name for s in subject_rows}
+
     # 5) Schedule 已排课时 —— 同样严格按学年、学期统计
     scheduled_counts: dict[int, float] = defaultdict(float)
     if teacher_ids:
@@ -348,6 +364,19 @@ async def list_teacher_profiles(
         for tid in teacher_ids:
             scheduled_counts[tid] = exact_counts.get(tid, 0)
 
+    # 5b) TeachingClassSchedule 已排课时 —— 走班课表每行记 1 节（无单双周维度）
+    walk_sched_counts: dict[int, float] = defaultdict(float)
+    if teacher_ids:
+        ws_stmt = select(TeachingClassSchedule.teacher_id, func.count()).where(
+            TeachingClassSchedule.tenant_id == tenant_id,
+            TeachingClassSchedule.teacher_id.in_(teacher_ids),
+            TeachingClassSchedule.academic_year == academic_year,
+            TeachingClassSchedule.term == term,
+        ).group_by(TeachingClassSchedule.teacher_id)
+        for tid, cnt in (await session.execute(ws_stmt)).fetchall():
+            if tid is not None:
+                walk_sched_counts[tid] = float(cnt or 0)
+
     plan_stmt = select(CourseHourPlan).where(CourseHourPlan.tenant_id == tenant_id)
     if academic_year:
         plan_stmt = plan_stmt.where(CourseHourPlan.academic_year == academic_year)
@@ -361,7 +390,8 @@ async def list_teacher_profiles(
     # 6) 组织并应用筛选
     rows: list[dict[str, Any]] = []
     for t in teachers:
-        if subject_id is not None and not any(subj.id == subject_id for _, _, subj in tas[t.id]):
+        if subject_id is not None and not any(subj.id == subject_id for _, _, subj in tas[t.id]) \
+                and not any(tc.subject_id == subject_id for tc in walk_classes[t.id]):
             continue
         is_ht = t.id in head_teacher_ids
         # 仅班主任筛选
@@ -405,7 +435,7 @@ async def list_teacher_profiles(
                 "display_text": f"{org.name}·{label}",
             })
 
-        # 任教班级汇总
+        # 任教班级汇总（行政班 + 走班教学班）
         teaching_classes = []
         weekly_total = 0.0
         for ta, cls, subj in tas[t.id]:
@@ -421,8 +451,20 @@ async def list_teacher_profiles(
                 "subject_id": subj.id,
                 "subject_name": subj.name,
                 "weekly_periods": periods,
+                "kind": "admin",
             })
-        scheduled = round(float(scheduled_counts.get(t.id, 0)), 1)
+        for tc in walk_classes[t.id]:
+            periods = float(tc.weekly_periods or 0)
+            weekly_total += periods
+            teaching_classes.append({
+                "class_id": tc.id,
+                "class_name": tc.name,
+                "subject_id": tc.subject_id,
+                "subject_name": subject_name_by_id.get(tc.subject_id, "未知学科"),
+                "weekly_periods": periods,
+                "kind": "walk",
+            })
+        scheduled = round(scheduled_counts.get(t.id, 0) + walk_sched_counts.get(t.id, 0), 1)
         ratio = 0.0
         if weekly_total > 0:
             ratio = round(min(scheduled / weekly_total, 1.0), 3)
@@ -573,8 +615,30 @@ async def teacher_weekly_schedule(
             teacher_name=tname.get(it.teacher_id, "未指定"),
             subject_name=sname.get(it.subject_id, "未知学科"),
             class_name=cname.get(it.class_id, "未知班级"),
+            kind="admin",
         )
         data.append(d)
+    # 走班教学班课表（选科走班模式：课表存于 TeachingClassSchedule，不在 Schedule）
+    walk_stmt = select(TeachingClassSchedule, TeachingClass).join(
+        TeachingClass, TeachingClassSchedule.teaching_class_id == TeachingClass.id,
+    ).where(
+        TeachingClassSchedule.tenant_id == tenant_id,
+        TeachingClassSchedule.teacher_id == teacher_id,
+        TeachingClassSchedule.academic_year == academic_year,
+        TeachingClassSchedule.term == term,
+    )
+    for row, tc in (await session.execute(walk_stmt)).all():
+        d = row.model_dump()
+        d.update(
+            class_id=tc.id,
+            week_parity="all",
+            teacher_name=tname.get(row.teacher_id, "未指定"),
+            subject_name=sname.get(row.subject_id, "未知学科"),
+            class_name=tc.name,
+            kind="walk",
+        )
+        data.append(d)
+    data.sort(key=lambda item: (item.get("weekday", 0), item.get("period", 0)))
     return {
         "code": 0,
         "message": "ok",

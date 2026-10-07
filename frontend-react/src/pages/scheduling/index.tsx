@@ -3,7 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom'
 import { App, Button, Checkbox, DatePicker, Dropdown, Form, Input, InputNumber, Modal, Popconfirm, Progress, Segmented, Select, Space, Switch, Table, Tabs, Tag, Tooltip } from 'antd'
 import type { TableProps, MenuProps } from 'antd'
 import dayjs from 'dayjs'
-import { authApi, fileCenterApi, orgApi, schedulingApi } from '@/api'
+import { authApi, fileCenterApi, gaokaoApi, orgApi, schedulingApi } from '@/api'
 import PageHeader from '@/components/PageHeader'
 import EmptyState from '@/components/EmptyState'
 import TableCard from '@/components/TableCard'
@@ -34,6 +34,7 @@ import GenerationDiagnosisDrawer from './GenerationDiagnosisDrawer'
 import CourseHoursPanel from './hours-management'
 import SlotStructurePanel from './SlotStructurePanel'
 import WalkSchedulePanel from './WalkSchedulePanel'
+import JointScheduling from './JointScheduling'
 import WalkTeachingAssignments from './walk-teaching-assignments'
 import {
   BUILTIN_PERIOD_PLANS,
@@ -49,6 +50,7 @@ import {
   buildGenerationPayload,
   buildRuleGridConfig,
   getConfiguredSlotOptions,
+  daytimeSlotCapacity,
   localDateValue,
   normalizeGridConfig,
   parseGenerationDiagnosis,
@@ -122,6 +124,10 @@ export default function SchedulingView() {
   const [searchParams, setSearchParams] = useSearchParams()
   const assignmentMode = searchParams.get('assignmentMode') === 'walk' ? 'walk' : 'admin'
   const [timetableMode, setTimetableMode] = useState<'administrative' | 'walk_class'>('administrative')
+  const [jointSupported, setJointSupported] = useState(false)
+  const [jointReady, setJointReady] = useState(false)
+  const [jointRevision, setJointRevision] = useState(0)
+  const [jointSaved, setJointSaved] = useState(false)
   const [scheduleViewMode, setScheduleViewMode] = useState<'administrative' | 'walk'>('administrative')
   const [gridGradeId, setGridGradeId] = useState<number | undefined>(Number(searchParams.get('grade')) || undefined)
   const [loadingGrid, setLoadingGrid] = useState(false)
@@ -166,7 +172,9 @@ export default function SchedulingView() {
     const gid = Number(raw)
     if (!Number.isFinite(gid)) return
     const first = resources.classes.find((item) => Number(item.grade_id) === gid)
-    if (first) setSelectedClassId(first.id)
+    if (first) setSelectedClassId((current) =>
+      resources.classes.find((item) => item.id === current)?.grade_id === gid ? current : first.id,
+    )
   }, [searchParams, resources.classes])
   const [assignKeyword, setAssignKeyword] = useState('')
   const [appliedAssignKeyword, setAppliedAssignKeyword] = useState('')
@@ -427,6 +435,24 @@ export default function SchedulingView() {
     return `${className}需要 ${issue.requested} 节，当前条件最多可排 ${issue.capacity} 节`
   }
 
+  const selectClass = (value?: number) => {
+    setSelectedClassId(value)
+    const grade = resources.classes.find((item) => item.id === value)?.grade_id
+    if (grade) {
+      const next = new URLSearchParams(searchParams)
+      next.set('grade', String(grade))
+      setSearchParams(next)
+    }
+  }
+
+  const selectGrade = (value: number) => {
+    setGridGradeId(value)
+    setSelectedClassId(resources.classes.find((item) => item.grade_id === value)?.id)
+    const next = new URLSearchParams(searchParams)
+    next.set('grade', String(value))
+    setSearchParams(next)
+  }
+
   const loadResources = async (scope?: { academicYear: string; term: '1' | '2' }) => {
     const [strategyOptions, academicSettings, gradeList, schoolSettings] = await Promise.all([
       schedulingApi.strategies(),
@@ -439,6 +465,7 @@ export default function SchedulingView() {
     const data = await schedulingApi.resources({ academic_year: scopedYear, term: scopedTerm })
     setResources(data)
     setTimetableMode(schoolSettings.timetable_mode || 'administrative')
+    setJointSupported(schoolSettings.timetable_mode === 'walk_class' && schoolSettings.gaokao_mode === '3+1+2')
     setStrategies(strategyOptions)
     setGrades(gradeList)
     setGridGradeId((id) => gradeList.some((grade) => grade.id === id) ? id : data.classes[0]?.grade_id ?? gradeList[0]?.id)
@@ -449,7 +476,11 @@ export default function SchedulingView() {
       if (academicSettings.current_academic_year) setAcademicYear(academicSettings.current_academic_year)
       if (academicSettings.current_term) setTerm(academicSettings.current_term)
     }
-    setSelectedClassId((prev) => data.classes.some((cls) => cls.id === prev) ? prev : data.classes[0]?.id)
+    setSelectedClassId((prev) => {
+      const requestedGrade = Number(searchParams.get('grade'))
+      const requestedClass = data.classes.find((cls) => cls.grade_id === requestedGrade)
+      return requestedClass?.id ?? (data.classes.some((cls) => cls.id === prev) ? prev : data.classes[0]?.id)
+    })
   }
 
   const loadScopeRules = async () => {
@@ -844,6 +875,18 @@ export default function SchedulingView() {
     const grade = resources.classes.find((item) => item.id === selectedClassId)?.grade_id
     if (grade) setGridGradeId(grade)
   }, [selectedClassId, resources.classes])
+
+  useEffect(() => {
+    let active = true
+    setJointReady(false)
+    setJointSaved(false)
+    if (jointSupported && gridGradeId) {
+      void gaokaoApi.overview({ grade_id: gridGradeId, academic_year: academicYear, term })
+        .then((data) => { if (active) setJointReady(Boolean(data.workflow?.can_generate_teaching_classes)) })
+        .catch((error) => { if (active) message.error(error instanceof Error ? error.message : '选科状态加载失败') })
+    }
+    return () => { active = false }
+  }, [jointSupported, gridGradeId, academicYear, term, message])
 
   useEffect(() => {
     if (activeTab !== 'schedule') return
@@ -1319,18 +1362,45 @@ export default function SchedulingView() {
       <PageHeader
         title="排课管理"
         extra={
-          activeTab === 'assignments' && assignmentMode === 'admin' ? (
+          <Space wrap>
+          {jointSupported && <>
+            <Select aria-label="联合排课年级" value={gridGradeId} placeholder="选择年级" style={{ width: 180 }}
+              disabled={generating} options={grades.map((grade) => ({ value: grade.id, label: grade.name }))}
+              onChange={selectGrade} />
+            <Tooltip title={!jointReady ? '请先在学生选课中确认选科；也请核对当前年级和学期' : undefined}>
+              <span><JointScheduling key={`${gridGradeId}-${academicYear}-${term}`} gradeId={gridGradeId}
+                gradeName={grades.find((grade) => grade.id === gridGradeId)?.name}
+                academicYear={academicYear} term={term} disabled={generating || !jointReady}
+                onSaved={() => {
+                  setJointSaved(true)
+                  setJointRevision((value) => value + 1)
+                  setRuleCatalogEpoch((value) => value + 1)
+                  void loadResources()
+                  void loadTable()
+                  void loadVersions()
+                  const next = new URLSearchParams(searchParams)
+                  next.set('tab', 'schedule')
+                  setSearchParams(next)
+                }} /></span>
+            </Tooltip>
+          </>}
+          {activeTab === 'assignments' && assignmentMode === 'admin' && (
             <Button
-              type="primary"
+              type={jointSupported ? 'default' : 'primary'}
               size="large"
               icon={<Icon name="plus" size={14} />}
               onClick={openAssignmentModal}
             >
               新增任教关系
             </Button>
-          ) : undefined
+          )}
+          </Space>
         }
       />
+      {jointSupported && <p className="sk-workflow-hint">
+        核对课时、课位、任教和规则 → 联合排课预览 → 确认保存 → 查询课表
+        {jointSaved && <Tag color="success" style={{ marginLeft: 12 }}>联合课表已保存</Tag>}
+      </p>}
       {genStage !== 'idle' && (
         <section
           className={`sk-status${genStage === 'blocked' || genStage === 'error' ? ' sk-status-fail' : genStage === 'done' ? ' sk-status-done' : ''}`}
@@ -1487,9 +1557,10 @@ export default function SchedulingView() {
                 academicYear={academicYear}
                 term={term}
                 classId={selectedClassId}
-                onClassChange={setSelectedClassId}
+                onClassChange={selectClass}
                 classOptions={resources.classes.map(classOption)}
                 onInherited={loadResources}
+                daytimeCapacity={gridConfigured ? daytimeSlotCapacity(gridConfig) : undefined}
               />
             ),
           },
@@ -1505,13 +1576,7 @@ export default function SchedulingView() {
                 gradeId={gridGradeId}
                 grades={grades}
                 configured={gridConfigured}
-                onGradeChange={(id) => {
-                  setGridGradeId(id)
-                  setSelectedClassId(resources.classes.find((item) => item.grade_id === id)?.id)
-                  const next = new URLSearchParams(searchParams)
-                  next.set('grade', String(id))
-                  setSearchParams(next, { replace: true })
-                }}
+                onGradeChange={selectGrade}
                 onChange={setGridConfig}
                 onSave={() => void saveGridConfig()}
               />,
@@ -1764,10 +1829,13 @@ export default function SchedulingView() {
               )}
               {timetableMode === 'walk_class' && scheduleViewMode === 'walk' ? (
                 <WalkSchedulePanel
+                  key={jointRevision}
                   academicYear={academicYear}
                   term={term}
                   grades={grades}
                   initialGradeId={gridGradeId}
+                  jointSupported={jointSupported}
+                  onGradeChange={selectGrade}
                 />
               ) : (
               <div className="sk-schedule-workspace">
@@ -1779,7 +1847,7 @@ export default function SchedulingView() {
                       showSearch
                       optionFilterProp="label"
                       value={selectedClassId}
-                      onChange={setSelectedClassId}
+                      onChange={selectClass}
                       placeholder="选择班级"
                       className="sk-schedule-class-select"
                       style={{ width: 200 }}
@@ -1815,7 +1883,9 @@ export default function SchedulingView() {
                         ) : null}
                       </Button>
                     </Dropdown>
-                    <Button
+                    {jointSupported ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'admin', label: '单独生成行政课表',
+                      disabled: generating || !gridConfigured, onClick: openGenerationRulePreview,
+                    }] }}><Button disabled={generating}>高级操作</Button></Dropdown> : <Button
                       type="primary"
                       loading={generating}
                       disabled={generating || !gridConfigured}
@@ -1824,7 +1894,7 @@ export default function SchedulingView() {
                       onClick={openGenerationRulePreview}
                     >
                       {generating ? '正在生成' : '生成课表'}
-                    </Button>
+                    </Button>}
                     <Button
                       disabled={generating}
                       title="选择班级或全部后导出课表"
@@ -1885,7 +1955,7 @@ export default function SchedulingView() {
                       <EmptyState
                         icon="calendar"
                         title={`${gradeScheduleLabel}还没有课表`}
-                        desc="点击「生成课表」按综合规则为年级一次性排课。"
+                        desc={jointSupported ? '点击页首「联合排课」，预览通过后确认保存。' : '点击「生成课表」按综合规则为年级一次性排课。'}
                         height={260}
                       />
                     )
@@ -1910,7 +1980,7 @@ export default function SchedulingView() {
                       eveningStartPeriod={gridConfig.evening_start_period}
                       dateMode
                       weekStart={weekStart}
-                      onLessonContextMenu={openAdjustment}
+                      onLessonClick={openAdjustment}
                     />
                   )
                 })()}

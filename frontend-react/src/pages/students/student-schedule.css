@@ -1,0 +1,9 @@
+.student-schedule-context { display: flex; align-items: center; gap: 12px; margin-bottom: 12px; color: var(--text-2); }
+.student-schedule-loading { padding: 48px; text-align: center; }
+.student-schedule-grid { overflow: auto; max-height: 75vh; }
+.student-schedule-grid .schedule-table { min-width: 760px; }
+.student-schedule-grid .st-entry { padding: 0; }
+.student-schedule-grid .st-lessons { padding: 3px 4px; }
+.student-schedule-grid .st-parity-all { display: none; }
+.student-schedule-grid .st-class-line,
+.student-schedule-grid .st-lesson-details { display: block; margin-top: 0; font-size: 11px; line-height: 1.4; color: var(--text-2); }

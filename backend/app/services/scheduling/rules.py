@@ -15,6 +15,8 @@ from app.services.scheduling.core import ScheduleItem
 
 
 RuleCode = Literal[
+    "student_gap_minimize",
+    "student_contiguous",
     "slot_forbidden",
     "slot_allowed",
     "slot_fixed",
@@ -45,6 +47,8 @@ TargetType = Literal["global", "slot", "subject", "teacher", "class"]
 PeriodScope = Literal["regular", "evening", "any"]
 
 SUPPORTED_RULE_CODES: frozenset[str] = frozenset({
+    "student_gap_minimize",
+    "student_contiguous",
     "slot_forbidden", "slot_allowed", "slot_fixed",
     "teacher_daily_limit", "teacher_consecutive", "teacher_gap_free",
     "class_gap_free", "subject_daily_spread",
@@ -80,6 +84,8 @@ class RuleDefinition(BaseModel):
     priority: Literal["hard", "soft"] = "soft"
     # 公共规则(general)与个性规则(individual)冲突时，个性规则优先。
     rule_scope: Literal["general", "individual"] = "general"
+    # 旧规则默认保持共用；行政班预留课位不会再禁掉走班。
+    schedule_scope: Literal["all", "admin", "walk"] = "all"
     target: RuleTarget
     weekdays: list[int] = Field(default_factory=list, max_length=7)
     periods: list[int] = Field(default_factory=list, max_length=12)
@@ -109,6 +115,15 @@ class RuleGroupDocument(BaseModel):
 
 
 RULE_GROUP_CATALOG_VERSION = 2
+
+
+def rules_for_schedule(
+    group: RuleGroupDocument, mode: Literal["admin", "walk"],
+) -> RuleGroupDocument:
+    """Select execution rules without changing the semester's stored catalog."""
+    return group.model_copy(update={
+        "rules": [rule for rule in group.rules if rule.schedule_scope in {"all", mode}],
+    })
 
 
 def normalize_legacy_rule_group(group: RuleGroupDocument) -> RuleGroupDocument:
@@ -823,6 +838,7 @@ def generation_class_gap_free_weekdays(group: RuleGroupDocument) -> list[int]:
         if (
             not rule.enabled
             or rule.code != "class_gap_free"
+            or rule.params.get("trailing_empty") is True
             or rule.priority != "hard"
             or compiled.status != "ready"
         ):
@@ -832,6 +848,15 @@ def generation_class_gap_free_weekdays(group: RuleGroupDocument) -> list[int]:
         else:
             days.update(range(1, 7))
     return sorted(days)
+
+
+def generation_class_prefix_groups(group: RuleGroupDocument) -> list[dict[str, Any]]:
+    ready = {r.rule_id for r in compile_rule_group(group) if r.status == "ready"}
+    return [dict(classes=rule.target.ids, weekdays=rule.weekdays, periods=rule.periods,
+                 week_parity=rule.week_parity)
+            for rule in group.rules if rule.id in ready and rule.enabled
+            and rule.code == "class_gap_free" and rule.priority == "hard"
+            and rule.params.get("trailing_empty") is True]
 
 
 def _daytime_parity_sides(rule: RuleDefinition) -> tuple[list[int], list[int]] | None:
@@ -1080,6 +1105,20 @@ def generation_teacher_period_minima(group: RuleGroupDocument) -> list[dict[str,
 
 
 def _missing_parameter(rule: RuleDefinition) -> str | None:
+    if rule.code == "student_contiguous":
+        if (rule.priority != "hard" or rule.schedule_scope != "walk" or rule.target.type != "global"
+                or rule.period_scope != "regular" or rule.week_parity != "all"
+                or set(rule.params) - {"fill_self_study"}
+                or ("fill_self_study" in rule.params and not isinstance(rule.params["fill_self_study"], bool))
+                or sorted(rule.periods) != list(range(1, len(rule.periods) + 1)) or not rule.periods):
+            return "学生课程连续仅支持全局、走班、白天每周硬约束，节次须从第1节连续选择"
+        return None
+    if rule.code == "student_gap_minimize":
+        if (rule.priority != "soft" or rule.schedule_scope != "walk"
+                or rule.target.type != "global" or rule.period_scope != "regular"
+                or rule.week_parity != "all" or rule.params):
+            return "学生减少空档仅支持全局、走班、白天每周软目标，可选择星期和优先节次"
+        return None
     if rule.code == "manual_review":
         # manual_review 本身就是“仅人工确认、不绑定算法”的规则类型，可编译。
         return None
@@ -1113,6 +1152,12 @@ def _missing_parameter(rule: RuleDefinition) -> str | None:
         return "教师无空节规则必须作用于教师或学科"
     if rule.code == "class_gap_free" and rule.target.type not in {"class", "global"}:
         return "班级无空节规则必须作用于班级或全局"
+    if rule.code == "class_gap_free" and "trailing_empty" in rule.params:
+        if type(rule.params["trailing_empty"]) is not bool:
+            return "trailing_empty 必须为布尔值"
+        if rule.params["trailing_empty"] and (not rule.periods or rule.priority != "hard"
+                                             or rule.period_scope != "regular"):
+            return "末尾可空规则须选择节次，并使用白天硬约束"
     if rule.code == "subject_evening_parity_pair":
         if rule.target.type != "subject" or len(rule.target.ids) != 2:
             return "单双周对课规则必须提供两个学科目标（单周学科、双周学科）"
@@ -1327,10 +1372,17 @@ def evaluate_rule_group(
     schedule_available: bool = True,
     evening_start_period: int | None = None,
     class_head_teacher_ids: dict[int, int | None] | None = None,
+    schedule_mode: Literal["admin", "walk"] = "admin",
+    shared_items: Iterable[ScheduleItem] = (),
+    student_occupied_by_parity: dict | None = None,
+    student_self_study_by_parity: dict | None = None,
 ) -> RuleEvaluationSummary:
     """Evaluate enabled rules against a generated or persisted weekly schedule."""
+    group = rules_for_schedule(group, schedule_mode)
     compiled = compile_rule_group(group)
     rows = list(items)
+    # 共用教师规则可计入另一种课表；专属规则只校验本次课表。
+    combined_rows = rows + list(shared_items)
     by_id = {item.rule_id: item for item in compiled}
     class_slot_allowed = generation_class_slot_allowed_subjects(group)
     early_subject_ids = generation_early_subject_ids(group)
@@ -1364,9 +1416,53 @@ def evaluate_rule_group(
                 status="not_run", message="当前还没有可校验的课表",
             ))
             continue
+        if rule.code in {"student_gap_minimize", "student_contiguous"}:
+            if student_occupied_by_parity is None:
+                results.append(RuleEvaluationResult(
+                    rule_id=rule.id, code=rule.code, title=rule.title, priority=rule.priority,
+                    status="not_run", message="需学生名单和公共课、走班课合并后校验",
+                ))
+            else:
+                from app.services.scheduling.student_gaps import count_student_gaps, count_student_unfilled, count_student_prefix_gaps
+                preferred = {day: rule.periods or list(range(1, 8)) for day in (rule.weekdays or range(1, 8))}
+                if rule.code == "student_contiguous":
+                    if rule.params.get("fill_self_study"):
+                        studies = student_self_study_by_parity or {}
+                        covered = {parity: {sid: set(slots) | studies.get(parity, {}).get(sid, set())
+                            for sid, slots in occupied.items()} for parity, occupied in student_occupied_by_parity.items()}
+                        collisions = sum(len(set(slots) & studies.get(parity, {}).get(sid, set()))
+                            for parity, occupied in student_occupied_by_parity.items() for sid, slots in occupied.items())
+                        missing = count_student_unfilled(covered, preferred)
+                        count = sum(len(studies.get(parity, {}).get(sid, set()))
+                            for parity, occupied in student_occupied_by_parity.items() for sid in occupied)
+                        results.append(RuleEvaluationResult(
+                            rule_id=rule.id, code=rule.code, title=rule.title, priority=rule.priority,
+                            status="fail" if missing or collisions else "pass",
+                            violation_count=missing + collisions, penalty=missing + collisions,
+                            metrics={"student_unfilled": missing, "student_self_study": count, "self_study_conflicts": collisions},
+                            message=f"空节 {missing}，自习冲突 {collisions}，自习 {count}（单双周合计）",
+                        ))
+                        continue
+                    gaps = count_student_prefix_gaps(student_occupied_by_parity, preferred)
+                    results.append(RuleEvaluationResult(
+                        rule_id=rule.id, code=rule.code, title=rule.title, priority=rule.priority,
+                        status="fail" if gaps else "pass", violation_count=gaps, penalty=gaps,
+                        metrics={"student_prefix_gaps": gaps},
+                        message=f"课程开始前及中间空节 {gaps}（单双周合计），末尾可空",
+                    ))
+                    continue
+                gaps = count_student_gaps(student_occupied_by_parity, preferred, preferred)
+                missing = count_student_unfilled(student_occupied_by_parity, preferred)
+                results.append(RuleEvaluationResult(
+                    rule_id=rule.id, code=rule.code, title=rule.title, priority=rule.priority,
+                    status="fail" if missing else "pass", violation_count=missing, penalty=missing + gaps,
+                    metrics={"student_gaps": gaps, "student_unfilled": missing},
+                    message=f"优先节次空节 {missing}，其中内部空节 {gaps}（单双周合计）",
+                ))
+            continue
         results.append(_evaluate_ready_rule(
             rule,
-            rows,
+            combined_rows if rule.schedule_scope == "all" else rows,
             evening_start_period=evening_start_period,
             class_head_teacher_ids=class_head_teacher_ids,
             class_slot_allowed_subjects=class_slot_allowed,
@@ -1799,6 +1895,20 @@ def _class_gap_free(
 
     周六还要求单周、双周两个实例各自 1～7 节都满。第 10 节起是晚自习，不参与。
     """
+    if rule.params.get("trailing_empty") is True:
+        selected = sorted(rule.periods)
+        occupied: dict[tuple[str, int, int], set[int]] = defaultdict(set)
+        for item in rows:
+            if not (_target_match(rule, item) and _day_match(rule, item)):
+                continue
+            for parity in ("odd", "even"):
+                if rule.week_parity not in ("all", parity) or item.week_parity not in (WeekParity.all, parity):
+                    continue
+                occupied[(parity, item.class_id, item.weekday)].add(item.period)
+        violations = sum(any(p not in slots and any(later in slots for later in selected[i + 1:])
+                             for i, p in enumerate(selected)) for slots in occupied.values())
+        return _result(rule, violations, violations, {"checked_class_days": len(occupied)},
+                       f"行政课中间空节：{violations}")
     evening_start = int(evening_start_period or 9)
     by_cd: dict[tuple[int, int], set[int]] = defaultdict(set)
     for item in rows:

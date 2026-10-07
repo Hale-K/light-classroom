@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, App, Button, Card, Checkbox, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd'
+import { useNavigate } from 'react-router-dom'
+import { Alert, App, Button, Card, Checkbox, Dropdown, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd'
 import {
   ApartmentOutlined,
   CheckCircleFilled,
@@ -32,6 +33,7 @@ const WORKFLOW_STEPS = [
 
 export default function GaokaoView() {
   const { message } = App.useApp()
+  const navigate = useNavigate()
   const user = useAuthStore((state) => state.user)
 
   const [academicYear, setAcademicYear] = useState('2026-2027')
@@ -47,9 +49,6 @@ export default function GaokaoView() {
   const [capacity, setCapacity] = useState(40)
   const [generationPreview, setGenerationPreview] = useState<Awaited<ReturnType<typeof gaokaoApi.generateTeachingClasses>>>()
   const [replaceExisting, setReplaceExisting] = useState(false)
-  const [scheduleOpen, setScheduleOpen] = useState(false)
-  const [schedulePreview, setSchedulePreview] = useState<Awaited<ReturnType<typeof gaokaoApi.recommendWalkConfiguration>>>()
-  const [scheduleGenerated, setScheduleGenerated] = useState(false)
   const [reviewChoices, setReviewChoices] = useState<import('@/api').GaokaoChoiceReview[]>([])
   const [reviewingId, setReviewingId] = useState<number>()
   const [selectedReviewIds, setSelectedReviewIds] = useState<number[]>([])
@@ -112,7 +111,6 @@ export default function GaokaoView() {
   useEffect(() => {
     setGenerationOpen(false); setGenerationPreview(undefined); setReplaceExisting(false)
     setResultsOpen(false)
-    setScheduleOpen(false); setSchedulePreview(undefined); setScheduleGenerated(false)
   }, [gradeId, academicYear, term])
 
   const generateClasses = async (preview: boolean) => {
@@ -144,38 +142,6 @@ export default function GaokaoView() {
     } catch (e) {
       setGenerationPreview(undefined)
       message.error(e instanceof Error ? e.message : '教学班生成失败')
-    } finally {
-      setGenerating('')
-    }
-  }
-
-  const generateSchedule = async () => {
-    if (!gradeId) {
-      message.warning('请选择年级')
-      return
-    }
-    setGenerating('schedule')
-    try {
-      const result = await gaokaoApi.generateSchedule({
-        grade_id: gradeId,
-        academic_year: academicYear,
-        term,
-      })
-      setSchedulePreview((current) => current ? {
-        ...current,
-        placements: result.placements,
-        room_ids: result.room_ids,
-        recommended_count: result.slots.length,
-        daily_slot_counts: result.daily_slot_counts,
-        peak_concurrent_classes: result.peak_concurrent_classes,
-        rule_results: result.rule_results,
-        warnings: result.warnings,
-      } : current)
-      setScheduleGenerated(true)
-      message.success(`已完整安排 ${result.created} 个走班课时，使用 ${result.room_count} 间教室`)
-      await load()
-    } catch (e) {
-      message.error(e instanceof Error ? e.message : '走班课表生成失败')
     } finally {
       setGenerating('')
     }
@@ -223,36 +189,17 @@ export default function GaokaoView() {
   return (
     <div className="gk-page gk-workbench">
       <PageHeader
-        title={canReviewChoices ? '班级选科审核' : '选科与走班工作台'}
+        title={canReviewChoices ? '班级选科审核' : '选科与分班'}
         extra={
           isWalkClass && !canReviewChoices ? (
             <>
               <Button disabled={!gradeId} onClick={() => setResultsOpen(true)}>查看教学班结果</Button>
-              <Button
-                loading={generating === 'classes'}
-                disabled={workflow ? !workflow.can_generate_teaching_classes : true}
-                title={workflow?.description}
-                onClick={() => { setGenerationPreview(undefined); setReplaceExisting(false); setGenerationOpen(true) }}
-              >
-                生成教学班
-              </Button>
-              <Button
-                type="primary"
-                loading={generating === 'schedule-preview' || generating === 'schedule'}
-                disabled={workflow ? !workflow.can_generate_schedule : true}
-                title={workflow?.description}
-                onClick={async () => {
-                  if (!gradeId) return
-                  setGenerating('schedule-preview')
-                  try {
-                    const preview = await gaokaoApi.recommendWalkConfiguration({ grade_id: gradeId, academic_year: academicYear, term })
-                    setSchedulePreview(preview); setScheduleGenerated(false); setScheduleOpen(true)
-                  } catch (error) { message.error(error instanceof Error ? error.message : '排课预览失败') }
-                  finally { setGenerating('') }
-                }}
-              >
-                生成走班课表
-              </Button>
+              <Dropdown trigger={['click']} menu={{ items: [{ key: 'classes', label: '单独生成教学班',
+                disabled: !workflow?.can_generate_teaching_classes || Boolean(generating),
+                onClick: () => { setGenerationPreview(undefined); setReplaceExisting(false); setGenerationOpen(true) },
+              }] }}><Button>高级操作</Button></Dropdown>
+              <Button type="primary" disabled={!gradeId || !academicContextReady}
+                onClick={() => navigate(`/scheduling?tab=hours&grade=${gradeId}`)}>去排课管理</Button>
             </>
           ) : undefined
         }
@@ -281,28 +228,6 @@ export default function GaokaoView() {
             <Alert type="warning" showIcon message={`已有 ${generationPreview.existing_class_count} 个教学班。替换会删除原班成员、教师和教室安排及已有走班课表，单班课时调整不会保留。`} />
             <Checkbox checked={replaceExisting} disabled={generating === 'classes'} onChange={(event) => setReplaceExisting(event.target.checked)} style={{ marginTop: 12 }}>我确认替换本年级本学期已有教学班</Checkbox>
           </>}
-        </>}
-      </Modal>
-      <Modal title={scheduleGenerated ? '走班课表生成结果' : '走班课表生成预览'} open={scheduleOpen} width={900}
-        confirmLoading={generating === 'schedule'} onCancel={() => { if (generating !== 'schedule') setScheduleOpen(false) }}
-        footer={scheduleGenerated ? <Button onClick={() => setScheduleOpen(false)}>关闭</Button> : <Space>
-          <Button disabled={generating === 'schedule'} onClick={() => setScheduleOpen(false)}>取消</Button>
-          <Button type="primary" loading={generating === 'schedule'} disabled={schedulePreview?.status !== 'feasible'} onClick={() => void generateSchedule()}>确认生成课表</Button>
-        </Space>}>
-        {schedulePreview && <>
-          <Alert style={{ marginBottom: 12 }} type={schedulePreview.status === 'feasible' ? 'success' : 'warning'} showIcon
-            message={scheduleGenerated ? `已安排 ${schedulePreview.placements?.length ?? 0} 个课时，覆盖 ${schedulePreview.student_count ?? 0} 名学生，使用 ${schedulePreview.room_ids?.length ?? 0} 间共享教室` : schedulePreview.message}
-            description={schedulePreview.status === 'feasible'
-              ? `每名学生每周 ${schedulePreview.student_hours_min ?? 0} 节走班课；安排在 ${schedulePreview.recommended_count ?? 0} 个时段；最多同时 ${schedulePreview.peak_concurrent_classes ?? 0} 个教学班上课。共享教室池有 ${schedulePreview.room_count ?? 0} 间，本方案按需使用 ${schedulePreview.room_ids?.length ?? 0} 间。`
-              : schedulePreview.rule_failures?.map((rule) => `${rule.title}：${rule.message}`).join('；')} />
-          {schedulePreview.warnings.map((warning) => <Alert key={warning} style={{ marginBottom: 8 }} type="warning" showIcon message={warning} />)}
-          {schedulePreview.placements?.length ? <Table size="small" rowKey={(row) => `${row.teaching_class_id}-${row.weekday}-${row.period}`}
-            dataSource={schedulePreview.placements} pagination={{ pageSize: 8 }} columns={[
-              { title: '教学班', dataIndex: 'class_name' },
-              { title: '时段', render: (_, row) => `${['周一', '周二', '周三', '周四', '周五', '周六', '周日'][row.weekday - 1]} 第${row.period}节` },
-              { title: '教室', dataIndex: 'room_name' },
-            ]} /> : null}
-          {!scheduleGenerated && <Alert style={{ marginTop: 12 }} type="warning" showIcon message="确认后将替换本年级本学期已有走班课表；如果课时、教师、学生、教室或硬性规则无法同时满足，系统不会覆盖旧课表。" />}
         </>}
       </Modal>
       <div className="gk-contextbar">
@@ -380,7 +305,7 @@ export default function GaokaoView() {
         </div>
         <div className="gk-metric metric-purple">
           <span className="gk-metric-icon"><ReadOutlined /></span>
-          <div><span>{isWalkClass ? '已生成教学班' : '科类组合'}</span><strong>{isWalkClass ? stats.teaching : stats.combos}</strong><small>{isWalkClass ? '可继续生成走班课表' : '按当前模式统计'}</small></div>
+          <div><span>{isWalkClass ? '已生成教学班' : '科类组合'}</span><strong>{isWalkClass ? stats.teaching : stats.combos}</strong><small>{isWalkClass ? '课表在排课管理生成' : '按当前模式统计'}</small></div>
         </div>
       </div>
 

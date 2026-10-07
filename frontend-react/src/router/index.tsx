@@ -11,7 +11,6 @@ import Login from '@/pages/login'
 import AdminLogin from '@/pages/admin/Login'
 import AdminSchools from '@/pages/admin/Schools'
 import Dashboard from '@/pages/dashboard'
-import ExamManage from '@/pages/exam'
 import SchedulingView from '@/pages/scheduling'
 import SpaceResourcesView from '@/pages/space-resources'
 import OnboardingView from '@/pages/onboarding'
@@ -25,7 +24,6 @@ import RbacWorkbenchView from '@/pages/rbac'
 import GaokaoView from '@/pages/gaokao'
 import SeatingView from '@/pages/seating'
 import ExamSchedulingView from '@/pages/exam-scheduling'
-import ExamRoomsView from '@/pages/exam-rooms'
 import ExamVenuesView from '@/pages/exam-venues'
 import ExamCalendarView from '@/pages/exam-calendar'
 import ExamInvigilatorsView from '@/pages/exam-invigilators'
@@ -110,7 +108,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="/dashboard" replace /> },
           { path: 'dashboard', element: <Dashboard /> },
-          { path: 'exams', element: <ExamManage /> },
+          { path: 'exams', element: <Navigate to="/exam-scheduling" replace /> },
           { path: 'scans', element: <Navigate to="/dashboard" replace /> },
           { path: 'scheduling', element: <SchedulingView /> },
           { path: 'scheduling/class-planning', element: <Navigate to="/scheduling" replace /> },
@@ -133,7 +131,7 @@ export const router = createBrowserRouter([
           { path: 'gaokao', element: <GaokaoView /> },
           { path: 'seating', element: <SeatingView /> },
           { path: 'exam-scheduling', element: <ExamSchedulingView /> },
-          { path: 'exam-rooms', element: <ExamRoomsView /> },
+          { path: 'exam-rooms', element: <Navigate to="/exam-venues" replace /> },
           { path: 'exam-venues', element: <ExamVenuesView /> },
           { path: 'exam-calendar', element: <ExamCalendarView /> },
           { path: 'exam-invigilators', element: <ExamInvigilatorsView /> },

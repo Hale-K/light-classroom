@@ -21,7 +21,7 @@ from app.core.security import get_password_hash
 from app.db.session import get_session
 from app.models.enums import BaseUserRole, EveningParity, StudentStatus, UserStatus, WeekParity
 from app.models.facility import Room
-from app.models.gaokao import GaokaoScheme
+from app.models.gaokao import GaokaoScheme, TeachingClassSchedule
 from app.models.org import (
     Class, CourseHourPlan, Grade, OrganizationUnit, Schedule, StaffAppointment, Student, Subject,
     TeachingAssignment, Tenant, TenantConfig, User,
@@ -55,6 +55,7 @@ from app.services.scheduling.rules import (
     dump_stored_rule_groups,
     parse_stored_rule_groups,
     pick_rule_group,
+    rules_for_schedule,
     normalize_legacy_rule_group,
     evaluate_rule_group,
     generation_slot_patterns,
@@ -69,6 +70,7 @@ from app.services.scheduling.rules import (
     generation_evening_self_study_candidates,
     generation_gap_free_groups,
     generation_class_gap_free_weekdays,
+    generation_class_prefix_groups,
     generation_slot_teacher_balance_scope,
     generation_evening_parity_pairs,
     generation_daytime_parity_pairs,
@@ -729,6 +731,31 @@ def _check(key: str, label: str, passed: bool, *, severity: str = "hard") -> dic
     return {"key": key, "label": label, "passed": passed, "severity": severity}
 
 
+def _timetable_mode_of(config: TenantConfig | None) -> str:
+    value = config.config_value if config and isinstance(config.config_value, dict) else {}
+    return value.get("mode") if value.get("mode") in {"administrative", "walk_class"} else "administrative"
+
+
+async def _load_walk_occupancy(
+    session: AsyncSession, *, tenant_id: int, academic_year: str, term: str,
+) -> list[TeachingClassSchedule]:
+    """选科走班课表模式下返回本学年学期全部走班课位；行政班课表模式返回空列表。
+
+    用于调课检查：走班课位对行政课调整不可见会造成学生撞课，必须显式占位。
+    """
+    config = (await session.execute(select(TenantConfig).where(
+        TenantConfig.tenant_id == tenant_id,
+        TenantConfig.config_key == "timetable_mode",
+    ))).scalars().first()
+    if _timetable_mode_of(config) != "walk_class":
+        return []
+    return list((await session.execute(select(TeachingClassSchedule).where(
+        TeachingClassSchedule.tenant_id == tenant_id,
+        TeachingClassSchedule.academic_year == academic_year,
+        TeachingClassSchedule.term == term,
+    ))).scalars().all())
+
+
 def _evaluate_move_or_swap(
     rows: list[Schedule],
     *,
@@ -739,6 +766,7 @@ def _evaluate_move_or_swap(
     target_parity: WeekParity | str | None = None,
     subject_names: dict[int, str] | None = None,
     teacher_names: dict[int, str] | None = None,
+    walk_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """空位=挪课；同班占位=对调。返回逐条 checks，供前端勾选确认。"""
     subject_names = subject_names or {}
@@ -775,6 +803,24 @@ def _evaluate_move_or_swap(
 
     evening_ok = not _evening_period_forbidden(grid, source.subject_id, move_parity, target_period)
     checks.append(_check("evening_source", "调入后本课晚自习学科允许", evening_ok))
+
+    # 选科走班课表模式：走班课位对行政课调整是硬占位，禁止调入（不开放行政课与走班课对调）
+    walk_rows_all = list((walk_context or {}).get("rows") or [])
+    if any(w.weekday == target_weekday and w.period == target_period for w in walk_rows_all):
+        reason = "该时段为走班课占用，行政课不能调入；走班课请在「课表 → 走班课表」中调整"
+        if peers:
+            reason = "目标时段同时有本班行政课与走班课占用，无法调整"
+        return {
+            "mode": "move",
+            "selectable": False,
+            "available": False,
+            "checks": checks,
+            "reason": reason,
+            "week_parity": move_parity.value,
+            "swap_schedule_id": None,
+            "swap_with_subject": None,
+            "swap_with_teacher": None,
+        }
 
     if not peers:
         teacher_ok = True
@@ -2282,11 +2328,13 @@ async def _execute_schedule_generation(
         generation_class_gap_free_weekdays(rule_group) if rule_group else []
     )
     class_gap_free = bool(class_gap_free_weekdays)
+    class_prefix_groups = generation_class_prefix_groups(rule_group) if rule_group else []
     # 与导出脚本一致：有班级无空堂规则时，周一～周六第1～7节全部打包
     #（脚本写死 class_gap_free=True 且不限 weekdays）。
     if class_gap_free or (
         rule_group is not None
-        and any(r.enabled and r.code == "class_gap_free" and r.priority == "hard" for r in rule_group.rules)
+        and any(r.enabled and r.code == "class_gap_free" and r.priority == "hard"
+                and r.params.get("trailing_empty") is not True for r in rule_group.rules)
     ):
         class_gap_free = True
         class_gap_free_weekdays = []
@@ -2403,6 +2451,7 @@ async def _execute_schedule_generation(
                         class_required_subject_slots=class_required_subject_slots or None,
                         daytime_parity_pairs=generation_daytime_parity_pairs(rule_group) if rule_group else None,
                         class_gap_free=class_gap_free,
+                        class_prefix_groups=class_prefix_groups,
                         class_gap_free_weekdays=class_gap_free_weekdays or None,
                         subject_daily_spread=True,
                         gap_free_groups=gap_free_groups,
@@ -3365,7 +3414,7 @@ async def _resolve_generation_rule_group(
         and class_grade_ids != {group.grade_id}
     ):
         raise HTTPException(status_code=422, detail="所选班级与综合规则关联的年级不一致")
-    return group
+    return rules_for_schedule(group, "admin") if group is not None else None
 
 
 async def _persist_rule_catalog(
@@ -3961,6 +4010,8 @@ async def schedule_adjustment_options(
             select(User.id, User.name).where(User.id.in_(teacher_ids))
         )).all()
     } if teacher_ids else {}
+    walk_occupancy = await _load_walk_occupancy(session, tenant_id=tenant_id, academic_year=academic_year, term=term)
+    walk_context = {"rows": walk_occupancy}
     options = []
     for weekday, period, parity in _iter_adjustment_targets(
         source=source,
@@ -3977,6 +4028,7 @@ async def schedule_adjustment_options(
             grid=grid,
             subject_names=subject_names,
             teacher_names=teacher_names,
+            walk_context=walk_context,
         )
         if teaching_relation is None:
             relation_check = _check("teaching_relation", "教师已配置该班该学科任教关系", False)
@@ -4046,6 +4098,7 @@ async def preview_schedule_adjustment(
         )).all()
     } if teacher_ids else {}
     target_parity = body.target_week_parity or WeekParity(source.week_parity)
+    walk_context = {"rows": await _load_walk_occupancy(session, tenant_id=tenant_id, academic_year=body.academic_year, term=body.term)}
     evaluated = _evaluate_move_or_swap(
         rows,
         source=source,
@@ -4055,6 +4108,7 @@ async def preview_schedule_adjustment(
         grid=grid,
         subject_names=subject_names,
         teacher_names=teacher_names,
+        walk_context=walk_context,
     )
     if not evaluated.get("selectable", False):
         raise HTTPException(status_code=409, detail=evaluated.get("reason") or "目标时段不可调")
@@ -4284,6 +4338,7 @@ async def move_schedule(
         )).all()
     } if teacher_ids else {}
     target_parity = body.target_week_parity or WeekParity(source.week_parity)
+    walk_context = {"rows": await _load_walk_occupancy(session, tenant_id=tenant_id, academic_year=body.academic_year, term=body.term)}
     evaluated = _evaluate_move_or_swap(
         rows,
         source=source,
@@ -4293,6 +4348,7 @@ async def move_schedule(
         grid=grid,
         subject_names=subject_names,
         teacher_names=teacher_names,
+        walk_context=walk_context,
     )
     if not evaluated.get("selectable", False):
         raise HTTPException(status_code=409, detail=evaluated.get("reason") or "目标时段不可调")

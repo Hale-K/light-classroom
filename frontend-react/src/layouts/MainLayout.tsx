@@ -14,9 +14,9 @@ import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 
 const MENU_GROUP_ORDER = ['overview', 'school-affairs', 'teaching-exams']
 const NAV_COLLAPSED_KEY = 'zh_nav_collapsed_groups'
-const EXAM_MODULE_PATHS = ['/exam-rooms', '/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling']
+const EXAM_MODULE_PATHS = ['/exam-venues', '/exam-calendar', '/exam-invigilators', '/exam-scheduling']
 const MENU_GATED_PATHS = new Set([
-  '/dashboard', '/exams', '/scheduling', '/teacher-courses', '/teacher-preparation', '/teacher-classes', '/teacher-students',
+  '/dashboard', '/scheduling', '/teacher-courses', '/teacher-preparation', '/teacher-classes', '/teacher-students',
   '/file-center', '/ai-providers', '/students', '/classes', '/staff', '/rbac', '/gaokao', '/seating',
   '/exam-scheduling', '/settings', '/subjects', '/campus-buildings',
   '/teacher-profiles', '/teacher-grades', '/teacher-notices',
@@ -32,7 +32,6 @@ const MENU_PATH_OVERRIDE: Record<string, string> = {
   'teacher-students': '/teacher-students',
 }
 const MENU_NAME_OVERRIDE: Record<string, string> = {
-  exams: '考试管理',
   'teacher-classes': '学生管理',
   'teacher-students': '选课审核',
 }
@@ -161,7 +160,7 @@ export default function MainLayout() {
       .map((group) => ({
         ...group,
         children: (group.children || []).filter((item) => {
-          if (['scans', 'meetings', 'teacher-research'].includes(item.key)) return false
+          if (['scans', 'meetings', 'teacher-research', 'exams', 'teacher-homework'].includes(item.key)) return false
           if (!item.path) return false
           const allowed = routeRoles(item.path)
           // undefined = 所有登录用户可进；否则要求当前角色在允许列表里
@@ -248,7 +247,7 @@ export default function MainLayout() {
 
               const renderNavItem = (item: MenuNode) => {
                 const active = isNavItemActive(location.pathname, item.path)
-                const targetPath = item.path === '/exam-scheduling' ? '/exam-rooms' : item.path
+                const targetPath = item.path
                 return (
                   <button
                     key={item.key}

@@ -1347,7 +1347,7 @@ def test_exam_candidate_arrangement_assigns_every_student_to_a_room_and_seat():
 
     result = arrange_exam_candidates(
         schedules,
-        candidate_ids_by_paper={101: [1, 2, 3, 4, 5], 102: [1, 2, 3, 4, 5]},
+        candidate_ids_by_course={101: [1, 2, 3, 4, 5], 102: [1, 2, 3, 4, 5]},
         rooms=[ExamRoomResource(name="高三01考场", capacity=3), ExamRoomResource(name="高三02考场", capacity=3)],
         teacher_ids=[10, 11, 12, 13],
         invigilators_per_room=1,
@@ -1355,7 +1355,7 @@ def test_exam_candidate_arrangement_assigns_every_student_to_a_room_and_seat():
 
     assert len(result.seats) == 10
     assert len(result.rooms) == 4
-    assert {(seat.paper_id, seat.student_id) for seat in result.seats} == {
+    assert {(seat.course_key, seat.student_id) for seat in result.seats} == {
         (paper_id, student_id) for paper_id in (101, 102) for student_id in range(1, 6)
     }
     assert all(1 <= seat.seat_no <= 3 for seat in result.seats)
@@ -1373,7 +1373,7 @@ def test_exam_candidate_arrangement_rejects_room_capacity_shortage():
     with pytest.raises(ValueError, match="考场容量不足"):
         arrange_exam_candidates(
             schedules,
-            candidate_ids_by_paper={101: [1, 2, 3, 4, 5]},
+            candidate_ids_by_course={101: [1, 2, 3, 4, 5]},
             rooms=[ExamRoomResource(name="高三01考场", capacity=4)],
             teacher_ids=[10],
             invigilators_per_room=1,
@@ -1391,7 +1391,7 @@ def test_exam_candidate_arrangement_skips_teacher_on_leave_for_the_slot():
 
     result = arrange_exam_candidates(
         schedules,
-        candidate_ids_by_paper={101: [1]},
+        candidate_ids_by_course={101: [1]},
         rooms=[ExamRoomResource(name="高三01考场", capacity=40)],
         teacher_ids=[10, 11],
         unavailable_teacher_slots={10: {slot}},

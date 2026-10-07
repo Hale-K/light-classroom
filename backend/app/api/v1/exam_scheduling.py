@@ -49,22 +49,6 @@ class SaveExamVenuesIn(BaseModel):
     rooms: list[ExamRoomIn] = Field(min_length=1, max_length=300)
 
 
-class ExamRoomCatalogIn(BaseModel):
-    name: str = Field(min_length=1, max_length=100)
-    capacity: int = Field(default=40, ge=1, le=500)
-    building: str | None = Field(default=None, max_length=100)
-    room_type: str = Field(default="standard", pattern=r"^(standard|special|reserve)$")
-    status: str = Field(default="available", pattern=r"^(available|maintenance|disabled)$")
-
-
-class ExamRoomCatalogUpdate(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
-    capacity: int | None = Field(default=None, ge=1, le=500)
-    building: str | None = Field(default=None, max_length=100)
-    room_type: str | None = Field(default=None, pattern=r"^(standard|special|reserve)$")
-    status: str | None = Field(default=None, pattern=r"^(available|maintenance|disabled)$")
-
-
 class ExamSchedulingConfigIn(BaseModel):
     grade_ids: list[int] = Field(min_length=1, max_length=10)
     start_date: date | None = None
@@ -613,83 +597,6 @@ async def list_exam_rooms(
             },
         },
     }
-
-
-@router.post("/rooms", status_code=201, summary="新建考场资源")
-async def create_exam_room(
-    body: ExamRoomCatalogIn,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
-):
-    name = body.name.strip()
-    existing = (await session.execute(select(ExamRoom).where(
-        ExamRoom.tenant_id == tenant_id,
-        ExamRoom.name == name,
-    ))).scalars().first()
-    if existing and not existing.is_deleted:
-        raise HTTPException(status_code=409, detail="考场名称已存在")
-    room = existing or ExamRoom(tenant_id=tenant_id, name=name)
-    room.name = name
-    room.capacity = body.capacity
-    room.building = body.building.strip() if body.building else None
-    room.room_type = body.room_type
-    room.status = body.status
-    room.source_class_id = None
-    room.is_deleted = False
-    session.add(room)
-    await session.commit()
-    await session.refresh(room)
-    return {"code": 0, "message": "ok", "data": _exam_room_output(room)}
-
-
-@router.patch("/rooms/{room_id}", summary="修改考场资源")
-async def update_exam_room(
-    room_id: int,
-    body: ExamRoomCatalogUpdate,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
-):
-    room = await session.get(ExamRoom, room_id)
-    if not room or room.tenant_id != tenant_id or room.is_deleted:
-        raise HTTPException(status_code=404, detail="考场不存在")
-    values = body.model_dump(exclude_unset=True)
-    if "name" in values:
-        name = values["name"].strip()
-        duplicate = (await session.execute(select(ExamRoom.id).where(
-            ExamRoom.tenant_id == tenant_id,
-            ExamRoom.name == name,
-            ExamRoom.id != room_id,
-            ExamRoom.is_deleted == False,  # noqa: E712
-        ))).first()
-        if duplicate:
-            raise HTTPException(status_code=409, detail="考场名称已存在")
-        values["name"] = name
-    if "building" in values and values["building"]:
-        values["building"] = values["building"].strip()
-    for key, value in values.items():
-        setattr(room, key, value)
-    session.add(room)
-    await session.commit()
-    await session.refresh(room)
-    return {"code": 0, "message": "ok", "data": _exam_room_output(room)}
-
-
-@router.delete("/rooms/{room_id}", summary="删除考场资源")
-async def delete_exam_room(
-    room_id: int,
-    session: AsyncSession = Depends(get_session),
-    user=Depends(get_current_user),
-    tenant_id: int = Depends(get_current_tenant),
-):
-    room = await session.get(ExamRoom, room_id)
-    if not room or room.tenant_id != tenant_id or room.is_deleted:
-        raise HTTPException(status_code=404, detail="考场不存在")
-    room.is_deleted = True
-    session.add(room)
-    await session.commit()
-    return {"code": 0, "message": "ok", "data": {"id": room_id}}
 
 
 @router.get("/exams/{exam_id}/venues", summary="查询本次考试已确认考场")

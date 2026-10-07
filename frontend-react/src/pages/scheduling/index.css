@@ -931,6 +931,68 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
 }
+.sk-hours-daytime-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  margin: -6px 0 4px;
+  color: var(--text-2);
+  font-size: 13px;
+}
+.sk-hours-daytime-summary strong {
+  color: var(--ink);
+}
+.sk-hours-cap-warn {
+  color: #d48806;
+}
+.sk-hours-section {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0 14px;
+  padding-bottom: 6px;
+  border-bottom: 1px dashed var(--border);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 600;
+}
+.sk-hours-section:first-of-type {
+  margin-top: 0;
+}
+.sk-hours-section-hint {
+  color: var(--text-2);
+  font-size: 12px;
+  font-weight: 400;
+}
+.sk-hours-meter {
+  margin: -8px 0 16px;
+}
+.sk-hours-meter-text {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 2px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.sk-hours-meter-text strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+.sk-hours-evening-parity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: -4px 0 8px;
+}
+.sk-hours-evening-parity-hint {
+  color: var(--text-2);
+  font-size: 12px;
+}
 .sk-grid-help {
   margin: -4px 0 10px;
   color: var(--text-2);

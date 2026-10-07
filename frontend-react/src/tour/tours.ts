@@ -49,9 +49,6 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     { title: '关键指标', content: '管理员可核对班级、课时、任教和规则覆盖；教师可查看今日课程、备忘和个人进度。', target: firstOf('.wb-metrics', '.tw-split') },
     { title: '快捷入口', content: '从这里直接进入对应工作页；进入后可再次打开本页导览查看具体操作。', target: firstOf('.wb-action-grid', '.tw-diamond-grid') },
   ],
-  '/exams': [
-    { title: '考试管理', content: '在这里查看和新建考试；考试日期、科目场次、考场和监考安排在排考管理中完成。', target: '.ant-table-wrapper' },
-  ],
   '/scheduling': [
     {
       title: '先看完整排课流程',
@@ -96,7 +93,7 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     },
     {
       title: '生成前确认范围与版本',
-      content: '进入课表页后先确认学年、学期、年级和班级范围。“生成课表”会先校验数据与规则，再启动后台求解；已有课表会保留历史版本。若仍聚焦页签按钮，请先保存课位结构。',
+      content: '先核对当前学期和年级。3+1+2 走班点击页首“联合排课”，预览后确认保存；单独生成在“高级操作”中。其他模式仍使用“生成课表”。',
       target: tabPanelTarget('.sk-tabs', '课表', '.sk-calendar-actions', '.sk-schedule-workspace'),
       beforeEnter: switchTab('.sk-tabs', '课表'),
     },
@@ -203,7 +200,7 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
   ],
   '/gaokao': [
     { title: '范围与模式', content: '先选择年级并确认学校高考模式，后续选科统计和教学班生成都按这个范围处理。', target: '.gk-filters' },
-    { title: '业务进度', content: '这里显示选科确认、教学班和排课所处阶段；未满足前置条件时生成按钮不会启用。', target: '.gk-workflow' },
+    { title: '业务进度', content: '完成选科确认后，点“去排课管理”进行联合排课；本页可查看分班结果。', target: '.gk-workflow' },
     { title: '选科数据', content: '组合人数和学科需求用于判断开班规模，生成前先处理页面提示的缺项。', target: '.gk-grid' },
   ],
   '/seating': [
@@ -211,12 +208,8 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     { title: '排座规则', content: '在这里设置座位顺序、需要分开的学生等条件，确认后再生成座位表。', target: '.st-rules' },
     { title: '座位结果', content: '生成后逐行核对考生与座位号；调整规则后需要重新生成并再次检查。', target: firstOf('.st-seat-grid', '.ant-table-wrapper') },
   ],
-  '/exam-rooms': [
-    { title: '排考流程', content: '顶部导航展示考场资源、使用范围、考试日程、监考教师和人员排考的先后关系。', target: '.es-nav' },
-    { title: '考场资源', content: '这里选择可作为考场的场室，并核对容量。考场不足会影响后续考生安排。', target: '.es-room-manager' },
-  ],
   '/exam-venues': [
-    { title: '排考流程', content: '顶部导航可以在排考五个环节之间切换，建议按从左到右的顺序配置。', target: '.es-nav' },
+    { title: '排考流程', content: '顶部导航可以在排考四个环节之间切换，建议按从左到右的顺序配置。', target: '.es-nav' },
     { title: '考试与考场范围', content: '先选择考试，再勾选本次实际使用的考场；保存后考试日程才有明确容量范围。', target: '.es-venue-picker' },
   ],
   '/exam-calendar': [

@@ -177,6 +177,14 @@
 }
 .tp-class-name { color: var(--text-1); font-weight: 500; }
 .tp-class-subject { color: var(--text-2); }
+.tp-class-walk-tag {
+  padding: 0 5px;
+  border-radius: 4px;
+  background: #fef3c7;
+  color: #b45309;
+  font-size: 10px;
+  line-height: 1.6;
+}
 .tp-class-periods {
   margin-left: 2px;
   background: linear-gradient(135deg, rgba(15,23,42,0.04), rgba(2,6,23,0.02));

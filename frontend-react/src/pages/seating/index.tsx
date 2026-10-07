@@ -12,8 +12,8 @@ import {
 } from '@dnd-kit/core'
 import type { DragEndEvent } from '@dnd-kit/core'
 import { App, Button, Input, InputNumber, Modal, Select, Spin, Table, Tabs, Tag } from 'antd'
-import { orgApi, seatingApi, examApi } from '@/api'
-import type { ClassInfo, Exam, SeatArrangement, SeatEntry, Student } from '@/types'
+import { orgApi, seatingApi } from '@/api'
+import type { ClassInfo, SeatArrangement, SeatEntry, Student } from '@/types'
 import PageHeader from '@/components/PageHeader'
 import TableCard from '@/components/TableCard'
 import EmptyState from '@/components/EmptyState'
@@ -37,11 +37,7 @@ const ORDER_OPTIONS = [
     label: '随机排列',
     desc: '使用固定种子生成可复现的随机顺序',
   },
-  {
-    value: 'score',
-    label: '按考试成绩',
-    desc: '按某一场考试的总分从高到低依次入座',
-  },
+
 ]
 
 /** 排布方式维度：决定顺序如何填入座位矩阵 */
@@ -303,8 +299,6 @@ export default function SeatingView() {
   const [separationPairs, setSeparationPairs] = useState<number[][]>([])
   /** 想挨着坐的学生对（ID 对：尽量相邻） */
   const [adjacencyPairs, setAdjacencyPairs] = useState<number[][]>([])
-  const [exams, setExams] = useState<Exam[]>([])
-  const [selectedExamId, setSelectedExamId] = useState<number>()
   const [activeTab, setActiveTab] = useState<'rules' | 'seats'>('rules')
 
   const selectedRule = templates.find((t) => t.id === selectedTemplateId)
@@ -437,10 +431,6 @@ export default function SeatingView() {
         setSelectedClassId((prev) => prev ?? data[0]?.id)
       })
       .catch((e) => message.error(e instanceof Error ? e.message : '班级加载失败'))
-    examApi
-      .list()
-      .then(setExams)
-      .catch((e) => message.error(e instanceof Error ? e.message : '考试加载失败'))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -459,10 +449,6 @@ export default function SeatingView() {
       message.warning('请先在"建立规则"中选择一个规则模板')
       return
     }
-    if (selectedRule.order === 'score' && selectedExamId == null) {
-      message.warning('按考试成绩排序，请先选择一场考试')
-      return
-    }
     setLoading(true)
     try {
       const item = await seatingApi.generate({
@@ -473,7 +459,6 @@ export default function SeatingView() {
         layout: selectedRule.layout,
         pairing: selectedRule.pairing,
         seed: selectedRule.order === 'random' ? Date.now() : undefined,
-        exam_id: selectedRule.order === 'score' ? selectedExamId : undefined,
         front_student_ids: frontIds,
         separation_pairs: separationPairs,
         adjacency_pairs: adjacencyPairs,
@@ -773,23 +758,6 @@ export default function SeatingView() {
                         options={classes.map((item) => ({ label: item.name, value: item.id }))}
                       />
                     </label>
-
-                    {selectedRule?.order === 'score' && (
-                      <label className="st-label">
-                        排序考试
-                        <Select
-                          value={selectedExamId}
-                          onChange={setSelectedExamId}
-                          placeholder="选择一场考试"
-                          showSearch
-                          optionFilterProp="label"
-                          options={exams.map((e) => ({
-                            label: e.academic_year ? `${e.academic_year} · ${e.name}` : e.name,
-                            value: e.id,
-                          }))}
-                        />
-                      </label>
-                    )}
 
                     <div className="st-size-row">
                       <label className="st-label">

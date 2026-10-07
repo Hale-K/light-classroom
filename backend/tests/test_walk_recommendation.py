@@ -57,11 +57,12 @@ def test_hard_rule_slots_are_excluded_from_the_recommendation():
                    if p['teaching_class_id'] == 1)
 
 
-def test_distinct_cohorts_are_staggered_when_resources_allow():
+def test_cohorts_share_one_reserved_window_when_resources_allow():
     members = [(1, 100), (1, 101), (2, 102), (2, 103)]
     rooms = [dict(id=1, name='room1', capacity=2), dict(id=2, name='room2', capacity=2)]
     cohorts = [dict(id=i, name=f'class{i}', subject_id=1, teacher_id=9 + i, weekly_periods=1) for i in (1, 2)]
     result = recommend_walk_slots(cohorts, members, rooms, [(1, 1), (1, 2)], time_limit=2)
     assert result['status'] == 'feasible'
-    assert result['peak_concurrent_classes'] == 1
-    assert len({(p['weekday'], p['period']) for p in result['placements']}) == 2
+    # 新目标函数优先少占课位窗口：两个教学班并入同一窗口，不再为降并发错峰铺开
+    assert result['peak_concurrent_classes'] == 2
+    assert len({(p['weekday'], p['period']) for p in result['placements']}) == 1

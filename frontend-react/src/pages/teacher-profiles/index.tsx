@@ -262,6 +262,7 @@ export default function TeacherProfilesView() {
                 <span className="tp-class-name">{tc.class_name}</span>
                 <span className="tp-class-subject">{tc.subject_name}</span>
                 <span className="tp-class-periods">周{tc.weekly_periods}</span>
+                {tc.kind === 'walk' && <span className="tp-class-walk-tag">走班</span>}
               </span>
             ))
           )}

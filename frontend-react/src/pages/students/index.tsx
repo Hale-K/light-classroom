@@ -9,6 +9,8 @@ import FilterCard from '@/components/FilterCard'
 import TableCard from '@/components/TableCard'
 import DictTag from '@/components/DictTag'
 import EmptyState from '@/components/EmptyState'
+import StudentScheduleModal from './StudentScheduleModal'
+import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 import { GENDER_DICT, STUDENT_STATUS_DICT } from '@/types/dict'
 import type { ClassInfo, Grade, OrganizationTreeResult, OrganizationUnit, Student, StudentGradeMembership } from '@/types'
 
@@ -60,6 +62,7 @@ export default function StudentsView() {
   const [students, setStudents] = useState<Student[]>([])
   const [academicYear, setAcademicYear] = useState('')
   const [term, setTerm] = useState('1')
+  const [scheduleStudent, setScheduleStudent] = useState<Student | null>(null)
   const [subjectChoices, setSubjectChoices] = useState<Map<number, { primary: string; secondary: string[] }>>(new Map())
   const [keyword, setKeyword] = useState('')
   const [campusFilter, setCampusFilter] = useState<CampusFilter>('')
@@ -196,12 +199,13 @@ export default function StudentsView() {
     }
   }
 
-  const loadData = async (selectedTerm?: string) => {
+  const loadData = async (refreshAcademicContext = false) => {
     setLoading(true)
     try {
-      const academicSettings = await authApi.academicYears().catch(() => null)
-      const scopedAcademicYear = academicSettings?.current_academic_year || academicYear
-      const scopedTerm = selectedTerm || (academicYear ? term : academicSettings?.current_term || term || '1')
+      const academicSettings = await authApi.academicYears(refreshAcademicContext)
+      const scopedAcademicYear = academicSettings.current_academic_year
+      const scopedTerm = academicSettings.current_term
+      if (!scopedAcademicYear) throw new Error('请先在系统配置中设置当前学年')
       setAcademicYear(scopedAcademicYear)
       setTerm(scopedTerm)
       const [gradeList, classList, studentList, orgTree] = await Promise.all([
@@ -248,13 +252,14 @@ export default function StudentsView() {
 
   useEffect(() => {
     void loadData()
+    const refreshScope = () => {
+      setScheduleStudent(null)
+      resetFilters()
+      void loadData(true)
+    }
+    window.addEventListener(ACADEMIC_CONTEXT_CHANGED, refreshScope)
+    return () => window.removeEventListener(ACADEMIC_CONTEXT_CHANGED, refreshScope)
   }, [])
-
-  const changeTerm = (value: string) => {
-    setTerm(value)
-    setPage(1)
-    void loadData(value)
-  }
 
   useEffect(() => {
     if (activeTab !== 'memberships') return
@@ -547,6 +552,11 @@ export default function StudentsView() {
         />
       ),
     },
+    {
+      title: '操作', key: 'schedule', width: 120, fixed: 'right',
+      render: (_, record) => <Button type="primary" size="small" disabled={!academicYear || loading}
+        onClick={() => setScheduleStudent(record)}>查询课表</Button>,
+    },
   ]
 
   return (
@@ -588,15 +598,6 @@ export default function StudentsView() {
 
       <FilterCard>
         <div className="zh-filter-row">
-          <label className="zh-filter-field">
-            <span>学期</span>
-            <Select
-              value={term}
-              onChange={changeTerm}
-              style={{ width: 150 }}
-              options={[{ label: '第一学期', value: '1' }, { label: '第二学期', value: '2' }]}
-            />
-          </label>
           <label className="zh-filter-field">
             <span>学生</span>
             <Input
@@ -719,6 +720,9 @@ export default function StudentsView() {
           locale={{ emptyText: <EmptyState height={220} title="暂无学生年级关联" desc="学生指定年级或分班后会自动建立关系" /> }}
         />}
       </TableCard>
+
+      {scheduleStudent && <StudentScheduleModal student={scheduleStudent} academicYear={academicYear}
+        term={term} onClose={() => setScheduleStudent(null)} />}
 
       <Modal
         title="新增学生档案"

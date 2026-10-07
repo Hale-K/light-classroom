@@ -356,6 +356,8 @@ export type SchedulingRuleCode =
   | "teacher_consecutive"
   | "teacher_gap_free"
   | "class_gap_free"
+  | "student_gap_minimize"
+  | "student_contiguous"
   | "teacher_multi_class_evening_adjacent"
   | "teacher_forbidden_slots"
   | "teacher_preferred_weekdays"
@@ -379,6 +381,7 @@ export interface SchedulingRuleDefinition {
   title: string;
   code: SchedulingRuleCode;
   rule_scope?: "general" | "individual";
+  schedule_scope?: "all" | "admin" | "walk";
   enabled: boolean;
   priority: "hard" | "soft";
   target: { type: SchedulingRuleTargetType; ids: number[] };
@@ -805,6 +808,8 @@ export interface TeacherTeachingClass {
   subject_id: number;
   subject_name: string;
   weekly_periods: number;
+  /** admin = 行政班任教关系；walk = 走班教学班（选科走班模式） */
+  kind?: "admin" | "walk";
 }
 
 /** 教师档案行 */
@@ -872,6 +877,8 @@ export interface TeacherScheduleEntry {
   teacher_name?: string;
   subject_name?: string;
   class_name?: string;
+  /** admin = 行政班课表（Schedule）；walk = 走班教学班课表（TeachingClassSchedule） */
+  kind?: "admin" | "walk";
 }
 
 /** 教师个人周课表结果 */

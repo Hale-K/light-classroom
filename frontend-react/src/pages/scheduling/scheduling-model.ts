@@ -404,6 +404,24 @@ export function normalizeGridConfig(grid: SchedulingGridConfig): SchedulingGridC
   }
 }
 
+/** 每周白天课位容量：正式课位按单双周两条腿各计 0.5，被禁用的课位不计；晚自习课位不计入。 */
+export function daytimeSlotCapacity(config: SchedulingGridConfig): number {
+  const dailyPeriods = Array.from({ length: 7 }, (_, index) => config.daily_periods?.[index] ?? 0)
+  const overrides = config.slot_overrides ?? []
+  let capacity = 0
+  for (let day = 1; day <= 7; day += 1) {
+    for (let period = 1; period <= dailyPeriods[day - 1]; period += 1) {
+      let legs = 0
+      for (const leg of ['odd', 'even'] as const) {
+        const override = overrides.find((slot) => slot.weekday === day && slot.period === period && slot.week_parity === leg)
+        if ((override?.slot_type ?? 'daytime') === 'daytime') legs += 1
+      }
+      capacity += legs / 2
+    }
+  }
+  return capacity
+}
+
 export function getConfiguredSlotOptions(gridConfig: SchedulingGridConfig): string[] {
   const dailyPeriods = Array.from({ length: 7 }, (_, index) => gridConfig.daily_periods[index] ?? 0)
   const oddEvening = Array.from({ length: 7 }, (_, index) => gridConfig.evening_daily_periods_odd[index] ?? 0)

@@ -6,7 +6,9 @@ from ortools.sat.python import cp_model
 
 def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=None,
                          blocked_teachers=None, blocked_rooms=None, blocked_subjects=None,
-                         blocked_slots=None, time_limit=12):
+                         blocked_slots=None, time_limit=12, student_gap_weekdays=None,
+                         student_fixed_by_parity=None, student_gap_periods=None,
+                         student_contiguous_periods=None, student_self_study_periods=None):
     blocked_students = blocked_students or {}
     blocked_teachers = blocked_teachers or {}
     blocked_rooms = blocked_rooms or {}
@@ -30,6 +32,17 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
     if not classes or not rooms or not slots:
         return {'status': 'blocked', 'message': '请先完成教学班、可用教室和基础课位配置'}
     student_hours = {sid: sum(by_id[cid]['weekly_periods'] for cid in cids) for sid, cids in by_student.items()}
+    fixed_by_parity = student_fixed_by_parity if student_fixed_by_parity is not None else {
+        'odd': blocked_students, 'even': blocked_students,
+    }
+    if student_contiguous_periods:
+        from app.services.scheduling.student_gaps import count_student_prefix_gaps
+        insufficient = {sid for fixed in fixed_by_parity.values() for sid in by_student
+                        if count_student_prefix_gaps({'week': {sid: fixed.get(sid, set())}},
+                                                     student_contiguous_periods) > student_hours[sid]}
+        if insufficient:
+            return {'status': 'infeasible', 'message': f'{len(insufficient)}名学生的公共课前空位超过走班总课时，需先协调重排行政课表；原课表未修改',
+                    'students_requiring_admin_reschedule': len(insufficient)}
     teacher_hours = [sum(by_id[cid]['weekly_periods'] for cid in cids) for cids in by_teacher.values()]
     total = sum(c['weekly_periods'] for c in classes)
     bounds = {'rooms': ceil(total / len(rooms)), 'students': max(student_hours.values(), default=0),
@@ -49,8 +62,6 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
             model.Add(x[c['id'], slot] <= active[slot])
         variables = [v for (cid, _), v in x.items() if cid == c['id']]
         model.Add(sum(variables) == c['weekly_periods'])
-        for day in range(1, 8):
-            model.Add(sum(v for (cid, (d, p)), v in x.items() if cid == c['id'] and d == day) <= 2)
     conflict_groups = {tuple(sorted(ids)) for ids in [*by_student.values(), *by_teacher.values()] if len(ids) > 1}
     for slot in slots:
         for ids in conflict_groups:
@@ -66,10 +77,34 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
     peak_concurrency = model.NewIntVar(0, len(classes), 'peak_concurrent_walk_classes')
     for slot in slots:
         model.Add(sum(v for (cid, candidate_slot), v in x.items() if candidate_slot == slot) <= peak_concurrency)
-    # First reduce simultaneous teaching groups to ease scarce teacher/room load;
-    # then keep the timetable compact and spread its windows across the week.
-    model.Minimize(peak_concurrency * 1000000 + sum(active.values()) * 10000 + peak * 100
-                   + sum(v * (slot[0] * 10 + slot[1]) for slot, v in active.items()))
+    # Use fewer reserved windows first. Resource conflicts/capacity remain hard
+    # constraints; reducing concurrency must not spread lessons over the week.
+    rank_bound = sum(day * 10 + period for day, period in slots)
+    tie_weight = rank_bound + 1
+    window_weight = (12 * (len(classes) + 1) + len(classes) + 1) * tie_weight
+    objective = (sum(active.values()) * window_weight
+                 + (peak * (len(classes) + 1) + peak_concurrency) * tie_weight
+                 + sum(v * (slot[0] * 10 + slot[1]) for slot, v in active.items()))
+    resource_bound = (len(slots) + 1) * window_weight
+    if student_contiguous_periods:
+        from app.services.scheduling.student_gaps import add_student_contiguous_constraints
+        add_student_contiguous_constraints(model, x, by_student, fixed_by_parity, student_contiguous_periods)
+    if student_gap_weekdays is not None:
+        from app.services.scheduling.student_gaps import add_student_gap_cost
+        fixed = student_fixed_by_parity if student_fixed_by_parity is not None else {
+            'odd': blocked_students, 'even': blocked_students,
+        }
+        gap_cost = add_student_gap_cost(model, x, by_student, fixed, student_gap_weekdays, student_gap_periods)
+        # Internal gaps take precedence over the existing resource tie-breakers.
+        objective += gap_cost * (resource_bound + 1)
+    if student_self_study_periods:
+        # Prefer real courses in the required window; independent study fills
+        # only its remainder. All subject hours and conflict constraints stay.
+        from app.services.scheduling.student_gaps import add_student_gap_cost
+        study_cost = add_student_gap_cost(model, x, by_student, fixed_by_parity,
+            student_self_study_periods, student_self_study_periods)
+        objective += study_cost * (resource_bound + 1)
+    model.Minimize(objective)
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit
     solver.parameters.num_search_workers = 2
@@ -77,7 +112,7 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
     status = solver.Solve(model)
     if status not in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         return {'status': 'infeasible' if status == cp_model.INFEASIBLE else 'unknown',
-                'message': '当前课位、教师、学生或教室条件无法同时满足' if status == cp_model.INFEASIBLE else '计算尚未找到可行方案，请增加可用教室或课位后重试',
+                'message': ('公共课锁定后无法满足学生课程连续及资源限制，需检查或协调重排行政课表' if student_contiguous_periods else '当前课位、教师、学生或教室条件无法同时满足') if status == cp_model.INFEASIBLE else '计算尚未找到可行方案，请调整配置或延长求解时间后重试',
                 'lower_bound': lower_bound, 'bounds': bounds, 'total_class_periods': total}
     placements = []
     used_rooms = set()
@@ -91,7 +126,29 @@ def recommend_walk_slots(classes, members, rooms, slots, *, blocked_students=Non
             placements.append({'teaching_class_id': c['id'], 'class_name': c['name'], 'teacher_id': c['teacher_id'],
                 'weekday': slot[0], 'period': slot[1], 'room_id': room['id'], 'room_name': room['name']})
     chosen = sorted({(p['weekday'], p['period']) for p in placements})
-    return {'status': 'feasible', 'message': '已找到满足全部教学班课时的无冲突走班方案',
+    gap_metrics = {}
+    if student_self_study_periods:
+        from app.services.scheduling.student_gaps import build_student_self_study
+        occupied = {parity: {sid: set(fixed.get(sid, set())) for sid in by_student}
+                    for parity, fixed in fixed_by_parity.items()}
+        for placement in placements:
+            for parity in occupied.values():
+                for sid in roster[placement['teaching_class_id']]:
+                    parity[sid].add((placement['weekday'], placement['period']))
+        studies = build_student_self_study(occupied, student_self_study_periods)
+        gap_metrics['student_self_study_count'] = sum(len(slots) for group in studies.values() for slots in group.values())
+    if student_gap_weekdays is not None:
+        from app.services.scheduling.student_gaps import count_student_gaps, count_student_unfilled
+        occupied = {parity: {sid: set(fixed.get(sid, set())) for sid in by_student}
+                    for parity, fixed in fixed.items()}
+        for placement in placements:
+            for parity in occupied.values():
+                for sid in roster[placement['teaching_class_id']]:
+                    parity[sid].add((placement['weekday'], placement['period']))
+        gap_metrics['student_gap_count'] = count_student_gaps(occupied, student_gap_weekdays, student_gap_periods)
+        if student_gap_periods is not None:
+            gap_metrics['student_unfilled_count'] = count_student_unfilled(occupied, student_gap_periods)
+    return {**gap_metrics, 'status': 'feasible', 'message': '已找到满足全部教学班课时的无冲突走班方案',
             'lower_bound': lower_bound, 'bounds': bounds, 'recommended_count': len(chosen),
             'slots': [list(slot) for slot in chosen], 'room_ids': sorted(used_rooms), 'placements': placements,
             'student_count': len(student_hours), 'student_hours_min': min(student_hours.values(), default=0),

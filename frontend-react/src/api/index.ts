@@ -872,6 +872,8 @@ export interface WalkTeachingClass {
 }
 
 export const gaokaoApi = {
+  studentTimetable: (studentId: number, params: { academic_year: string; term: string }) =>
+    unwrap<ScheduleEntry[]>(http.get(`/gaokao/student-timetable/${studentId}`, { params })),
   recommendWalkConfiguration: (data: { grade_id: number; academic_year: string; term: string; room_ids?: number[]; forbidden_slots?: [number, number][] }) =>
     unwrap<{ status: string; message: string; lower_bound?: number; recommended_count?: number; slots?: [number, number][]; room_ids?: number[];
       student_count?: number; roster_student_count: number; student_hours_min?: number; student_hours_max?: number; total_class_periods?: number;
@@ -912,6 +914,16 @@ export const gaokaoApi = {
       classes?: Array<{ subject_id: number; subject_name: string; sequence: number; student_count: number; weekly_periods: number }> }>(
       http.post('/gaokao/teaching-classes/generate', data),
     ),
+  previewRegroupPlan: (data: { grade_id: number; academic_year: string; term: string; capacity: number; weekdays: number[]; periods: number[] }) =>
+    unwrap<{ preview_token: string; student_count: number; class_count: number;
+      audit: Record<string, number>; replaced_rule_ids: string[];
+      classes: Array<{ id: number; subject_name: string; student_count: number; capacity: number }> }>(
+      http.post('/gaokao/teaching-classes/regroup-plan', data, { timeout: 180000 }),
+    ),
+  saveRegroupPlan: (data: { grade_id: number; academic_year: string; term: string; preview_token: string; confirm_replace: true }) =>
+    unwrap<{ saved: boolean; class_count: number; student_count: number; public_lessons: number; walk_lessons: number; audit: Record<string, number> }>(
+      http.post('/gaokao/teaching-classes/regroup-save', data, { timeout: 60000 }),
+    ),
   updateTeachingSubjectHours: (data: {
     grade_id: number
     academic_year: string
@@ -927,6 +939,14 @@ export const gaokaoApi = {
     unwrap<{ updated: number; cleared_schedule_count: number }>(http.patch(`/gaokao/teaching-classes/${classId}/hours`, data)),
   teachingClasses: (params: { grade_id: number; academic_year: string; term: string }) =>
     unwrap<WalkTeachingClass[]>(http.get('/gaokao/teaching-classes', { params })),
+  teachingClassRoster: (classId: number, params: { academic_year: string; term: string }) =>
+    unwrap<{
+      teaching_class_id: number
+      teaching_class_name: string
+      subject_id: number
+      total: number
+      items: Array<{ student_id: number; student_no: string | null; student_name: string; class_name: string | null }>
+    }>(http.get(`/gaokao/teaching-classes/${classId}/roster`, { params })),
   walkClassSpacePool: (params: { grade_id: number; academic_year: string; term?: string }) =>
       unwrap<{ grade_id: number; academic_year: string; term: string | null; physics_room_ids: number[]; history_room_ids: number[]; shared_room_ids: number[]; available_rooms: Array<{ id: number; name: string; capacity: number }> }>(
         http.get('/gaokao/space-pool', { params }),
@@ -942,7 +962,7 @@ export const gaokaoApi = {
     unwrap<{ grade_id: number; academic_year: string; physics_room_ids: number[]; history_room_ids: number[]; shared_room_ids: number[] }>(
       http.put('/gaokao/space-pool', data),
     ),
-  schedules: (params: { academic_year: string; term: string; grade_id?: number }) =>
+  schedules: (params: { academic_year: string; term: string; grade_id?: number; student_id?: number }) =>
     unwrap<Array<{
       id: number
       teaching_class_id: number
@@ -1065,11 +1085,6 @@ export const examSchedulingApi = {
       items: ExamRoomEntry[]
       pagination: { page: number; page_size: number; total: number; total_pages: number }
     }>(http.get('/exam-scheduling/rooms', { params })),
-  createRoom: (data: { name: string; capacity: number; building?: string; room_type: string }) =>
-    unwrap<ExamRoomEntry>(http.post('/exam-scheduling/rooms', data)),
-  updateRoom: (id: number, data: { name?: string; capacity?: number; building?: string; room_type?: string }) =>
-    unwrap<ExamRoomEntry>(http.patch(`/exam-scheduling/rooms/${id}`, data)),
-  deleteRoom: (id: number) => unwrap<{ id: number }>(http.delete(`/exam-scheduling/rooms/${id}`)),
   venues: (examId: number) =>
     unwrap<ExamVenuePlan>(http.get(`/exam-scheduling/exams/${examId}/venues`)),
   saveVenues: (examId: number, rooms: ExamVenuePlan['rooms']) =>

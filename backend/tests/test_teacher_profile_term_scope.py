@@ -10,6 +10,7 @@ from sqlmodel import SQLModel
 from app.api.deps import get_current_tenant, get_current_user
 from app.api.v1.teacher_profiles import router
 from app.db.session import get_session
+from app.models.gaokao import TeachingClass, TeachingClassSchedule
 from app.models.org import (
     Class, CourseHourPlan, OrganizationUnit, Schedule, StaffAppointment,
     Subject, TeachingAssignment, TenantConfig, User,
@@ -19,7 +20,8 @@ from app.models.org import (
 def test_empty_current_term_does_not_fall_back_to_historical_classes_or_lessons():
     engine = create_engine("sqlite://")
     models = [Class, CourseHourPlan, OrganizationUnit, Schedule, StaffAppointment,
-              Subject, TeachingAssignment, TenantConfig, User]
+              Subject, TeachingAssignment, TenantConfig, User,
+              TeachingClass, TeachingClassSchedule]
     SQLModel.metadata.create_all(engine, tables=[model.__table__ for model in models])
     with Session(engine) as session:
         session.add_all([

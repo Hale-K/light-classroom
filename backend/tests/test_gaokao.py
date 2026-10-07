@@ -2,7 +2,11 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
-from app.api.v1.gaokao import UpdateTeachingSubjectHoursIn, update_teaching_subject_hours
+from app.api.v1.gaokao import (
+    UpdateTeachingSubjectHoursIn,
+    _map_student_admin_classes_to_term,
+    update_teaching_subject_hours,
+)
 
 from app.services.academic.gaokao import (
     SubjectChoice,
@@ -14,12 +18,41 @@ from app.services.academic.gaokao import (
     validate_scheme_configuration,
     validate_subject_choice,
 )
+from app.services.scheduling.walk_recommendation import recommend_walk_slots
 
 
 def test_312_scheme_requires_three_required_two_primary_and_four_secondary_subjects():
     validate_scheme_configuration("3+1+2", [1, 2, 3], [4, 8], [5, 6, 7, 9])
     with pytest.raises(ValueError, match="4 门再选"):
         validate_scheme_configuration("3+1+2", [1, 2, 3], [4, 8], [5, 6, 7])
+
+
+def test_student_rosters_resolve_previous_term_class_ids_to_current_term_classes():
+    previous_term_classes = [
+        SimpleNamespace(id=627, grade_id=12, cohort_label="2026", name="高一（1）班"),
+        SimpleNamespace(id=628, grade_id=12, cohort_label="2026", name="高一（2）班"),
+    ]
+    current_term_classes = [
+        SimpleNamespace(id=717, grade_id=12, cohort_label="2026", name="高一（1）班"),
+        SimpleNamespace(id=718, grade_id=12, cohort_label="2026", name="高一（2）班"),
+    ]
+
+    mapping = _map_student_admin_classes_to_term(
+        {627, 628}, previous_term_classes, current_term_classes,
+    )
+
+    assert mapping == {627: 717, 628: 718}
+
+
+def test_student_roster_class_mapping_rejects_ambiguous_or_missing_term_class():
+    previous_term_class = SimpleNamespace(id=627, grade_id=12, cohort_label="2026", name="高一（1）班")
+    current_term_classes = [
+        SimpleNamespace(id=717, grade_id=12, cohort_label="2026", name="高一（1）班"),
+        SimpleNamespace(id=718, grade_id=12, cohort_label="2026", name="高一（1）班"),
+    ]
+
+    with pytest.raises(ValueError, match="无法唯一对应"):
+        _map_student_admin_classes_to_term({627}, [previous_term_class], current_term_classes)
 
 
 def test_scheme_subject_pools_cannot_overlap():
@@ -150,7 +183,8 @@ async def test_subject_hours_update_preserves_classes_and_clears_only_their_sche
     ("grade_level", "term", "code", "can_generate_classes", "can_generate_schedule"),
     [
         (1, "1", "exploration", False, False),
-        (1, "2", "intention", True, False),
+        # 高一下学期为意向确认期：可预编教学班并试排走班课表（见 _SELECTION_PHASES 描述）
+        (1, "2", "intention", True, True),
         (2, "1", "effective", True, True),
         (3, "2", "effective", True, True),
     ],
@@ -201,6 +235,19 @@ def test_generate_walk_schedule_prevents_shared_student_and_teacher_conflicts():
                 continue
             assert left.teacher_id != right.teacher_id
             assert set(left.student_ids).isdisjoint(right.student_ids)
+
+
+def test_walk_recommendation_does_not_impose_an_unconfigured_daily_class_limit():
+    result = recommend_walk_slots(
+        classes=[{"id": 1, "name": "生物教学班", "subject_id": 9, "teacher_id": 10, "weekly_periods": 4}],
+        members=[(1, 100)],
+        rooms=[{"id": 1, "name": "共享教室", "capacity": 40}],
+        slots=[(1, 1), (1, 2), (1, 3), (1, 4)],
+    )
+
+    assert result["status"] == "feasible"
+    assert len(result["placements"]) == 4
+    assert {item["weekday"] for item in result["placements"]} == {1}
 
 
 def test_generate_walk_schedule_prevents_shared_room_conflicts():

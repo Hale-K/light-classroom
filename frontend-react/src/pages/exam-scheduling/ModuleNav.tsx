@@ -1,7 +1,6 @@
 import { NavLink } from 'react-router-dom'
 
 const ITEMS = [
-  { path: '/exam-rooms', title: '考场管理', note: '维护学校考场资源' },
   { path: '/exam-venues', title: '考场安排', note: '确定本次使用范围' },
   { path: '/exam-calendar', title: '考试日程', note: '设置日期与考试场次' },
   { path: '/exam-invigilators', title: '监考教师', note: '设置可用、休假与排除' },

@@ -4,15 +4,28 @@ from app.api.v1.scheduling import CourseHourIn, _apply_course_hour_plans, _sort_
 from app.models.org import CourseHourPlan, Subject, TeachingAssignment
 
 
-def test_half_period_must_choose_odd_or_even_week():
+def test_half_period_parity_contract():
+    # 0.5 节可以选「无规定」（all，由规则/求解器安排单双周）
+    item = CourseHourIn(
+        class_id=1,
+        subject_id=2,
+        academic_year="2026-2027",
+        term="1",
+        weekday_periods=0.5,
+        saturday_periods=0,
+        week_parity="all",
+    )
+    assert item.week_parity == "all"
+
+    # 整节课时没有隔周概念，不允许选单周/双周
     with pytest.raises(ValueError, match="0.5"):
         CourseHourIn(
             class_id=1,
             subject_id=2,
             academic_year="2026-2027",
             term="1",
-            weekly_periods=0.5,
-            week_parity="all",
+            weekly_periods=4,
+            week_parity="odd",
         )
 
 

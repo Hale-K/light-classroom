@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { App, Button, Checkbox, Form, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Alert, App, Button, Checkbox, Form, InputNumber, Modal, Progress, Radio, Segmented, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { schedulingApi } from '@/api'
 import type { ClassInfo, CourseHourPlanInfo, EveningParity, SubjectInfo, WeekParity } from '@/types'
@@ -14,6 +14,8 @@ interface CourseHoursPanelProps {
   onClassChange?: (classId?: number) => void
   classOptions?: Array<{ label: string; value: number }>
   onInherited?: () => Promise<void> | void
+  /** 每周白天课位容量（来自课位结构）；未配置课位结构时不传，弹窗内不显示容量参照。 */
+  daytimeCapacity?: number
 }
 
 type EveningParityChoice = EveningParity
@@ -34,6 +36,47 @@ const parityLabels: Record<WeekParity, string> = { all: '每周', odd: '单周',
 const hasHalfDaytime = (weekday: number, saturday: number) =>
   [weekday, saturday].some((value) => value % 1 !== 0)
 
+const formatPeriods = (value: number) => (Number.isInteger(value) ? String(value) : value.toFixed(1))
+
+const eveningText = (row: CourseHourPlanInfo): string => {
+  const mode = row.evening_parity
+    ?? (row.evening_periods_odd && row.evening_periods_even
+      ? (row.week_parity !== 'all' ? 'either' : 'all')
+      : (row.evening_periods_odd ? 'odd' : row.evening_periods_even ? 'even' : 'all'))
+  if (mode === 'either') return '0.5 节（无规定）'
+  if (mode === 'odd') return '0.5 节（单周）'
+  if (mode === 'even') return '0.5 节（双周）'
+  if (row.evening_periods_odd && row.evening_periods_even) return '1 节（每周）'
+  return '0 节'
+}
+
+const describePlan = (row: CourseHourPlanInfo): string =>
+  `${parityLabels[row.week_parity]} 工作日 ${formatPeriods(row.weekday_periods)} 节 · 周六 ${formatPeriods(row.saturday_periods)} 节 · 晚课 ${eveningText(row)}`
+
+/** 课表行 → 弹窗表单值（编辑与“同科目参考默认”共用） */
+function planToFormValues(row: CourseHourPlanInfo): Partial<CourseHourFormValues> {
+  const both = Boolean(row.evening_periods_odd && row.evening_periods_even)
+  const stored = row.evening_parity
+  const eveningParity: EveningParityChoice = stored
+    ? stored
+    : both
+      ? (row.week_parity !== 'all' ? 'either' : 'all')
+      : (row.evening_periods_odd && !row.evening_periods_even ? 'odd' : 'even')
+  const isHalfEvening = eveningParity === 'either' || eveningParity === 'odd' || eveningParity === 'even'
+  return {
+    class_id: row.class_id,
+    subject_id: row.subject_id,
+    weekday_periods: row.weekday_periods,
+    saturday_periods: row.saturday_periods,
+    weekly_periods: row.weekly_periods,
+    week_parity: row.week_parity,
+    evening_periods: both || row.evening_periods_odd || row.evening_periods_even
+      ? (isHalfEvening ? 0.5 : 1)
+      : 0,
+    evening_parity: eveningParity === 'all' ? 'either' : eveningParity,
+  }
+}
+
 export default function CourseHoursPanel({
   classes,
   subjects,
@@ -43,23 +86,33 @@ export default function CourseHoursPanel({
   onClassChange,
   classOptions,
   onInherited,
+  daytimeCapacity,
 }: CourseHoursPanelProps) {
   const { message } = App.useApp()
-  const [rows, setRows] = useState<CourseHourPlanInfo[]>([])
+  const [allPlans, setAllPlans] = useState<CourseHourPlanInfo[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState<CourseHourPlanInfo>()
+  const [autoTarget, setAutoTarget] = useState<CourseHourPlanInfo>()
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [inheritOpen, setInheritOpen] = useState(false)
   const [inheriting, setInheriting] = useState(false)
   const [inheritTypes, setInheritTypes] = useState(['course_hours', 'assignments'])
   const [form] = Form.useForm<CourseHourFormValues>()
+  const saveModeRef = useRef<'save' | 'continue' | null>(null)
   const weekdayPeriods = Form.useWatch('weekday_periods', form) ?? 0
   const saturdayPeriods = Form.useWatch('saturday_periods', form) ?? 0
   const eveningPeriods = Form.useWatch('evening_periods', form) ?? 0
+  const formClassId = Form.useWatch('class_id', form) as number | undefined
+  const formSubjectId = Form.useWatch('subject_id', form) as number | undefined
   const hasHalfPeriod = hasHalfDaytime(weekdayPeriods, saturdayPeriods)
+
+  const rows = useMemo(
+    () => (classId ? allPlans.filter((row) => row.class_id === classId) : allPlans),
+    [allPlans, classId],
+  )
 
   useEffect(() => {
     const currentParity = form.getFieldValue('week_parity') as WeekParity | undefined
@@ -79,10 +132,30 @@ export default function CourseHoursPanel({
     }
   }, [eveningPeriods, form])
 
+  // 新增模式下选完班级+科目：已有同组合方案则转更新模式；否则带出同科目其他班级的配置作默认
+  useEffect(() => {
+    if (!open || editing) return
+    if (!formClassId || !formSubjectId) {
+      setAutoTarget(undefined)
+      return
+    }
+    const siblings = allPlans.filter((row) => row.class_id === formClassId && row.subject_id === formSubjectId)
+    if (!siblings.length) {
+      setAutoTarget(undefined)
+      const reference = allPlans.find((row) => row.subject_id === formSubjectId && row.class_id !== formClassId)
+      if (reference) form.setFieldsValue(planToFormValues(reference))
+      return
+    }
+    const currentParity = (form.getFieldValue('week_parity') as WeekParity | undefined) ?? 'all'
+    const target = siblings.find((row) => row.week_parity === currentParity) ?? siblings[0]
+    setAutoTarget(target)
+    form.setFieldsValue(planToFormValues(target))
+  }, [open, editing, formClassId, formSubjectId, allPlans, form])
+
   const load = async () => {
     setLoading(true)
     try {
-      setRows(await schedulingApi.courseHours({ academic_year: academicYear, term, class_id: classId }))
+      setAllPlans(await schedulingApi.courseHours({ academic_year: academicYear, term }))
     } catch (error) {
       message.error(error instanceof Error ? error.message : '课时方案加载失败')
     } finally {
@@ -90,16 +163,18 @@ export default function CourseHoursPanel({
     }
   }
 
-  useEffect(() => { void load() }, [academicYear, term, classId])
+  useEffect(() => { void load() }, [academicYear, term])
 
   const close = () => {
     setOpen(false)
     setEditing(undefined)
+    setAutoTarget(undefined)
     form.resetFields()
   }
 
   const openCreate = () => {
     setEditing(undefined)
+    setAutoTarget(undefined)
     form.resetFields()
     form.setFieldsValue({
       class_id: classId,
@@ -115,26 +190,8 @@ export default function CourseHoursPanel({
 
   const openEdit = (row: CourseHourPlanInfo) => {
     setEditing(row)
-    const both = Boolean(row.evening_periods_odd && row.evening_periods_even)
-    const stored = row.evening_parity
-    const eveningParity: EveningParityChoice = stored
-      ? stored
-      : both
-        ? (row.week_parity !== 'all' ? 'either' : 'all')
-        : (row.evening_periods_odd && !row.evening_periods_even ? 'odd' : 'even')
-    const isHalfEvening = eveningParity === 'either' || eveningParity === 'odd' || eveningParity === 'even'
-    form.setFieldsValue({
-      class_id: row.class_id,
-      subject_id: row.subject_id,
-      weekday_periods: row.weekday_periods,
-      saturday_periods: row.saturday_periods,
-      weekly_periods: row.weekly_periods,
-      week_parity: row.week_parity,
-      evening_periods: both || row.evening_periods_odd || row.evening_periods_even
-        ? (isHalfEvening ? 0.5 : 1)
-        : 0,
-      evening_parity: eveningParity === 'all' ? 'either' : eveningParity,
-    })
+    setAutoTarget(undefined)
+    form.setFieldsValue(planToFormValues(row))
     setOpen(true)
   }
 
@@ -157,8 +214,9 @@ export default function CourseHoursPanel({
           eveningPeriodsEven = 1
         }
       }
+      const target = editing ?? autoTarget
       await schedulingApi.saveCourseHour({
-        id: editing?.id,
+        id: target?.id,
         weekly_periods: values.weekday_periods + values.saturday_periods,
         class_id: values.class_id,
         subject_id: values.subject_id,
@@ -173,12 +231,21 @@ export default function CourseHoursPanel({
         evening_periods_odd: eveningPeriodsOdd,
         evening_periods_even: eveningPeriodsEven,
       })
-      message.success(editing ? '课时方案已更新' : '课时方案已保存')
-      close()
-      await load()
+      if (saveModeRef.current === 'continue' && !target) {
+        message.success('已保存，可继续录入下一科目')
+        form.setFieldValue('subject_id', undefined)
+        const subjectField = form.getFieldInstance('subject_id') as { focus?: () => void } | null
+        subjectField?.focus?.()
+        await load()
+      } else {
+        message.success(target ? '课时方案已更新' : '课时方案已保存')
+        close()
+        await load()
+      }
     } catch (error) {
       message.error(error instanceof Error ? error.message : '课时方案保存失败')
     } finally {
+      saveModeRef.current = null
       setSaving(false)
     }
   }
@@ -230,17 +297,7 @@ export default function CourseHoursPanel({
     { title: '工作日', dataIndex: 'weekday_periods', key: 'weekday_periods', width: 110, align: 'center', render: (value: number) => `${value} 节` },
     { title: '周六', dataIndex: 'saturday_periods', key: 'saturday_periods', width: 100, align: 'center', render: (value: number) => `${value} 节` },
     { title: '合计', dataIndex: 'weekly_periods', key: 'weekly_periods', width: 100, align: 'center', render: (value: number) => `${value} 节` },
-    { title: '晚课', key: 'evening_periods', width: 170, align: 'center', render: (_, row) => {
-      const mode = row.evening_parity
-        ?? (row.evening_periods_odd && row.evening_periods_even
-          ? (row.week_parity !== 'all' ? 'either' : 'all')
-          : (row.evening_periods_odd ? 'odd' : row.evening_periods_even ? 'even' : 'all'))
-      if (mode === 'either') return '0.5 节（无规定）'
-      if (mode === 'odd') return '0.5 节（单周）'
-      if (mode === 'even') return '0.5 节（双周）'
-      if (row.evening_periods_odd && row.evening_periods_even) return '1 节（每周）'
-      return '0 节'
-    } },
+    { title: '晚课', key: 'evening_periods', width: 170, align: 'center', render: (_, row) => eveningText(row) },
     { title: '白天周次', dataIndex: 'week_parity', key: 'week_parity', width: 140, align: 'center', render: (value: WeekParity, row) => {
       const half = hasHalfDaytime(row.weekday_periods, row.saturday_periods)
       const label = value === 'all' && half ? '无规定' : parityLabels[value]
@@ -258,6 +315,13 @@ export default function CourseHoursPanel({
   const weekdayTotal = rows.reduce((sum, row) => sum + row.weekday_periods, 0)
   const saturdayTotal = rows.reduce((sum, row) => sum + row.saturday_periods, 0)
   const daytimeTotal = weekdayTotal + saturdayTotal
+
+  const isUpdate = Boolean(editing || autoTarget)
+  const updateTargetId = (editing ?? autoTarget)?.id
+  const classConfiguredOther = allPlans
+    .filter((row) => row.class_id === formClassId && row.id !== updateTargetId)
+    .reduce((sum, row) => sum + row.weekday_periods + row.saturday_periods, 0)
+  const daytimeAfterSave = classConfiguredOther + weekdayPeriods + saturdayPeriods
 
   return (
     <section className="sk-hours">
@@ -309,53 +373,113 @@ export default function CourseHoursPanel({
         }}
         locale={{ emptyText: '暂无课时方案，请先新增班级课程课时' }}
       />
-      <Modal title={editing ? '编辑课时方案' : '新增课时方案'} open={open} centered onCancel={close} onOk={() => form.submit()} okText="保存" cancelText="取消" confirmLoading={saving}>
+      <Modal
+        title={isUpdate ? '更新课时方案' : '新增课时方案'}
+        open={open}
+        centered
+        width={560}
+        onCancel={close}
+        onOk={() => { saveModeRef.current = 'save'; form.submit() }}
+        okText={isUpdate ? '更新' : '保存'}
+        cancelText="取消"
+        confirmLoading={saving}
+        footer={!isUpdate ? (
+          <Space>
+            <Button onClick={close}>取消</Button>
+            <Button loading={saving && saveModeRef.current === 'save'} onClick={() => { saveModeRef.current = 'save'; form.submit() }}>保存</Button>
+            <Button type="primary" loading={saving && saveModeRef.current === 'continue'} onClick={() => { saveModeRef.current = 'continue'; form.submit() }}>保存并继续</Button>
+          </Space>
+        ) : undefined}
+      >
         <Form form={form} layout="vertical" onFinish={submit}>
-          <Form.Item name="class_id" label="班级" rules={[{ required: true, message: '请选择班级' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择班级" options={classes.map((item) => ({ label: item.name, value: item.id }))} notFoundContent={<SelectEmptyGuide description="暂无可用班级" path="/classes" actionLabel="去班级管理创建" compact />} />
-          </Form.Item>
-          <Form.Item name="subject_id" label="科目" rules={[{ required: true, message: '请选择科目' }]}>
-            <Select showSearch optionFilterProp="label" placeholder="选择科目" options={subjects.map((item) => ({ label: item.name, value: item.id }))} notFoundContent={<SelectEmptyGuide description="暂无可用科目" path="/subjects" actionLabel="去科目管理创建" compact />} />
-          </Form.Item>
-          <Form.Item name="weekday_periods" label="工作日课时" rules={[{ required: true, message: '请输入工作日课时' }]} extra="周一至周五的合计课时。">
-            <InputNumber min={0} max={20} step={0.5} addonAfter="节" style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="saturday_periods" label="周六课时" rules={[{ required: true, message: '请输入周六课时' }]} extra="没有周六课时就填 0。">
-            <InputNumber min={0} max={10} step={0.5} addonAfter="节" style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item label="白天课时合计">
-            <InputNumber value={weekdayPeriods + saturdayPeriods} addonAfter="节" disabled style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="week_parity" label="白天隔周类型（工作日 + 周六）" rules={[{ required: true, message: '请选择白天隔周类型' }]} extra={hasHalfPeriod ? '作用于上方的工作日课时和周六课时；0.5 节默认无规定，由对课规则或求解器安排单双周。此项不影响晚课。' : '作用于上方的工作日课时和周六课时；整节白天课按每周安排。此项不影响晚课。'}>
-            <Select options={Object.entries(parityLabels).map(([value, label]) => ({
-              value,
-              label: value === 'all'
-                ? (hasHalfPeriod ? '无规定（由规则/求解器安排）' : `${label}（普通课时）`)
-                : `${label}（隔周课时）`,
-              disabled: hasHalfPeriod ? false : value !== 'all',
-            }))} />
-          </Form.Item>
+          {autoTarget && !editing && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 16 }}
+              message="该班级此科目已有课时方案，本次保存将更新它"
+              description={`当前为：${describePlan(autoTarget)}`}
+            />
+          )}
           <div className="sk-evening-hours-fields">
-            <Form.Item name="evening_periods" label="晚课课时（独立维护）" rules={[{ required: true, message: '请输入晚课课时' }]} extra="只作用于晚自习课位，不计入工作日或周六白天课时；1 = 两周都上，0.5 = 每周只上一节，没有就填 0。">
-              <InputNumber min={0} max={1} step={0.5} addonAfter="节" style={{ width: '100%' }} />
+            <Form.Item name="class_id" label="班级" rules={[{ required: true, message: '请选择班级' }]}>
+              <Select showSearch optionFilterProp="label" placeholder="选择班级" options={classes.map((item) => ({ label: item.name, value: item.id }))} notFoundContent={<SelectEmptyGuide description="暂无可用班级" path="/classes" actionLabel="去班级管理创建" compact />} />
             </Form.Item>
-            <Form.Item
-              name="evening_parity"
-              label="0.5 晚课单双周安排"
-              extra="单周、双周，或无规定由程序安排。物理和历史无规定时，可单物双史，也可单史双物。"
-            >
-              <Select
-                disabled={eveningPeriods !== 0.5}
-                placeholder="无规定"
+            <Form.Item name="subject_id" label="科目" rules={[{ required: true, message: '请选择科目' }]}>
+              <Select showSearch optionFilterProp="label" placeholder="选择科目" options={subjects.map((item) => ({ label: item.name, value: item.id }))} notFoundContent={<SelectEmptyGuide description="暂无可用科目" path="/subjects" actionLabel="去科目管理创建" compact />} />
+            </Form.Item>
+          </div>
+
+          <div className="sk-hours-section">
+            <span>白天课时</span>
+            <span className="sk-hours-section-hint">工作日 + 周六</span>
+          </div>
+          <div className="sk-evening-hours-fields">
+            <Form.Item name="weekday_periods" label="工作日课时" rules={[{ required: true, message: '请输入工作日课时' }]}>
+              <InputNumber min={0} max={20} step={0.5} addonAfter="节" style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="saturday_periods" label="周六课时" rules={[{ required: true, message: '请输入周六课时' }]}>
+              <InputNumber min={0} max={10} step={0.5} addonAfter="节" style={{ width: '100%' }} />
+            </Form.Item>
+          </div>
+          <div className="sk-hours-meter">
+            <div className="sk-hours-meter-text">
+              <span>白天合计 <strong>{formatPeriods(weekdayPeriods + saturdayPeriods)}</strong> 节</span>
+              {daytimeCapacity != null && (
+                <span className={daytimeAfterSave > daytimeCapacity ? 'sk-hours-cap-warn' : undefined}>
+                  本班 {formatPeriods(daytimeAfterSave)}/{formatPeriods(daytimeCapacity)} 节
+                  {daytimeAfterSave > daytimeCapacity ? ' · 已超出课位容量，可能排不入' : ''}
+                </span>
+              )}
+            </div>
+            {daytimeCapacity != null && daytimeCapacity > 0 && (
+              <Progress
+                size="small"
+                showInfo={false}
+                percent={Math.min(100, Math.round((daytimeAfterSave / daytimeCapacity) * 100))}
+                status={daytimeAfterSave > daytimeCapacity ? 'exception' : 'success'}
+              />
+            )}
+          </div>
+          {hasHalfPeriod ? (
+            <Form.Item name="week_parity" label="白天隔周" extra="含 0.5 节时需说明隔周方式；不影响晚课。">
+              <Select options={[
+                { value: 'all', label: '无规定（由规则/求解器安排）' },
+                { value: 'odd', label: '单周' },
+                { value: 'even', label: '双周' },
+              ]} />
+            </Form.Item>
+          ) : null}
+
+          <div className="sk-hours-section">
+            <span>晚课 · 晚自习课位</span>
+            <span className="sk-hours-section-hint">语数外通常每周，其他通常隔周</span>
+          </div>
+          <Form.Item name="evening_periods" style={{ marginBottom: eveningPeriods === 0.5 ? 12 : 0 }}>
+            <Segmented
+              block
+              options={[
+                { value: 0, label: '不上' },
+                { value: 1, label: '每周 1 节' },
+                { value: 0.5, label: '隔周 1 节' },
+              ]}
+            />
+          </Form.Item>
+          {eveningPeriods === 0.5 && (
+            <div className="sk-hours-evening-parity">
+              <Radio.Group
+                size="small"
+                optionType="button"
+                buttonStyle="solid"
                 options={[
                   { value: 'either', label: '无规定' },
                   { value: 'odd', label: '单周' },
                   { value: 'even', label: '双周' },
                 ]}
               />
-            </Form.Item>
-          </div>
-          <div className="sk-rule-info-card"><strong>配置范围说明</strong><span>白天隔周类型只控制工作日和周六课时；晚课课时及晚课单双周安排单独控制晚自习。每个晚上只有 1 节：语数外通常填 1，其他科目通常填 0.5，并可选择单周、双周或无规定。</span></div>
+              <span className="sk-hours-evening-parity-hint">无规定 = 由排课程序安排单双周（物理/历史可单物双史）</span>
+            </div>
+          )}
         </Form>
       </Modal>
       <Modal

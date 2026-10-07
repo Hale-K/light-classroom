@@ -375,7 +375,7 @@ def _build_suggestions(
                 "title": "核对课时与任教",
                 "action": "check_hours",
                 "action_label": "去课时/任教检查",
-                "reason": "若各班工作日课时正好铺满第1～7节，再叠加禁排/仅允许科目，极易无解。",
+                "reason": "请在课位结构中配置各教学日的可用节次，并在课时管理中配置班级课时。若课时占满已配置的可用课位，再叠加禁排或仅允许科目等硬限制，可能无法排出课表。",
                 "impact": "先确认课时方案、任教是否与规则匹配，再改规则。",
                 "priority": 50,
                 "applicable": False,
@@ -402,15 +402,6 @@ def _score_rule(
                 "demote_to_soft",
                 f"禁止占用指定课位（{sorted(weekdays)} 的第 {sorted(periods)} 节），覆盖 {n_classes} 个班。",
                 "降为软目标或缩小班级/星期范围，可立刻腾出课位。",
-            )
-        allowed = rule.params.get("allowed_subject_ids") or []
-        if periods & {8, 9} and n_classes >= 5:
-            return (
-                3,
-                "demote_to_soft",
-                f"第8/9节仅允许少量科目（{len(allowed)} 个），且作用 {n_classes} 个班；"
-                "主科无法溢出到 8/9，模型极易被锁死。",
-                "建议先降为软目标，或仅保留对个别班（如 10 班）的硬限制。",
             )
         return (
             12,

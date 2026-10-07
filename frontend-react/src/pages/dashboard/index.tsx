@@ -28,7 +28,7 @@ interface WorkbenchAction {
 
 const academicActions: WorkbenchAction[] = [
   { title: '排课管理', detail: '检查任教关系并生成课表', path: '/scheduling', icon: 'calendar', tone: 'blue' },
-  { title: '排考管理', detail: '创建考场并安排考试人员', path: '/exam-rooms', icon: 'file-text', tone: 'amber' },
+  { title: '排考管理', detail: '配置考试并安排考生与监考教师', path: '/exam-scheduling', icon: 'file-text', tone: 'amber' },
   { title: '行政分班', detail: '按已分配资源生成班级', path: '/classes', icon: 'users', tone: 'violet' },
   { title: '空间资源', detail: '查看校区、楼宇与场室', path: '/campus-buildings', icon: 'building', tone: 'green' },
 ]

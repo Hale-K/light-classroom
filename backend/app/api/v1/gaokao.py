@@ -5,11 +5,11 @@ from collections import Counter, defaultdict
 import asyncio
 import hashlib
 import json
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, Field
-from sqlalchemy import delete, or_, select
+from pydantic import BaseModel, Field, ConfigDict, model_validator
+from sqlalchemy import and_, delete, or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.deps import get_current_tenant, get_current_user, require_choice_viewer, require_head_teacher, require_management_user, resolve_choice_view_access
@@ -26,7 +26,7 @@ from app.models.gaokao import (
 from app.models.facility import Building, ResourceAllocationRule, Room, RoomCohortAllocation
 from app.services.org.cohort import expected_cohort_label, normalize_cohort_label
 from app.models.org import (
-    Class, Grade, Student, StudentGradeMembership, Subject, TeachingAssignment,
+    Class, Grade, Student, StudentGradeMembership, StudentClassMembership, Subject, TeachingAssignment,
     Tenant, TenantConfig, User, OrganizationUnit, StaffAppointment, Schedule, CourseHourPlan,
 )
 from app.models.enums import BaseUserRole, UserStatus
@@ -40,6 +40,257 @@ from app.services.academic.gaokao import (
 )
 
 router = APIRouter(prefix="/gaokao", tags=["新高考走班"])
+
+
+class WalkRegroupAutoIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    grade_id: int = Field(ge=1)
+    academic_year: str = Field(min_length=4, max_length=20)
+    term: str = Field(pattern=r'^[12]$')
+    capacity: int = Field(default=45, ge=1, le=100)
+    weekdays: list[int] = Field(default_factory=lambda: list(range(1, 7)))
+    periods: list[int] = Field(default_factory=lambda: list(range(1, 8)))
+
+    @model_validator(mode='after')
+    def validate_slots(self):
+        WalkRegroupPreviewIn(**self.model_dump(), a_groups={1: 0}, b_groups={1: 0},
+                             b_excluded_subject={0: 1})
+        return self
+
+
+class WalkRegroupSaveIn(BaseModel):
+    model_config = ConfigDict(extra='forbid')
+    grade_id: int = Field(ge=1)
+    academic_year: str = Field(min_length=4, max_length=20)
+    term: str = Field(pattern=r'^[12]$')
+    preview_token: str = Field(min_length=1, max_length=50)
+    confirm_replace: Literal[True]
+
+
+@router.post('/teaching-classes/regroup-plan', dependencies=[Depends(require_management_user)],
+             summary='联合预览重新分组和课表')
+async def preview_regroup_plan(body: WalkRegroupAutoIn, session: AsyncSession = Depends(get_session),
+                              tenant_id: int = Depends(get_current_tenant)):
+    from app.services.scheduling.walk_regroup_save import preview_plan
+    return {'code': 0, 'message': 'ok', 'data': await preview_plan(body, session, tenant_id)}
+
+
+@router.post('/teaching-classes/regroup-save', dependencies=[Depends(require_management_user)],
+             summary='保存联合分组和课表（不备份旧数据）')
+async def save_regroup_plan(body: WalkRegroupSaveIn, session: AsyncSession = Depends(get_session),
+                           tenant_id: int = Depends(get_current_tenant),
+                           user: User = Depends(get_current_user)):
+    from app.services.scheduling.walk_regroup_save import save_plan
+    return {'code': 0, 'message': 'ok', 'data': await save_plan(body, session, tenant_id, user.id)}
+
+
+class WalkRegroupPreviewIn(BaseModel):
+    """Explicit, opt-in walk partitions; no persistence or implicit rule replacement."""
+    model_config = ConfigDict(extra='forbid')
+    grade_id: int = Field(ge=1)
+    academic_year: str = Field(min_length=4, max_length=20)
+    term: str = Field(pattern=r'^[12]$')
+    capacity: int = Field(default=45, ge=1, le=100)
+    a_groups: dict[int, int] = Field(min_length=1, max_length=100)
+    b_groups: dict[int, int] = Field(min_length=1, max_length=100)
+    b_excluded_subject: dict[int, int] = Field(min_length=1, max_length=100)
+    weekdays: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6], min_length=1, max_length=6)
+    periods: list[int] = Field(default_factory=lambda: [1, 2, 3, 4, 5, 6, 7], min_length=1, max_length=12)
+
+    @model_validator(mode='after')
+    def validate_partitions(self):
+        if len(set(self.weekdays)) != len(self.weekdays) or any(d < 1 or d > 6 for d in self.weekdays):
+            raise ValueError('星期必须为周一至周六，且不能重复')
+        if sorted(self.periods) != list(range(1, max(self.periods) + 1)):
+            raise ValueError('不空节范围必须从第1节连续选择，不能重复')
+        if set(self.a_groups) != set(self.b_groups):
+            raise ValueError('两组必须覆盖相同的行政班')
+        if any(cid <= 0 or group < 0 for groups in (self.a_groups, self.b_groups)
+               for cid, group in groups.items()):
+            raise ValueError('行政班 ID 必须为正数，分组编号不能为负数')
+        if set(self.b_excluded_subject) != set(self.b_groups.values()):
+            raise ValueError('每个 B 组必须配置一个排除学科')
+        if any(sid <= 0 for sid in self.b_excluded_subject.values()):
+            raise ValueError('学科 ID 必须为正数')
+        return self
+
+
+@router.post('/teaching-classes/regroup-preview', dependencies=[Depends(require_management_user)],
+             summary='预览走班重新分组（不保存）')
+async def preview_walk_regroup(body: WalkRegroupPreviewIn,
+                              session: AsyncSession = Depends(get_session),
+                              tenant_id: int = Depends(get_current_tenant)):
+    from app.services.scheduling.walk_regroup import regroup_walk_students
+    grade, selected, admin_by_student = await _regroup_roster(body, session, tenant_id)
+    if not set(body.b_excluded_subject.values()).issubset(set().union(*selected.values())):
+        raise HTTPException(status_code=422, detail='排除学科不在当前学生选科中')
+    if set(body.a_groups) != set(admin_by_student.values()):
+        raise HTTPException(status_code=422, detail='分组必须覆盖本学期所有在读行政班，不能包含其他班级')
+    result = await asyncio.to_thread(regroup_walk_students, selected, admin_by_student,
+        body.a_groups, body.b_groups, body.b_excluded_subject, capacity=body.capacity)
+    if result['status'] == 'feasible':
+        result.update(await _preview_regroup_calendar(body, session, tenant_id, grade,
+            selected, admin_by_student, result))
+    return {'code': 0, 'message': 'ok', 'data': {**result, 'saved': False,
+        'student_count': len(selected),
+        'warnings': ['分组及课表仅预览，未修改原数据；正式启用需同步替换旧走班预留规则']}}
+
+
+async def _regroup_roster(body, session, tenant_id):
+    grade = await session.get(Grade, body.grade_id)
+    if not grade or grade.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail='年级不存在')
+    student_ids = await _grade_student_ids(session, tenant_id, body.grade_id, body.academic_year)
+    choices = list((await session.execute(select(StudentSubjectChoice).where(
+        StudentSubjectChoice.tenant_id == tenant_id,
+        StudentSubjectChoice.student_id.in_(student_ids),
+        StudentSubjectChoice.academic_year == body.academic_year,
+        StudentSubjectChoice.effective_term == body.term,
+        StudentSubjectChoice.status.in_(['confirmed', 'locked'])))).scalars())
+    if not student_ids or len(choices) != len(student_ids):
+        raise HTTPException(status_code=422, detail='请先完成本年级所有学生的选科确认')
+    selected = {c.student_id: set(c.secondary_subject_ids) for c in choices}
+    if any(len(subjects) != 2 for subjects in selected.values()):
+        raise HTTPException(status_code=422, detail='当前预览仅支持每名学生两个再选走班学科')
+    classes = await _student_term_classes(session, tenant_id, student_ids,
+        body.academic_year, body.term, body.grade_id)
+    admin_by_student = {sid: cls.id for sid, cls in classes.items()}
+    return grade, selected, admin_by_student
+
+
+async def _student_term_classes(session, tenant_id, student_ids, academic_year, term, grade_id=None):
+    """Use actual semester memberships, never infer current classes from legacy names."""
+    query = select(StudentClassMembership.student_id, Class).join(
+        Class, Class.id == StudentClassMembership.class_id).where(
+        StudentClassMembership.tenant_id == tenant_id,
+        StudentClassMembership.student_id.in_(student_ids),
+        StudentClassMembership.academic_year == academic_year,
+        StudentClassMembership.term == term,
+        StudentClassMembership.status == 'active',
+        Class.tenant_id == tenant_id, Class.academic_year == academic_year, Class.term == term,
+        Class.grade_id == StudentClassMembership.grade_id)
+    if grade_id is not None:
+        query = query.where(StudentClassMembership.grade_id == grade_id)
+    rows = (await session.execute(query)).all()
+    result = {}
+    for sid, cls in rows:
+        if sid in result:
+            raise HTTPException(status_code=422, detail='本学期行政班归属重复，请先修正分班记录')
+        result[sid] = cls
+    if set(result) != set(student_ids):
+        raise HTTPException(status_code=422, detail=f'还有 {len(set(student_ids) - set(result))} 名学生未分入本学期行政班')
+    return result
+
+
+async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, admins, draft):
+    from app.api.v1.scheduling import GenerateIn, _generation_assignment_payloads, _load_rule_group
+    from app.services.scheduling.walk_regroup_calendar import trial_calendar, audit_draft
+    from app.services.scheduling.rules import generation_subject_allowed_slots, rules_for_schedule
+    assignments = await _generation_assignment_payloads(session, GenerateIn(
+        academic_year=body.academic_year, term=body.term,
+        class_ids=sorted(set(admins.values()))), tenant_id)
+    if any(a['week_parity'] != 'all' or a['evening_periods_odd'] or a['evening_periods_even']
+           or any(float(a[key]) != int(a[key]) for key in ('weekly_periods', 'weekday_periods', 'saturday_periods'))
+           for a in assignments):
+        raise HTTPException(status_code=422, detail='当前联合预览只支持每周相同的整数白天课时')
+    subjects = set().union(*selected.values())
+    plans = list((await session.execute(select(TeachingSubjectHourPlan).where(
+        TeachingSubjectHourPlan.tenant_id == tenant_id, TeachingSubjectHourPlan.grade_id == body.grade_id,
+        TeachingSubjectHourPlan.academic_year == body.academic_year, TeachingSubjectHourPlan.term == body.term,
+        TeachingSubjectHourPlan.subject_id.in_(subjects)))).scalars())
+    if {p.subject_id for p in plans} != subjects or len({p.weekly_periods for p in plans}) != 1:
+        raise HTTPException(status_code=422, detail='请配置两个走班学科等课时；当前分组预览不支持不等课时')
+    hours = plans[0].weekly_periods
+    slots = [(d, p) for d in body.weekdays for p in body.periods]
+    totals = defaultdict(lambda: [0, 0])
+    for a in assignments:
+        totals[a['class_id']][0] += a['weekday_periods']
+        totals[a['class_id']][1] += a['saturday_periods']
+    if set(totals) != set(admins.values()) or any(sum(h) + 2 * hours != len(slots) for h in totals.values()):
+        raise HTTPException(status_code=422, detail='行政课加走班课总课时必须等于所选不空节范围；请先调整课时')
+    saturday_totals = {int(h[1]) for h in totals.values()}
+    if len(saturday_totals) != 1:
+        raise HTTPException(status_code=422, detail='当前联合预览要求各行政班周六公共课课时相同')
+    saturday_walk = sum(d == 6 for d, _ in slots) - saturday_totals.pop()
+    saturday_hours = {'A': saturday_walk // 2, 'B': saturday_walk - saturday_walk // 2}
+    if any(h < 0 or h > hours for h in saturday_hours.values()):
+        raise HTTPException(status_code=422, detail='周六课时不满足走班分组要求')
+    old_classes = list((await session.execute(select(TeachingClass).where(
+        TeachingClass.tenant_id == tenant_id, TeachingClass.grade_id == body.grade_id,
+        TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.term))).scalars())
+    teachers = defaultdict(set)
+    for c in old_classes:
+        if c.teacher_id and c.subject_id in subjects:
+            teachers[c.subject_id].add(c.teacher_id)
+    if any(not teachers[s] for s in subjects):
+        raise HTTPException(status_code=422, detail='请先为各走班学科配置任课教师')
+    rooms = [r for r in await _shared_teaching_rooms(session, tenant_id, grade, body.academic_year, body.term)
+             if r.capacity >= body.capacity]
+    if not rooms:
+        raise HTTPException(status_code=422, detail='没有满足班额的共享教室')
+    external, blocked_rooms = set(), defaultdict(set)
+    for model in (Schedule, TeachingClassSchedule):
+        query = select(model).where(model.tenant_id == tenant_id, model.academic_year == body.academic_year,
+                                    model.term == body.term)
+        query = query.where(model.class_id.not_in(set(admins.values()))) if model == Schedule else query.where(
+            model.teaching_class_id.not_in([c.id for c in old_classes]))
+        for row in (await session.execute(query)).scalars():
+            slot = row.weekday, row.period
+            external.add((row.teacher_id, slot))
+            for room in rooms:
+                if row.room in {room.name, f'楼栋{room.building_id} · {room.name}'}:
+                    blocked_rooms[slot].add(room.id)
+    group = await _load_rule_group(session, tenant_id, body.academic_year, body.term, grade_id=body.grade_id)
+    allowed = generation_subject_allowed_slots(rules_for_schedule(group, 'admin'))
+    calendar = await asyncio.to_thread(trial_calendar, draft, assignments, set(admins.values()),
+        body.a_groups, body.b_groups, teachers, len(rooms), external, slots=slots,
+        phase_hours=hours, saturday_hours=saturday_hours, subject_allowed=allowed, blocked_rooms=blocked_rooms)
+    if calendar['status'] not in ('OPTIMAL', 'FEASIBLE'):
+        return {'status': calendar['status'].lower(), 'schedule_validated': False}
+    report, placements = audit_draft(draft, calendar, selected, admins, assignments,
+        [{'id': r.id, 'capacity': r.capacity} for r in rooms], external, slots=slots,
+        phase_hours=hours, blocked_rooms=blocked_rooms)
+    # The legacy blanket reservation/prefix rules are deliberately NOT treated as satisfied.
+    # No rule is silently changed: the preview describes the required coordinated replacement.
+    return {'schedule_validated': True, 'calendar': calendar, 'placements': placements,
+        'audit': report, 'current_rules_validated': False,
+        'rules_requiring_review': [r.id for r in group.rules if r.enabled and r.code != 'subject_allowed_slots']}
+
+
+def _map_student_admin_classes_to_term(
+    student_class_ids: set[int],
+    referenced_classes: list[Class],
+    term_classes: list[Class],
+) -> dict[int, int]:
+    """Resolve roster class IDs to this term's class IDs without changing student records."""
+    term_by_id = {int(item.id): int(item.id) for item in term_classes if item.id is not None}
+    term_by_cohort_and_name: dict[tuple[int, str, str], list[int]] = defaultdict(list)
+    term_by_grade_and_name: dict[tuple[int, str], list[int]] = defaultdict(list)
+    for item in term_classes:
+        if item.id is None:
+            continue
+        term_by_grade_and_name[(item.grade_id, item.name)].append(int(item.id))
+        if item.cohort_label:
+            term_by_cohort_and_name[(item.grade_id, item.cohort_label, item.name)].append(int(item.id))
+
+    source_by_id = {int(item.id): item for item in referenced_classes if item.id is not None}
+    mapping: dict[int, int] = {}
+    for source_id in student_class_ids:
+        if source_id in term_by_id:
+            mapping[source_id] = source_id
+            continue
+        source = source_by_id.get(source_id)
+        if source is None:
+            raise ValueError("学生关联的行政班不存在，无法对应到当前学期")
+        candidates = (
+            term_by_cohort_and_name.get((source.grade_id, source.cohort_label, source.name), [])
+            if source.cohort_label
+            else term_by_grade_and_name.get((source.grade_id, source.name), [])
+        )
+        if len(candidates) != 1:
+            raise ValueError("部分学生原行政班无法唯一对应到当前学期班级，请先核对班级名称和届别")
+        mapping[source_id] = candidates[0]
+    return mapping
 
 
 async def _walk_teacher_subjects(session: AsyncSession, tenant_id: int, academic_year: str) -> dict[int, set[int]]:
@@ -156,13 +407,11 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
     blocked_students, blocked_teachers, blocked_rooms = defaultdict(set), defaultdict(set), defaultdict(set)
     admin = list((await session.execute(select(Schedule).where(Schedule.tenant_id == tenant_id,
         Schedule.academic_year == body.academic_year, Schedule.term == body.term))).scalars().all())
+    current_classes = await _student_term_classes(session, tenant_id, students,
+        body.academic_year, body.term, body.grade_id)
     admin_members = defaultdict(set)
-    for sid, cid in (await session.execute(select(Student.id, Student.class_id).where(
-        Student.tenant_id == tenant_id, Student.id.in_(students)))).all():
-        if cid: admin_members[cid].add(sid)
-    unassigned_students = students - {sid for members_in_class in admin_members.values() for sid in members_in_class}
-    if unassigned_students:
-        raise HTTPException(status_code=422, detail=f"还有 {len(unassigned_students)} 名学生未分入行政班，无法按全体学生的公共课空档安排走班课")
+    for sid, cls in current_classes.items():
+        admin_members[cls.id].add(sid)
     admin_class_ids = set(admin_members)
     scheduled_class_ids = {row.class_id for row in admin if row.class_id in admin_class_ids}
     missing_admin_schedule = admin_class_ids - scheduled_class_ids
@@ -171,10 +420,16 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
             f"高一年级还有 {len(missing_admin_schedule)} 个行政班没有已生成的公共课课表。"
             "请先在「排课管理 → 课表」生成并保存行政班课表，再预览走班课表。"
         ))
+    student_fixed_by_parity = {'odd': defaultdict(set), 'even': defaultdict(set)}
     for row in admin:
         slot = (row.weekday, row.period)
         if row.teacher_id: blocked_teachers[row.teacher_id].add(slot)
         for sid in admin_members[row.class_id]: blocked_students[sid].add(slot)
+        if row.period < (grid.get('evening_start_period') or 13):
+            for parity in student_fixed_by_parity:
+                if row.week_parity in ('all', parity):
+                    for sid in admin_members[row.class_id]:
+                        student_fixed_by_parity[parity][sid].add(slot)
         for room in rooms:
             if row.room in {room.name, f"楼栋{room.building_id} · {room.name}"}:
                 blocked_rooms[room.id].add(slot)
@@ -199,8 +454,11 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
         generation_subject_allowed_slots,
         generation_subject_forbidden_slots,
         generation_teacher_forbidden_slots,
+        rules_for_schedule,
     )
     rule_group = await _load_rule_group(session, tenant_id, body.academic_year, body.term, grade_id=body.grade_id)
+    if rule_group is not None:
+        rule_group = rules_for_schedule(rule_group, "walk")
     blocked_slots = set(forbidden_slots)
     blocked_subjects = defaultdict(set)
     if rule_group:
@@ -214,11 +472,47 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
         slot_universe = set(slots)
         for subject_id, allowed_slots in subject_allow_lists.items():
             blocked_subjects[subject_id].update(slot_universe - allowed_slots)
+    gap_weekdays = None
+    gap_periods = None
+    contiguous_periods = None
+    self_study_periods = None
+    if rule_group:
+        from app.services.scheduling.rules import compile_rule_group
+        ready_ids = {r.rule_id for r in compile_rule_group(rule_group) if r.status == 'ready'}
+        gap_rules = [r for r in rule_group.rules if r.enabled and r.id in ready_ids
+                     and r.code == 'student_gap_minimize']
+        if gap_rules:
+            gap_weekdays = sorted({d for r in gap_rules for d in (r.weekdays or range(1, 8))})
+            gap_periods = {day: sorted({p for r in gap_rules if day in (r.weekdays or range(1, 8))
+                                       for p in (r.periods or range(1, 8))}) for day in gap_weekdays}
+        contiguous_rules = [r for r in rule_group.rules if r.enabled and r.id in ready_ids
+                            and r.code == 'student_contiguous' and not r.params.get('fill_self_study')]
+        if contiguous_rules:
+            contiguous_days = {d for r in contiguous_rules for d in (r.weekdays or range(1, 8))}
+            contiguous_periods = {day: sorted({p for r in contiguous_rules
+                if day in (r.weekdays or range(1, 8)) for p in r.periods}) for day in contiguous_days}
+        study_rules = [r for r in rule_group.rules if r.enabled and r.id in ready_ids
+                       and r.code == 'student_contiguous' and r.params.get('fill_self_study')]
+        if study_rules:
+            self_study_periods = {day: sorted({p for r in study_rules
+                if day in (r.weekdays or range(1, 8)) for p in r.periods})
+                for day in {d for r in study_rules for d in (r.weekdays or range(1, 8))}}
+            if any((day, p) not in slots for day, periods in self_study_periods.items() for p in periods):
+                raise HTTPException(status_code=422, detail='学生排满节次包含未开放课位，请先修改基础课位')
+            # Keep home rooms available for the students not attending walk
+            # lessons; do not let the walk solver borrow them in this window.
+            study_slots = {(day, p) for day, periods in self_study_periods.items() for p in periods}
+            for admin_class in term_classes:
+                if admin_class.id in admin_members and admin_class.home_room_id:
+                    blocked_rooms[admin_class.home_room_id].update(study_slots)
     result = await asyncio.to_thread(recommend_walk_slots,
         [dict(id=c.id, name=c.name, subject_id=c.subject_id, teacher_id=c.teacher_id, weekly_periods=c.weekly_periods) for c in classes],
         members, [dict(id=r.id, name=r.name, capacity=r.capacity) for r in rooms], sorted(slots - blocked_slots),
         blocked_students=blocked_students, blocked_teachers=blocked_teachers, blocked_rooms=blocked_rooms,
-        blocked_subjects=blocked_subjects, blocked_slots=blocked_slots)
+        blocked_subjects=blocked_subjects, blocked_slots=blocked_slots,
+        student_gap_weekdays=gap_weekdays, student_fixed_by_parity=student_fixed_by_parity,
+        student_gap_periods=gap_periods, student_contiguous_periods=contiguous_periods,
+        student_self_study_periods=self_study_periods)
     rule_results = []
     rule_warnings = []
     if result.get('status') == 'feasible':
@@ -227,20 +521,33 @@ async def recommend_walk_configuration(body: WalkRecommendationIn, session: Asyn
         if rule_group:
             subjects_by_class = {c.id: c.subject_id for c in classes}
             room_by_id = {r.id: r for r in rooms}
-            rule_items = [ScheduleItem(
+            admin_rule_items = [ScheduleItem(
                 assignment_id=row.id, class_id=row.class_id, subject_id=row.subject_id,
                 teacher_id=row.teacher_id, weekday=row.weekday, period=row.period,
                 room=row.room, week_parity=row.week_parity,
             ) for row in admin]
-            rule_items.extend(ScheduleItem(
+            rule_items = [ScheduleItem(
                 assignment_id=-int(item['teaching_class_id']),
                 class_id=-int(item['teaching_class_id']),
                 subject_id=subjects_by_class[int(item['teaching_class_id'])],
                 teacher_id=int(item['teacher_id']), weekday=int(item['weekday']), period=int(item['period']),
                 room=f"楼栋{room_by_id[int(item['room_id'])].building_id} · {room_by_id[int(item['room_id'])].name}",
-            ) for item in result.get('placements', []))
+            ) for item in result.get('placements', [])]
+            student_occupied = {parity: {sid: set(fixed.get(sid, set())) for sid in students}
+                                for parity, fixed in student_fixed_by_parity.items()}
+            walk_members = defaultdict(set)
+            for cid, sid in members:
+                walk_members[cid].add(sid)
+            for placement in result.get('placements', []):
+                for occupied in student_occupied.values():
+                    for sid in walk_members[placement['teaching_class_id']]:
+                        occupied[sid].add((placement['weekday'], placement['period']))
+            from app.services.scheduling.student_gaps import build_student_self_study
             summary = evaluate_rule_group(rule_group, rule_items,
-                evening_start_period=grid.get('evening_start_period'))
+                evening_start_period=grid.get('evening_start_period'), schedule_mode="walk",
+                shared_items=admin_rule_items, student_occupied_by_parity=student_occupied,
+                student_self_study_by_parity=(build_student_self_study(student_occupied, self_study_periods)
+                                             if self_study_periods else None))
             rule_results = [item.model_dump(mode='json') for item in summary.results]
             failed = blocking_rule_results(summary)
             if failed:
@@ -1481,3 +1788,115 @@ async def list_schedules(
         "subject_name": subjects.get(item.subject_id, "未知学科"),
         "teacher_name": teachers.get(item.teacher_id, "待分配"),
     } for item in schedules]}
+
+
+@router.get('/teaching-classes/{class_id}/roster', summary='教学班学生名单（按行政班分组）',
+            dependencies=[Depends(require_management_user)])
+async def teaching_class_roster(class_id: int, academic_year: str, term: str,
+                                session: AsyncSession = Depends(get_session),
+                                user=Depends(get_current_user),
+                                tenant_id: int = Depends(get_current_tenant)):
+    teaching_class = await session.get(TeachingClass, class_id)
+    if not teaching_class or teaching_class.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail='教学班不存在')
+    # 行政班归属按本学期分班关系（StudentClassMembership）取，未分班的学生 class_name 为 None
+    member_rows = (await session.execute(
+        select(Student, Class.name)
+        .join(TeachingClassStudent, TeachingClassStudent.student_id == Student.id)
+        .outerjoin(StudentClassMembership, and_(
+            StudentClassMembership.student_id == Student.id,
+            StudentClassMembership.tenant_id == tenant_id,
+            StudentClassMembership.academic_year == academic_year,
+            StudentClassMembership.term == term,
+            StudentClassMembership.status == 'active',
+        ))
+        .outerjoin(Class, and_(
+            Class.id == StudentClassMembership.class_id,
+            Class.tenant_id == tenant_id,
+            Class.academic_year == academic_year,
+            Class.term == term,
+        ))
+        .where(
+            TeachingClassStudent.teaching_class_id == class_id,
+            TeachingClassStudent.tenant_id == tenant_id,
+            Student.tenant_id == tenant_id,
+        )
+        .order_by(Class.name, Student.student_no, Student.id)
+    )).all()
+    items = [{
+        "student_id": student.id,
+        "student_no": student.student_no,
+        "student_name": student.name,
+        "class_name": admin_class_name,
+    } for student, admin_class_name in member_rows]
+    return {
+        "code": 0,
+        "message": "ok",
+        "data": {
+            "teaching_class_id": class_id,
+            "teaching_class_name": teaching_class.name,
+            "subject_id": teaching_class.subject_id,
+            "total": len(items),
+            "items": items,
+        },
+    }
+
+
+@router.get('/student-timetable/{student_id}', summary='查询学生完整课表',
+            dependencies=[Depends(require_management_user)])
+async def student_timetable(student_id: int, academic_year: str, term: str,
+                            session: AsyncSession = Depends(get_session),
+                            user=Depends(get_current_user), tenant_id: int = Depends(get_current_tenant)):
+    from app.api.v1.scheduling import _load_rule_group, weekly_schedule
+    from app.services.scheduling.rules import compile_rule_group, rules_for_schedule
+    from app.services.scheduling.student_gaps import complete_student_timetable
+    student = await session.get(Student, student_id)
+    if not student or student.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail='学生不存在')
+    current_class = (await _student_term_classes(session, tenant_id, [student_id], academic_year, term))[student_id]
+    class_id = current_class.id
+    admin = (await weekly_schedule(class_id, academic_year, term, session, user))['data']
+    walk = (await list_schedules(academic_year, term, None, None, student_id, session, user, tenant_id))['data']
+    entries = admin + [{**entry, 'id': -entry['id'], 'class_id': -entry['teaching_class_id'],
+        'class_name': '走班 · ' + entry['teaching_class_name'], 'week_parity': 'all'} for entry in walk]
+    group = await _load_rule_group(session, tenant_id, academic_year, term, grade_id=current_class.grade_id)
+    study_periods = {}
+    if group:
+        group = rules_for_schedule(group, 'walk')
+        ready_ids = {rule.rule_id for rule in compile_rule_group(group) if rule.status == 'ready'}
+        for rule in group.rules:
+            if rule.enabled and rule.id in ready_ids and rule.code == 'student_contiguous' and rule.params.get('fill_self_study'):
+                for day in rule.weekdays or range(1, 8):
+                    study_periods.setdefault(day, set()).update(rule.periods)
+    if study_periods:
+        teaching = list((await session.execute(select(TeachingClass).join(TeachingClassStudent,
+            TeachingClassStudent.teaching_class_id == TeachingClass.id).where(
+                TeachingClass.tenant_id == tenant_id, TeachingClassStudent.tenant_id == tenant_id,
+                TeachingClassStudent.student_id == student_id,
+                TeachingClass.academic_year == academic_year, TeachingClass.term == term))).scalars().all())
+        counts = Counter(entry['teaching_class_id'] for entry in walk)
+        if not admin or not teaching or any(counts[item.id] != item.weekly_periods for item in teaching):
+            raise HTTPException(status_code=422, detail='公共课或走班课尚未排完整，暂不补自习')
+    room = await session.get(Room, current_class.home_room_id) if current_class.home_room_id else None
+    context = dict(class_id=class_id, class_name=current_class.name, academic_year=academic_year, term=term,
+        room='自习地点待安排')
+    try:
+        entries = complete_student_timetable(entries, study_periods, context)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if study_periods and room and room.tenant_id == tenant_id:
+        room_names = {room.name, f'楼栋{room.building_id} · {room.name}'}
+        other_rows = list((await session.execute(select(Schedule).where(
+            Schedule.tenant_id == tenant_id, Schedule.academic_year == academic_year,
+            Schedule.term == term, Schedule.room.in_(room_names), Schedule.class_id != class_id))).scalars().all())
+        other_rows += list((await session.execute(select(TeachingClassSchedule).where(
+            TeachingClassSchedule.tenant_id == tenant_id, TeachingClassSchedule.academic_year == academic_year,
+            TeachingClassSchedule.term == term, TeachingClassSchedule.room.in_(room_names)))).scalars().all())
+        for entry in entries:
+            if entry.get('is_self_study'):
+                occupied = any(row.weekday == entry['weekday'] and row.period == entry['period']
+                    and (row.week_parity == 'all' or entry['week_parity'] == 'all' or row.week_parity == entry['week_parity'])
+                    for row in other_rows)
+                if not occupied:
+                    entry['room'] = f'楼栋{room.building_id} · {room.name}'
+    return {'code': 0, 'message': 'ok', 'data': entries}

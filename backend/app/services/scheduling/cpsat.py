@@ -63,6 +63,7 @@ def solve_daytime_cpsat(
     daytime_parity_pairs: Iterable[Mapping[str, Any]] | None = None,
     class_gap_free: bool = False,
     class_gap_free_weekdays: Iterable[int] | None = None,
+    class_prefix_groups: Iterable[Mapping[str, Any]] | None = None,
     subject_daily_spread: bool = False,
     gap_free_groups: list[dict[str, Any]] | None = None,
     slot_teacher_cap: Mapping[str, Any] | None = None,
@@ -535,6 +536,28 @@ def solve_daytime_cpsat(
 
     _blocks("subjects", cons.get("subjects") or [])
     _blocks("teachers", cons.get("teachers") or [])
+
+    # 可配置课位按顺序占用；未选中的走班预留课位不参与，末尾可空。
+    for group in class_prefix_groups or []:
+        class_ids = set(group.get("classes") or [m["class_id"] for m in meta.values()])
+        weekdays = set(group.get("weekdays") or range(1, days + 1))
+        periods = sorted(set(group["periods"]))
+        for parity, half_vars in (("odd", ho), ("even", he)):
+            if group.get("week_parity", "all") not in ("all", parity):
+                continue
+            slot_vars = defaultdict(list)
+            for source in (y, half_vars):
+                for (a_idx, d, p), var in source.items():
+                    slot_vars[(meta[a_idx]["class_id"], d, p)].append(var)
+            for c in class_ids:
+                for d in weekdays:
+                    previous = None
+                    for p in periods:
+                        occ = model.NewBoolVar(f"prefix_{parity}_{c}_{d}_{p}_{id(group)}")
+                        model.AddMaxEquality(occ, slot_vars.get((c, d, p)) or [0])
+                        if previous is not None:
+                            model.Add(occ <= previous)
+                        previous = occ
 
     # ---------- 班级课程连续性 ----------
     # 工作日/周六：第1~7节必须都有课；第8、9节是自习，可空。

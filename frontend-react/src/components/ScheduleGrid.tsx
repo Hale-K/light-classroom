@@ -19,12 +19,13 @@ interface ScheduleGridProps {
   showEvening?: boolean
   eveningStartPeriod?: number | null
   showClassName?: boolean
+  showLessonDetails?: boolean
   /** 高亮该教师的课（班主任看班级课表时标出「我的课」） */
   highlightTeacherId?: number | null
   /** 表头附加日期列（排考/走班日历用） */
   dateMode?: boolean
   weekStart?: string
-  onLessonContextMenu?: (entry: ScheduleEntry, event: React.MouseEvent<HTMLDivElement>) => void
+  onLessonClick?: (entry: ScheduleEntry, event: React.MouseEvent<HTMLDivElement>) => void
 }
 
 /** days≥6 时：周一～周五 + 单六 + 双六（+ 周日若有）；否则保持原周一～N */
@@ -72,10 +73,11 @@ export default function ScheduleGrid({
   showEvening = false,
   eveningStartPeriod,
   showClassName = false,
+  showLessonDetails = false,
   highlightTeacherId = null,
   dateMode = false,
   weekStart = '',
-  onLessonContextMenu,
+  onLessonClick,
 }: ScheduleGridProps) {
   const today = new Date()
   const todayValue = [
@@ -181,6 +183,7 @@ export default function ScheduleGrid({
                   )}
                 </div>
                 {showClassName && lesson.class_name && <small className="st-class-line">{lesson.class_name}</small>}
+                {showLessonDetails && <small className="st-lesson-details">{[lesson.teacher_name, lesson.room].filter(Boolean).join(' · ') || '教师 / 教室待安排'}</small>}
               </div>
             )
           })}
@@ -220,7 +223,7 @@ export default function ScheduleGrid({
         <div
           key={`lesson-${column.key}-${period}`}
           className={`st-lesson${entry ? ' filled' : ''}${dailyPeriods && period > dayCap ? ' unavailable' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
-          onContextMenu={entry && onLessonContextMenu ? (event) => onLessonContextMenu(entry, event) : undefined}
+          onClick={entry && onLessonClick ? (event) => onLessonClick(entry, event) : undefined}
         >
           {dailyPeriods && period > dayCap ? (
             <span className="st-unavailable-mark">不排课</span>
@@ -253,7 +256,7 @@ export default function ScheduleGrid({
           <div
             key={`evening-${row.key}-${column.key}`}
             className={`st-lesson${cellEntries.length ? ' filled' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
-            onContextMenu={entry && onLessonContextMenu ? (event) => onLessonContextMenu(entry, event) : undefined}
+            onClick={entry && onLessonClick ? (event) => onLessonClick(entry, event) : undefined}
           >
             {cellEntries.length ? (
               renderEntries(cellEntries)
