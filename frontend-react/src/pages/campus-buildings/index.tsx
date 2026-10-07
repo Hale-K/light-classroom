@@ -12,6 +12,7 @@ import {
   Modal,
   Pagination,
   Popconfirm,
+  Segmented,
   Select,
   Space,
   Table,
@@ -54,6 +55,7 @@ const BUILDING_STATUS = [
   { label: '已停用', value: 'disabled' },
 ]
 const ROOM_TYPE: Record<RoomResource['room_type'], string> = { classroom: '普通教室', laboratory: '实验室', computer: '计算机房', meeting: '会议室', auditorium: '报告厅', office: '办公室' }
+const ROOM_TYPE_COLOR: Record<RoomResource['room_type'], string> = { classroom: 'blue', laboratory: 'green', computer: 'cyan', meeting: 'orange', auditorium: 'purple', office: 'default' }
 const CLASS_TYPE_OPTIONS = [
   { label: '尖子班', value: 'elite' },
   { label: '重点班', value: 'key' },
@@ -139,6 +141,40 @@ function RadioGroupLike({ value, onChange, options, mini = false }: {
   )
 }
 
+function RoomCard({ room }: { room: RoomResource }) {
+  const allocations = room.cohort_allocations || []
+  return <article className={`facility-room-card facility-room-${room.room_type}`}>
+    <header className="facility-room-card-head">
+      <strong>{room.name}</strong>
+      {room.code && <code>{room.code}</code>}
+    </header>
+    <div className="facility-room-card-meta">
+      <Tag color={ROOM_TYPE_COLOR[room.room_type]}>{ROOM_TYPE[room.room_type]}</Tag>
+      <span className="facility-room-capacity">{room.capacity} 人</span>
+      {room.status !== 'available' && <Tag color="warning">{room.status === 'maintenance' ? '维修中' : room.status === 'disabled' ? '已停用' : room.status}</Tag>}
+    </div>
+    <div className="facility-room-card-tags">
+      {hasRoomFeature(room.features, 'multimedia') && <Tag color="geekblue">多媒体</Tag>}
+      {room.is_schedulable && <Tag>排课</Tag>}
+      {room.is_exam_enabled && <Tag>排考</Tag>}
+      {allocations.map((item) => (
+        <Tag key={`${item.rule_id}-${item.cohort_label}`} color={item.allocation_mode === 'exclusive' ? 'blue' : 'purple'}>
+          {item.cohort_label}{item.allocation_mode === 'shared' ? ' · 共享' : ''}
+        </Tag>
+      ))}
+    </div>
+  </article>
+}
+
+function RoomGrid({ list }: { list: RoomResource[] }) {
+  if (!list.length) return <div className="facility-floor-empty">本层暂无场室</div>
+  return <div className="facility-room-grid">{list.map((room) => <RoomCard key={room.id} room={room} />)}</div>
+}
+
+function capacitySum(list: RoomResource[]): number {
+  return list.reduce((sum, room) => sum + (room.capacity || 0), 0)
+}
+
 export default function CampusBuildingsView({ embedded = false, focus = 'resources' }: { embedded?: boolean; focus?: 'resources' | 'allocation' | 'class-planning' }) {
   const { message } = App.useApp()
   const navigate = useNavigate()
@@ -159,6 +195,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const [statusSavingId, setStatusSavingId] = useState<number>()
   const [selectedKey, setSelectedKey] = useState('space')
   const [expandedKeys, setExpandedKeys] = useState<Key[]>(['space'])
+  const [resourceView, setResourceView] = useState<'visual' | 'list'>('visual')
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [resourcePage, setResourcePage] = useState(1)
@@ -319,6 +356,12 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const selectedLabel = selectedKey === 'space' ? '全部空间资源' : selectedNode?.name || '空间资源'
   const navTree: DataNode[] = [{ key: 'space', title: <span className="zh-org-tree-title zh-org-school-title"><span>学校空间</span><small>{data?.stats.room_count || 0}</small></span>, children: navigationNodes(treeData) }]
   const assignedRooms = useMemo(() => rooms.filter((room) => (room.cohort_allocations || []).length > 0), [rooms])
+  const roomTypeCounts = useMemo(() => {
+    const counts = new Map<RoomResource['room_type'], number>()
+    rooms.forEach((room) => counts.set(room.room_type, (counts.get(room.room_type) || 0) + 1))
+    return [...counts.entries()].sort((a, b) => b[1] - a[1])
+  }, [rooms])
+  const roomTypeTotal = rooms.length
   const resourceFloors = useMemo(() => Array.from(new Set(assignedRooms.map((room) => room.floor))).sort((a, b) => a - b), [assignedRooms])
   const filteredResourceRooms = useMemo(() => {
     const keyword = appliedResourceKeyword.trim().toLowerCase()
@@ -585,6 +628,14 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     {focus === 'resources' && <div className="facility-stats">
       {[['校区', data?.stats.campus_count ?? 0], ['教学楼及楼宇', data?.stats.building_count ?? 0], ['场室总数', data?.stats.room_count ?? 0], ['多媒体场室', data?.stats.multimedia_count ?? 0]].map(([label, value]) => <div key={label}><span>{label}</span><strong>{value}</strong></div>)}
     </div>}
+    {focus === 'resources' && !!roomTypeTotal && <div className="facility-typebar" aria-label="场室类型分布">
+      <div className="facility-typebar-track">
+        {roomTypeCounts.map(([type, count]) => <span key={type} className={`facility-typebar-seg seg-${type}`} style={{ width: `${(count / roomTypeTotal) * 100}%` }} title={`${ROOM_TYPE[type]} ${count} 间`} />)}
+      </div>
+      <div className="facility-typebar-legend">
+        {roomTypeCounts.map(([type, count]) => <span key={type}><i className={`dot-${type}`} />{ROOM_TYPE[type]} {count}</span>)}
+      </div>
+    </div>}
     {focus === 'resources' && <div className="facility-workspace">
       <aside className="facility-tree-panel" aria-label="空间资源树">
         <div className="zh-organization-panel-title"><Icon name="building" size={16} /><strong>空间资源</strong></div>
@@ -592,8 +643,18 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           selectedKeys={[selectedKey]} onSelect={(keys) => { setSelectedKey(String(keys[0] || 'space')); setPage(1) }} />
       </aside>
       <section className="facility-directory" aria-label={`${selectedLabel}内容`}>
-        <header className="personnel-directory-head"><div><span>当前节点</span><h3>{selectedLabel}</h3></div><span className="facility-muted">学校空间 → 校区 → 楼宇 → 楼层 → 场室</span></header>
-        <Table rowKey="key" columns={columns} dataSource={pagedVisibleNodes} loading={loading} pagination={visibleNodes.length > 10 ? {
+        <header className="personnel-directory-head">
+          <div><span>当前节点</span><h3>{selectedLabel}</h3></div>
+          <Space size={12}>
+            <span className="facility-muted">学校空间 → 校区 → 楼宇 → 楼层 → 场室</span>
+            <Segmented
+              value={resourceView}
+              onChange={(value) => setResourceView(value as 'visual' | 'list')}
+              options={[{ label: '可视化', value: 'visual' }, { label: '列表', value: 'list' }]}
+            />
+          </Space>
+        </header>
+        {resourceView === 'list' ? <Table rowKey="key" columns={columns} dataSource={pagedVisibleNodes} loading={loading} pagination={visibleNodes.length > 10 ? {
           current: page,
           pageSize,
           total: visibleNodes.length,
@@ -602,6 +663,81 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
           showTotal: (total) => `共 ${total} 条`,
         } : false}
           locale={{ emptyText: <EmptyState icon="building" title="当前节点暂无下级资源" desc="可使用页面右上角按钮继续创建空间资源。" height={240} /> }} />
+        : <div className={`facility-visual${loading ? ' is-loading' : ''}`} style={loading ? { opacity: 0.6, pointerEvents: 'none' } : undefined}>
+          {(() => {
+            const nodeType = selectedKey === 'space' ? 'space' : selectedNode?.node_type
+            // 学校空间 / 校区：校区 → 楼宇卡片
+            if (nodeType === 'space' || nodeType === 'campus') {
+              const campuses = nodeType === 'space'
+                ? (data?.campuses || [])
+                : (data?.campuses || []).filter((campus) => campus.id === selectedNode?.campus?.id)
+              return campuses.map((campus) => {
+                const buildings = (data?.buildings || []).filter((building) => building.campus_id === campus.id)
+                const campusRooms = rooms.filter((room) => buildings.some((building) => building.id === room.building_id))
+                return <article className="facility-campus-card" key={campus.id}>
+                  <header className="facility-campus-head">
+                    <div><strong>{campus.name}</strong><span>{campus.address || '未填写地址'}</span></div>
+                    <div className="facility-campus-stats">
+                      <span>{buildings.length} 栋楼宇</span><span>{campusRooms.length} 间场室</span>
+                      {campus.student_capacity ? <span>规划 {campus.student_capacity.toLocaleString()} 人</span> : null}
+                    </div>
+                  </header>
+                  <div className="facility-campus-buildings">
+                    {buildings.map((building) => {
+                      const buildingRooms = rooms.filter((room) => room.building_id === building.id)
+                      const typeCounts = new Map<RoomResource['room_type'], number>()
+                      buildingRooms.forEach((room) => typeCounts.set(room.room_type, (typeCounts.get(room.room_type) || 0) + 1))
+                      return <article className="facility-building-card" key={building.id} onClick={() => setSelectedKey(`building-${building.id}`)}>
+                        <header><strong>{building.name}</strong>{building.code && <code>{building.code}</code>}</header>
+                        <div className="facility-building-meta">
+                          <span>{building.floor_count} 层</span><span>{buildingRooms.length} 间</span>
+                          {building.multimedia_count > 0 && <span className="facility-building-mm">{building.multimedia_count} 间多媒体</span>}
+                        </div>
+                        <div className="facility-building-types">
+                          {[...typeCounts.entries()].map(([type, count]) => (
+                            <span key={type}><i className={`facility-type-dot dot-${type}`} />{ROOM_TYPE[type]} {count}</span>
+                          ))}
+                        </div>
+                        <footer onClick={(event) => event.stopPropagation()}>
+                          <Select size="small" value={building.status} loading={statusSavingId === building.id} options={BUILDING_STATUS}
+                            style={{ width: 104 }} onChange={(value) => void updateStatus(building, value as BuildingStatus)} />
+                          <Button type="link" size="small">查看楼层 →</Button>
+                        </footer>
+                      </article>
+                    })}
+                    {!buildings.length && <div className="facility-floor-empty">该校区还没有楼宇，点击右上角「新增楼宇」创建。</div>}
+                  </div>
+                </article>
+              })
+            }
+            // 楼宇：楼层分区 + 教室卡片
+            if (nodeType === 'building') {
+              const building = selectedNode!.building!
+              const buildingRooms = rooms.filter((room) => room.building_id === building.id)
+              const floors = [...new Set(buildingRooms.map((room) => room.floor))].sort((a, b) => b - a)
+              return <>
+                {floors.map((floor) => {
+                  const floorRooms = buildingRooms.filter((room) => room.floor === floor)
+                    .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+                  return <div className="facility-floor" key={floor}>
+                    <div className="facility-floor-head"><strong>{floor} 层</strong><span>{floorRooms.length} 间 · 共 {capacitySum(floorRooms)} 人</span></div>
+                    <RoomGrid list={floorRooms} />
+                  </div>
+                })}
+                {!buildingRooms.length && <EmptyState icon="building" title="这栋楼宇还没有场室" desc="点击右上角「批量生成教室」或「新增场室」快速填充。" height={220} />}
+              </>
+            }
+            // 楼层：该层教室
+            if (nodeType === 'floor') {
+              const floorRooms = rooms.filter((room) => selectedNode?.children?.some((child) => child.room?.id === room.id))
+                .sort((a, b) => a.name.localeCompare(b.name, 'zh'))
+              return <RoomGrid list={floorRooms} />
+            }
+            // 单个教室
+            if (nodeType === 'room' && selectedNode?.room) return <RoomGrid list={[selectedNode.room]} />
+            return <EmptyState icon="building" title="当前节点暂无下级资源" desc="可使用页面右上角按钮继续创建空间资源。" height={240} />
+          })()}
+        </div>}
       </section>
     </div>}
     {(focus === 'allocation' || focus === 'class-planning') && <section className="facility-allocation-resource-list">

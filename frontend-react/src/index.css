@@ -2523,6 +2523,55 @@ body[data-theme='tech'] .st-subject-self-study {
 .facility-stats > div:last-child { border-right: 0; }
 .facility-stats span, .facility-muted, .facility-cell-note { color: var(--text-3); font-size: 12px; }
 .facility-stats strong { color: var(--text-1); font-size: 22px; line-height: 1; font-variant-numeric: tabular-nums; }
+/* ---- 场室类型分布条 ---- */
+.facility-typebar { margin: 0 0 12px; }
+.facility-typebar-track { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg-2); }
+.facility-typebar-seg { min-width: 6px; }
+.facility-typebar-legend { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; color: var(--text-3); font-size: 12px; }
+.facility-typebar-legend span { display: inline-flex; align-items: center; gap: 5px; }
+.facility-type-dot { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.dot-classroom { background: #3b82f6; } .dot-laboratory { background: #16a34a; } .dot-computer { background: #06b6d4; }
+.dot-meeting { background: #f59e0b; } .dot-auditorium { background: #8b5cf6; } .dot-office { background: #94a3b8; }
+.seg-classroom { background: #3b82f6; } .seg-laboratory { background: #16a34a; } .seg-computer { background: #06b6d4; }
+.seg-meeting { background: #f59e0b; } .seg-auditorium { background: #8b5cf6; } .seg-office { background: #94a3b8; }
+/* ---- 可视化视图 ---- */
+.facility-visual { min-height: 240px; }
+.facility-campus-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); margin-bottom: 16px; overflow: hidden; }
+.facility-campus-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; padding: 14px 16px 10px; }
+.facility-campus-head strong { font-size: 15px; color: var(--ink); }
+.facility-campus-head > div:first-child { display: flex; align-items: baseline; gap: 10px; }
+.facility-campus-head > div:first-child span { color: var(--text-3); font-size: 12px; }
+.facility-campus-stats { display: flex; gap: 14px; color: var(--text-2); font-size: 12.5px; white-space: nowrap; }
+.facility-campus-buildings { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; padding: 0 16px 16px; }
+.facility-building-card { border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); padding: 12px 14px; cursor: pointer; transition: border-color .15s ease, box-shadow .15s ease; display: flex; flex-direction: column; gap: 8px; }
+.facility-building-card:hover { border-color: var(--primary-1, #6366f1); box-shadow: 0 2px 10px rgba(99,102,241,.10); }
+.facility-building-card header { display: flex; align-items: baseline; gap: 8px; }
+.facility-building-card header strong { color: var(--ink); }
+.facility-building-card header code, .facility-room-card-head code { color: var(--text-3); font-size: 12px; }
+.facility-building-meta { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-2); font-size: 12.5px; }
+.facility-building-mm { color: #6366f1; }
+.facility-building-types { display: flex; flex-wrap: wrap; gap: 4px 12px; color: var(--text-3); font-size: 12px; }
+.facility-building-types span { display: inline-flex; align-items: center; gap: 5px; }
+.facility-building-card footer { display: flex; align-items: center; justify-content: space-between; margin-top: auto; }
+.facility-floor { margin-bottom: 18px; }
+.facility-floor-head { display: flex; align-items: baseline; gap: 10px; margin: 0 0 8px; padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
+.facility-floor-head strong { color: var(--ink); font-size: 13.5px; }
+.facility-floor-head span { color: var(--text-3); font-size: 12px; }
+.facility-floor-empty { padding: 18px 16px; border: 1px dashed var(--border); border-radius: 10px; color: var(--text-3); font-size: 13px; background: var(--surface-2); }
+.facility-room-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: 10px; }
+.facility-room-card { position: relative; border: 1px solid var(--border); border-left-width: 3px; border-radius: 10px; background: var(--surface); padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; }
+.facility-room-card.facility-room-classroom { border-left-color: #3b82f6; }
+.facility-room-card.facility-room-laboratory { border-left-color: #16a34a; }
+.facility-room-card.facility-room-computer { border-left-color: #06b6d4; }
+.facility-room-card.facility-room-meeting { border-left-color: #f59e0b; }
+.facility-room-card.facility-room-auditorium { border-left-color: #8b5cf6; }
+.facility-room-card.facility-room-office { border-left-color: #94a3b8; }
+.facility-room-card-head { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.facility-room-card-head strong { color: var(--ink); font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.facility-room-card-meta { display: flex; align-items: center; gap: 8px; }
+.facility-room-capacity { color: var(--text-2); font-size: 12.5px; font-variant-numeric: tabular-nums; }
+.facility-room-card-tags { display: flex; flex-wrap: wrap; gap: 4px; min-height: 0; }
+.facility-room-card-tags .ant-tag { margin-inline-end: 0; }
 .facility-cell-note { margin-top: 2px; font-weight: 400; font-size: 11.5px; }
 .facility-form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .facility-checks { display: grid; grid-template-columns: 1fr 1fr; padding: 10px 12px 0; background: var(--bg-2); border: 1px solid var(--border); border-radius: 10px; }
