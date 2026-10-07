@@ -229,67 +229,90 @@ export default function Facility3D({
         const topFloor = Math.max(1, ...floorNumbers)
         const isDimmed = Boolean(highlightBuildingId) && highlightBuildingId !== building.id
         const isFocused = !highlightBuildingId || highlightBuildingId === building.id
+        const buildingCenterX = cursorX + buildingWidth / 2
 
-        const structureMaterial = new THREE.MeshStandardMaterial({
-          color: GHOST_COLOR, roughness: 0.95, transparent: isDimmed, opacity: isDimmed ? 0.25 : 1,
-        })
-        // 楼体背板（含无教室的规划楼层，呈现楼宇轮廓）
-        const structure = new THREE.Mesh(
-          new THREE.BoxGeometry(buildingWidth, topFloor * FLOOR_HEIGHT, ROOM_DEPTH),
-          structureMaterial,
+        // 楼宇名标签（点击可下钻该楼）
+        const namePickable = makeLabel(
+          `${building.name}${building.code ? ` · ${building.code}` : ''}`,
+          'facility3d-label-building facility3d-label-pickable',
         )
-        structure.position.set(cursorX + buildingWidth / 2, (topFloor * FLOOR_HEIGHT) / 2, 0)
-        structure.userData = { kind: 'building', building }
-        structure.add(makeLabel(`${building.name}${building.code ? ` · ${building.code}` : ''}`, 'facility3d-label-building'))
-        contentGroup.add(structure)
-        // 楼宇描边
+        namePickable.position.set(buildingCenterX, topFloor * FLOOR_HEIGHT + 0.55, ROOM_DEPTH / 2)
+        namePickable.element.addEventListener('click', () => callbacksRef.current.onPickBuilding?.(building.id))
+        namePickable.element.style.pointerEvents = 'auto'
+        namePickable.element.style.cursor = 'pointer'
+        contentGroup.add(namePickable)
+
+        // 整楼线框轮廓（只描边不填充，不遮挡教室）
+        const shellGeometry = new THREE.BoxGeometry(buildingWidth, topFloor * FLOOR_HEIGHT, ROOM_DEPTH)
         const edges = new THREE.LineSegments(
-          new THREE.EdgesGeometry(structure.geometry),
-          new THREE.LineBasicMaterial({ color: 0xb7c3d2, transparent: true, opacity: isDimmed ? 0.2 : 0.9 }),
+          new THREE.EdgesGeometry(shellGeometry),
+          new THREE.LineBasicMaterial({ color: 0xb7c3d2, transparent: true, opacity: isDimmed ? 0.15 : 0.8 }),
         )
-        edges.position.copy(structure.position)
+        edges.position.set(buildingCenterX, (topFloor * FLOOR_HEIGHT) / 2, 0)
         contentGroup.add(edges)
+        shellGeometry.dispose()
 
-        // 楼层标签（左缘）
-        for (const floor of floorNumbers) {
-          const label = makeLabel(`${floor}F`, 'facility3d-label-floor')
-          label.position.set(-buildingWidth / 2 - 0.7, floor * FLOOR_HEIGHT - FLOOR_HEIGHT / 2, ROOM_DEPTH / 2)
-          structure.add(label)
-        }
+        // 每层：楼板 + 教室册；无教室的规划楼层画灰显体块
+        const plateGeometry = new THREE.BoxGeometry(buildingWidth + 0.08, 0.1, ROOM_DEPTH + 0.08)
+        const plateMaterial = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.9, transparent: isDimmed, opacity: isDimmed ? 0.2 : 1 })
+        const ghostGeometry = new THREE.BoxGeometry(buildingWidth, FLOOR_HEIGHT * 0.82, ROOM_DEPTH * 0.94)
+        for (let floor = 1; floor <= topFloor; floor += 1) {
+          const baseY = (floor - 1) * FLOOR_HEIGHT
+          const floorRooms = byFloor.get(floor) || []
 
-        // 每层教室
-        for (const [floor, floorRooms] of byFloor) {
-          const floorY = (floor - 1) * FLOOR_HEIGHT + FLOOR_HEIGHT / 2
-          const floorHighlighted = highlightFloor === floor && isFocused
-          const widthPerRoom = buildingWidth / Math.max(floorRooms.length, Math.ceil(maxPerFloor / 2))
-          floorRooms.forEach((room, index) => {
-            const isHighlight = highlightRoomId === room.id
-            const material = new THREE.MeshStandardMaterial({
-              color: roomColor(room),
-              roughness: 0.6,
-              transparent: isDimmed || (Boolean(highlightRoomId) && !isHighlight),
-              opacity: isDimmed ? 0.2 : highlightRoomId && !isHighlight ? 0.35 : 1,
-              emissive: isHighlight ? new THREE.Color(roomColor(room)) : new THREE.Color(0x000000),
-              emissiveIntensity: isHighlight ? 0.55 : 0,
+          if (!floorRooms.length) {
+            // 规划楼层：灰显体块（点击选中楼宇）
+            const ghost = new THREE.Mesh(ghostGeometry, new THREE.MeshStandardMaterial({
+              color: GHOST_COLOR, roughness: 0.95, transparent: true,
+              opacity: isDimmed ? 0.15 : 0.55,
+            }))
+            ghost.position.set(buildingCenterX, baseY + FLOOR_HEIGHT * 0.45, 0)
+            ghost.userData = { kind: 'building', building }
+            contentGroup.add(ghost)
+          } else {
+            // 楼板
+            const plate = new THREE.Mesh(plateGeometry, plateMaterial)
+            plate.position.set(buildingCenterX, baseY + 0.05, 0)
+            contentGroup.add(plate)
+
+            const floorHighlighted = highlightFloor === floor && isFocused
+            const widthPerRoom = buildingWidth / floorRooms.length
+            floorRooms.forEach((room, index) => {
+              const isHighlight = highlightRoomId === room.id
+              const material = new THREE.MeshStandardMaterial({
+                color: roomColor(room),
+                roughness: 0.55,
+                transparent: isDimmed || (Boolean(highlightRoomId) && !isHighlight),
+                opacity: isDimmed ? 0.2 : highlightRoomId && !isHighlight ? 0.32 : 1,
+                emissive: isHighlight ? new THREE.Color(roomColor(room)) : new THREE.Color(0x000000),
+                emissiveIntensity: isHighlight ? 0.55 : 0,
+              })
+              const box = new THREE.Mesh(
+                new THREE.BoxGeometry(widthPerRoom * 0.86, FLOOR_HEIGHT * 0.78, ROOM_DEPTH * 0.9),
+                material,
+              )
+              box.position.set(buildingCenterX - buildingWidth / 2 + (index + 0.5) * widthPerRoom, baseY + 0.1 + FLOOR_HEIGHT * 0.42, 0)
+              box.userData = { kind: 'room', room, building }
+              contentGroup.add(box)
             })
-            const box = new THREE.Mesh(new THREE.BoxGeometry(widthPerRoom * 0.88, FLOOR_HEIGHT * 0.72, ROOM_DEPTH * 0.86), material)
-            box.position.set(
-              cursorX + (index + 0.5) * widthPerRoom,
-              floorY,
-              0,
-            )
-            box.userData = { kind: 'room', room, building }
-            contentGroup.add(box)
-          })
-          if (floorHighlighted) {
-            const ring = new THREE.Mesh(
-              new THREE.BoxGeometry(buildingWidth + 0.3, FLOOR_HEIGHT + 0.12, ROOM_DEPTH + 0.3),
-              new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.16 }),
-            )
-            ring.position.set(cursorX + buildingWidth / 2, floorY, 0)
-            contentGroup.add(ring)
+
+            if (floorHighlighted) {
+              const ring = new THREE.Mesh(
+                new THREE.BoxGeometry(buildingWidth + 0.3, FLOOR_HEIGHT + 0.1, ROOM_DEPTH + 0.3),
+                new THREE.MeshBasicMaterial({ color: 0xf59e0b, transparent: true, opacity: 0.15 }),
+              )
+              ring.position.set(buildingCenterX, baseY + FLOOR_HEIGHT / 2, 0)
+              contentGroup.add(ring)
+            }
           }
+
+          // 楼层标签（左缘）
+          const label = makeLabel(`${floor}F`, 'facility3d-label-floor')
+          label.position.set(buildingCenterX - buildingWidth / 2 - 0.7, baseY + FLOOR_HEIGHT / 2, ROOM_DEPTH / 2)
+          contentGroup.add(label)
         }
+        plateGeometry.dispose()
+        ghostGeometry.dispose()
 
         cursorX += buildingWidth + buildingGap
         totals.maxX = Math.max(totals.maxX, cursorX)
