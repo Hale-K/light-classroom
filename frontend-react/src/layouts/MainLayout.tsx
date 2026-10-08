@@ -18,7 +18,7 @@ const EXAM_MODULE_PATHS = ['/exam-venues', '/exam-calendar', '/exam-invigilators
 const MENU_GATED_PATHS = new Set([
   '/dashboard', '/scheduling', '/teacher-courses', '/teacher-preparation', '/teacher-classes', '/teacher-students',
   '/file-center', '/ai-providers', '/students', '/classes', '/staff', '/rbac', '/gaokao', '/seating',
-  '/exam-scheduling', '/settings', '/subjects', '/campus-buildings',
+  '/exam-scheduling', '/settings', '/subjects', '/campus-buildings', '/courseware',
   '/teacher-profiles', '/teacher-grades', '/teacher-notices',
 ])
 

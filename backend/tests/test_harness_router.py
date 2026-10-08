@@ -16,7 +16,7 @@ def test_router_maps_structured_intent_to_registered_harness():
 
     for kind in AssistantIntent:
         decision = IntentDecision(kind=kind, confidence=1, source="test")
-        expected = "guide" if kind is AssistantIntent.UNKNOWN else kind.value
+        expected = "configuration" if kind is AssistantIntent.CONFIGURATION else "guide"
         assert router.select(decision).name == expected
     assert set(router.profiles) == {"direct", "guide", "readiness", "diagnosis", "configuration"}
 
@@ -33,7 +33,7 @@ def test_router_selects_direct_harness_for_fast_path():
     assert profile.allowed_tools == frozenset()
 
 
-def test_router_jev_tool_hint_narrows_only_existing_allowlist():
+def test_router_jev_tool_hint_does_not_lock_readonly_queries():
     router = HarnessRouter()
     decision = IntentDecision(
         kind=AssistantIntent.GUIDE,
@@ -42,7 +42,8 @@ def test_router_jev_tool_hint_narrows_only_existing_allowlist():
         tool_hints=frozenset({"lookup_teachers"}),
     )
     profile = router.select(decision)
-    assert profile.allowed_tools == frozenset({"lookup_teachers"})
+    assert profile.allowed_tools == router.profiles["guide"].allowed_tools
+    assert 'propose_rules' not in profile.allowed_tools
 
     unknown = IntentDecision(
         kind=AssistantIntent.GUIDE,
@@ -78,7 +79,7 @@ async def test_intent_gateway_uses_semantic_classifier_without_phrase_enumeratio
 
     assert decision.kind is AssistantIntent.DIAGNOSIS
     assert decision.source == "pgvector"
-    assert decision.route is AssistantRoute.SUPERVISOR
+    assert decision.route is AssistantRoute.AGENT
 
 
 @pytest.mark.asyncio
@@ -103,7 +104,7 @@ async def test_optional_decision_layer_falls_back_when_unavailable_or_uncertain(
 
     assert decision.kind is AssistantIntent.READINESS
     assert decision.source == "pgvector"
-    assert decision.route is AssistantRoute.SUPERVISOR
+    assert decision.route is AssistantRoute.AGENT
 
 
 @pytest.mark.asyncio
@@ -118,7 +119,7 @@ async def test_optional_decision_layer_is_used_when_confident():
 
     assert decision.kind is AssistantIntent.DIAGNOSIS
     assert decision.source == "jev"
-    assert decision.route is AssistantRoute.SUPERVISOR
+    assert decision.route is AssistantRoute.AGENT
 
 
 @pytest.mark.asyncio
@@ -157,10 +158,8 @@ def test_tool_scope_cannot_exceed_harness_allowlist():
 @pytest.mark.asyncio
 async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     from app.api.v1 import onboarding
-    foundation_keys = ("year", "personnel", "space", "allocation", "class_planning", "grid", "hours", "assignments")
-    monkeypatch.setattr(onboarding, "load_onboarding_status", AsyncMock(return_value={
-        "data": {"steps": [{"key": key, "done": True, "title": key, "detail": "已有记录", "path": "/scheduling"} for key in foundation_keys]}
-    }))
+    monkeypatch.setattr(onboarding, "load_onboarding_status", AsyncMock(
+        side_effect=AssertionError("普通聊天不应自动启动基础准备检查")))
     monkeypatch.setattr(
         gateway_model,
         "resolve_chat_endpoints",
@@ -180,8 +179,7 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
         tasks = ()
 
         async def run(self, execute, *, context=None, parallel=False, on_event=None):
-            from app.ai.supervisor import SupervisorKind, SupervisorReport
-            return SupervisorReport(kind=SupervisorKind.READINESS, summary="已检查")
+            raise AssertionError("普通聊天不应自动启动固定 Supervisor")
 
     services = ServiceRegistry()
     services.register("intent_gateway", IntentGateway(semantic))
@@ -200,8 +198,10 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     assert events[0][0] == "intent.classified"
     assert events[0][1]["kind"] == "readiness"
     assert events[1][0] == "harness.selected"
-    assert events[1][1]["name"] == "readiness"
-    assert not invoke.await_args
+    assert events[1][1]["name"] == "guide"
+    invoke.assert_awaited_once()
+    assert invoke.await_args.kwargs['harness'].name == 'guide'
+    assert not any(name.startswith('supervisor.') for name, _ in events)
 
 
 @pytest.mark.asyncio

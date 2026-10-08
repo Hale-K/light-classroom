@@ -122,7 +122,7 @@ async def health():
 
 
 # ---------- 路由挂载（按模块陆续加） ----------
-from app.api.v1 import admin, auth, org, exam, scheduling, seating, exam_scheduling, gaokao, student_auth, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge
+from app.api.v1 import admin, auth, org, exam, scheduling, seating, exam_scheduling, gaokao, student_auth, staff, dashboard, organization, facilities, rbac, teacher_profiles, student_import, file_center, ai_provider, assistant, onboarding, knowledge, courseware
 app.include_router(admin.router, prefix="/api/v1")
 app.include_router(auth.router, prefix="/api/v1")
 app.include_router(org.router, prefix="/api/v1")
@@ -146,6 +146,7 @@ from app.api.v1.page_agent import router as page_agent_router
 app.include_router(page_agent_router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
+app.include_router(courseware.router, prefix="/api/v1")
 # from app.api.v1 import exam, grading, ...
 # 其他业务模块暂不挂载；核心保留排课、排考和助手。
 

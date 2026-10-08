@@ -10,6 +10,7 @@ from app.models.exam import *  # noqa: F401,F403
 from app.models.gaokao import *  # noqa: F401,F403
 from app.models.audit import *  # noqa: F401,F403
 from app.models.transfer import *  # noqa: F401,F403
+from app.models.courseware import *  # noqa: F401,F403
 from app.models.scheduling import *  # noqa: F401,F403
 # AI 表模型注册：actions/proposal 会反向导入 scheduling（循环），此处延迟保护——
 # API 进程正常导入注册表结构；排课 worker 初始化时跳过（其不需要 AI 表，表由 Alembic 管理）

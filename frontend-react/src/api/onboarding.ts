@@ -5,6 +5,7 @@ export type OnboardingStep = {
   key: string
   title: string
   done: boolean
+  required?: boolean
   detail: string
   path: string
 }

@@ -203,6 +203,52 @@ async def ensure_ai_provider_menu(session: AsyncSession) -> None:
     await session.flush()
 
 
+async def ensure_courseware_menu(session: AsyncSession) -> None:
+    """已有库补齐「课件管理」菜单与权限映射（不覆盖其它项）。"""
+    from app.services.rbac.catalog import ensure_permissions
+
+    await ensure_permissions(session)
+    perm = (
+        await session.execute(select(Permission).where(Permission.code == "courseware:view"))
+    ).scalar_one_or_none()
+    if perm is None:
+        perm = Permission(code="courseware:view", name="查看课件管理", module="课件管理", sort=85)
+        session.add(perm)
+        await session.flush()
+    existing = (
+        await session.execute(select(Menu).where(Menu.key == "courseware"))
+    ).scalar_one_or_none()
+    if existing is None:
+        session.add(
+            Menu(
+                key="courseware",
+                name="课件管理",
+                path="/courseware",
+                icon="book",
+                sort=12,
+                enabled=True,
+                roles_csv="",
+                required_capability=None,
+                group_key="teaching-exams",
+                group_title="教学考试",
+                group_icon="book",
+                group_sort=30,
+            )
+        )
+        await session.flush()
+    linked = (
+        await session.execute(
+            select(MenuPermission).where(
+                MenuPermission.menu_key == "courseware",
+                MenuPermission.permission_id == perm.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if linked is None:
+        session.add(MenuPermission(menu_key="courseware", permission_id=perm.id))
+    await session.flush()
+
+
 async def ensure_menu_permissions(session: AsyncSession) -> None:
     """权限点 + 菜单结构 + 默认菜单权限映射（按 menu_key 仅补缺）。"""
     from app.services.rbac.catalog import ensure_permissions
@@ -212,6 +258,7 @@ async def ensure_menu_permissions(session: AsyncSession) -> None:
     await sync_menu_groups(session)
     await ensure_file_center_menu(session)
     await ensure_ai_provider_menu(session)
+    await ensure_courseware_menu(session)
     existing_keys = set(
         (await session.execute(select(MenuPermission.menu_key).distinct())).scalars().all()
     )

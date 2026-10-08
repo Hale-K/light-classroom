@@ -63,11 +63,25 @@ const CLASS_TYPE_OPTIONS = [
   { label: '实验班', value: 'experimental' },
 ]
 
-function navigationNodes(nodes: FacilityTreeNode[]): DataNode[] {
+function navigationNodes(nodes: FacilityTreeNode[], onAdd: (node: FacilityTreeNode) => void): DataNode[] {
   return nodes.map((node) => ({
     key: node.key,
-    title: <span className="zh-org-tree-title"><span>{node.name}</span><small>{node.children?.length || 0}</small></span>,
-    children: node.children ? navigationNodes(node.children) : undefined,
+    title: (
+      <span className="zh-org-tree-title">
+        <span>{node.name}</span>
+        <small>{node.children?.length || 0}</small>
+        <button
+          type="button"
+          className="zh-org-tree-add"
+          aria-label={`在「${node.name}」下新增`}
+          title={node.node_type === 'campus' ? '新增楼宇' : '生成场室'}
+          onClick={(event) => { event.stopPropagation(); onAdd(node) }}
+        >
+          <Icon name="plus" size={11} />
+        </button>
+      </span>
+    ),
+    children: node.children ? navigationNodes(node.children, onAdd) : undefined,
   }))
 }
 function findNode(nodes: FacilityTreeNode[], key: string): FacilityTreeNode | undefined {
@@ -314,7 +328,11 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
       setBatchRoomOpen(false)
       batchRoomForm.resetFields()
       const skippedText = result.skipped_count ? `，跳过已存在 ${result.skipped_count} 间` : ''
-      message.success(`已生成 ${result.created_count} 间普通教室${skippedText}`)
+      if (result.created_count) {
+        message.success(`已生成 ${result.created_count} 间普通教室${skippedText}`)
+      } else {
+        message.warning(`未生成新教室：编号与「${values.name_prefix}${String(values.start_number).padStart(2, '0')}」起的现有教室重名，请把起始编号往后调`)
+      }
       await load()
     } catch (error) { message.error(error instanceof Error ? error.message : '批量生成教室失败') }
     finally { setSaving(false) }
@@ -355,7 +373,49 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     [visibleNodes, page, pageSize],
   )
   const selectedLabel = selectedKey === 'space' ? '全部空间资源' : selectedNode?.name || '空间资源'
-  const navTree: DataNode[] = [{ key: 'space', title: <span className="zh-org-tree-title zh-org-school-title"><span>学校空间</span><small>{data?.stats.room_count || 0}</small></span>, children: navigationNodes(treeData) }]
+  /** 楼宇内同名即跳过，起始编号默认取现有最大编号 +1，避免新楼层从 1 开始全部撞名 */
+  const nextRoomStartNumber = (buildingId: number) => {
+    const suffixes = rooms
+      .filter((room) => room.building_id === buildingId)
+      .map((room) => Number((room.name.match(/(\d+)\s*$/) || [])[1] ?? NaN))
+      .filter((value) => Number.isFinite(value))
+    return (suffixes.length ? Math.max(...suffixes) : 0) + 1
+  }
+  /** 楼宇下还没有场室的第一个楼层：从楼上的 + 进入时默认生成这一层 */
+  const nextEmptyFloor = (buildingId: number) => {
+    const floors = rooms.filter((room) => room.building_id === buildingId).map((room) => room.floor)
+    return (floors.length ? Math.max(...floors) : 0) + 1
+  }
+  const addUnderNode = (node: FacilityTreeNode) => {
+    if (node.node_type === 'campus' && node.campus) {
+      buildingForm.setFieldValue('campus_id', node.campus.id)
+      setBuildingOpen(true)
+    } else if (node.node_type === 'building' && node.building) {
+      batchRoomForm.setFieldsValue({
+        building_id: node.building.id,
+        floor: nextEmptyFloor(node.building.id),
+        start_number: nextRoomStartNumber(node.building.id),
+      })
+      setBatchRoomOpen(true)
+    } else if (node.node_type === 'floor' && node.building) {
+      batchRoomForm.setFieldsValue({ building_id: node.building.id, floor: node.floorNumber, start_number: nextRoomStartNumber(node.building.id) })
+      setBatchRoomOpen(true)
+    }
+  }
+  const navTree: DataNode[] = [{
+    key: 'space',
+    title: (
+      <span className="zh-org-tree-title zh-org-school-title">
+        <span>学校空间</span>
+        <small>{data?.stats.room_count || 0}</small>
+        <button type="button" className="zh-org-tree-add" aria-label="新增校区" title="新增校区"
+          onClick={(event) => { event.stopPropagation(); setCampusOpen(true) }}>
+          <Icon name="plus" size={11} />
+        </button>
+      </span>
+    ),
+    children: navigationNodes(treeData, addUnderNode),
+  }]
   const assignedRooms = useMemo(() => rooms.filter((room) => (room.cohort_allocations || []).length > 0), [rooms])
   const roomTypeCounts = useMemo(() => {
     const counts = new Map<RoomResource['room_type'], number>()
@@ -395,16 +455,6 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
     setStatusSavingId(building.id)
     try { await facilityApi.updateBuildingStatus(building.id, status); message.success('楼宇使用状态已更新'); await load() }
     catch (error) { message.error(error instanceof Error ? error.message : '楼宇状态更新失败') }
-    finally { setStatusSavingId(undefined) }
-  }
-
-  const addFloorsTo = async (building: Building, count: number) => {
-    setStatusSavingId(building.id)
-    try {
-      const result = await facilityApi.updateBuilding(building.id, { floor_count: building.floor_count + count })
-      message.success(`已为${building.name}新增 ${count} 层（当前 ${result.floor_count} 层），新层可用「批量生成教室」填充场室`)
-      await load()
-    } catch (error) { message.error(error instanceof Error ? error.message : '加层失败') }
     finally { setStatusSavingId(undefined) }
   }
 
@@ -658,7 +708,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
   const openBuilding = () => { if (selectedNode?.node_type === 'campus') buildingForm.setFieldValue('campus_id', Number(selectedNode.key.replace('campus-', ''))); setBuildingOpen(true) }
   const openRoom = () => { if (selectedNode?.building) roomForm.setFieldValue('building_id', selectedNode.building.id); setRoomOpen(true) }
   const actions = focus === 'resources'
-    ? <div className="facility-actions"><Button onClick={() => setCampusOpen(true)}>新增校区</Button><Button disabled={!data?.campuses.length} onClick={openBuilding}>新增楼宇</Button><Button disabled={!data?.buildings.length} onClick={() => { batchRoomForm.setFieldsValue({ building_id: selectedNode?.building?.id || data?.buildings[0]?.id }); setBatchRoomOpen(true) }}>批量生成教室</Button><Button type="primary" disabled={!data?.buildings.length} onClick={openRoom}>新增场室</Button></div>
+    ? <div className="facility-actions"><Button onClick={() => setCampusOpen(true)}>新增校区</Button><Button disabled={!data?.campuses.length} onClick={openBuilding}>新增楼宇</Button><Button disabled={!data?.buildings.length} onClick={() => { const buildingId = selectedNode?.building?.id || data?.buildings[0]?.id; batchRoomForm.setFieldsValue({ building_id: buildingId, floor: buildingId ? nextEmptyFloor(buildingId) : undefined, start_number: buildingId ? nextRoomStartNumber(buildingId) : undefined }); setBatchRoomOpen(true) }}>批量生成教室</Button><Button type="primary" disabled={!data?.buildings.length} onClick={openRoom}>新增场室</Button></div>
     : null
   return <div className={embedded ? 'facility-pane' : 'zh-page facility-page'}>
     {embedded ? <div className="facility-subhead facility-subhead-actions">{actions}</div> : <PageHeader title="空间资源" extra={actions} />}
@@ -739,8 +789,6 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
                           <Select size="small" value={building.status} loading={statusSavingId === building.id} options={BUILDING_STATUS}
                             style={{ width: 104 }} onChange={(value) => void updateStatus(building, value as BuildingStatus)} />
                           <Space size={0}>
-                            <Button type="link" size="small" loading={statusSavingId === building.id}
-                              onClick={() => void addFloorsTo(building, 1)}>加一层</Button>
                             <Button type="link" size="small" onClick={() => setSelectedKey(`building-${building.id}`)}>查看楼层 →</Button>
                           </Space>
                         </footer>

@@ -25,6 +25,7 @@ class SentenceTransformerEmbedding:
     def __init__(self, model_path: str):
         self.model_path = model_path
         self._model: Any = None
+        self._load_task: asyncio.Task | None = None
         self._load_lock = asyncio.Lock()
         self._encode_lock = asyncio.Lock()
 
@@ -44,7 +45,10 @@ class SentenceTransformerEmbedding:
 
                     return SentenceTransformer(str(path), local_files_only=True)
 
-                self._model = await asyncio.to_thread(load_model)
+                # A timed-out request must not restart an expensive cold load.
+                if self._load_task is None or (self._load_task.done() and self._load_task.exception() is not None):
+                    self._load_task = asyncio.create_task(asyncio.to_thread(load_model))
+                self._model = await asyncio.shield(self._load_task)
         return self._model
 
     async def embed(self, texts: list[str]) -> list[list[float]]:
@@ -133,9 +137,9 @@ class PostgresIntentClassifier:
         previous = [
             str(item.get("content") or "").strip()[:500]
             for item in recent_turns[-4:-1]
-            if item.get("content")
+            if item.get("role") == "user" and item.get("content")
         ]
-        parts = [*previous, query.strip()]
+        parts = [*previous, query.strip()] if len(query.strip()) <= 12 else [query.strip()]
         if page_path:
             parts.append(f"当前页面：{page_path}")
         return "\n".join(parts)

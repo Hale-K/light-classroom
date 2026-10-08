@@ -15,6 +15,16 @@ export const MONDAY = (() => {
 export const SUBJECT_ORDER = ['语文', '数学', '英语', '物理', '化学', '生物', '政治', '历史', '地理', '体育']
 export const WEEKDAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
 
+export function resolveScheduleClassId(
+  selectedClassId: number | undefined,
+  gradeId: number | undefined,
+  classes: Array<{ id: number; grade_id: number }>,
+): number | undefined {
+  const selectedClass = classes.find((item) => item.id === selectedClassId)
+  if (!selectedClass || (gradeId !== undefined && selectedClass.grade_id !== gradeId)) return undefined
+  return selectedClass.id
+}
+
 export const GEN_STEPS = [
   { code: 'validating', label: '校验资源' },
   { code: 'generating', label: '初排与冲突修复' },

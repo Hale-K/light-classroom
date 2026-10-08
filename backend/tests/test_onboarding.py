@@ -1,8 +1,6 @@
 """新手引导准备流程判定：完成阈值与详情文案。"""
 from app.api.v1.onboarding import evaluate_steps, teaching_staff_count_query
 from app.ai.supervisor.readiness import preparation_guidance
-import pytest
-from unittest.mock import AsyncMock
 from sqlalchemy import create_engine, insert
 from app.models.org import User
 from app.models.rbac import Role, UserRole
@@ -63,35 +61,15 @@ def test_only_active_teaching_role_accounts_count_as_prepared_teachers():
     engine.dispose()
 
 
-@pytest.mark.asyncio
-async def test_readiness_stops_before_detailed_checks_when_personnel_missing(monkeypatch):
-    from app.api.v1 import onboarding
-    from app.ai.agent import assistant_agent
-    from app.ai.runtime import AssistantRuntime, ServiceRegistry
-    from app.ai.intent import AssistantIntent
-    from app.ai.intent import IntentGateway
-    from app.ai.intent import IntentDecision
-
-    async def semantic(*args, **kwargs):
-        return IntentDecision(AssistantIntent.READINESS, 0.95, "pgvector")
-
-    monkeypatch.setattr(onboarding, "load_onboarding_status", AsyncMock(
-        return_value={"data": {"steps": _steps(staff_count=0, room_count=0, enabled_rules=0)}}
-    ))
-    model = AsyncMock(side_effect=AssertionError("前置缺失不应调用模型"))
-    monkeypatch.setattr(assistant_agent, "agent_reply", model)
-    services = ServiceRegistry()
-    services.register("intent_gateway", IntentGateway(semantic))
-    detailed = AsyncMock(side_effect=AssertionError("前置缺失不应进行细项检查"))
-    services.register("readiness_supervisor", type("Supervisor", (), {"run": detailed})())
-    result = await assistant_agent.handle_assistant_turn(
-        None, 1, [{"role": "user", "content": "帮我检查排课准备情况"}],
-        runtime=AssistantRuntime(services=services),
+def test_standard_preparation_check_stops_when_personnel_missing():
+    # Standard checklist behavior remains available as an explicit module;
+    # the interactive chat no longer invokes it automatically.
+    text, jumps, ready = preparation_guidance(
+        _steps(staff_count=0, room_count=0, enabled_rules=0)
     )
-    assert result.jumps[0]["path"] == "/staff"
-    assert "没有检查对象不等于检查通过" in result.text
-    detailed.assert_not_called()
-    model.assert_not_called()
+    assert not ready
+    assert jumps[0]["path"] == "/staff"
+    assert "没有检查对象不等于检查通过" in text
 
 
 def test_new_school_first_steps_incomplete_with_guidance():

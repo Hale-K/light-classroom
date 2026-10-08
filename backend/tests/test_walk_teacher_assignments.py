@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 from sqlmodel import SQLModel
 
-from app.api.v1.gaokao import WalkTeachersIn, assign_walk_teachers, walk_teacher_options
+from app.api.v1.gaokao import ClearWalkScheduleIn, WalkTeachersIn, assign_walk_teachers, clear_walk_schedule, walk_teacher_options
 from app.models.gaokao import TeachingClass, TeachingClassSchedule
 from app.models.org import Grade, Subject, User, OrganizationUnit, StaffAppointment, TeachingAssignment
 
@@ -65,5 +65,61 @@ def test_walk_teacher_batch_scope_validation_idempotency_and_schedule_guard():
             assert (await assign_walk_teachers(body([1], teacher=None, expected=1), **deps))['data']['updated'] == 1
             assert db.get(TeachingClass, 2).teacher_id == 1
             assert db.get(TeachingClass, 3).teacher_id is None
+        asyncio.run(verify())
+    engine.dispose()
+
+
+def test_clearing_walk_timetable_unlocks_teacher_changes_without_touching_other_scopes():
+    engine = create_engine('sqlite://')
+    models = [Grade, Subject, User, OrganizationUnit, StaffAppointment, TeachingAssignment,
+        TeachingClass, TeachingClassSchedule]
+    SQLModel.metadata.create_all(engine, tables=[model.__table__ for model in models])
+    with Session(engine) as db:
+        db.add_all([
+            Grade(id=1, tenant_id=7, name='高一', level=1),
+            Subject(id=1, tenant_id=7, name='化学'),
+            User(id=1, tenant_id=7, name='原教师', phone='1', password_hash='test'),
+            User(id=2, tenant_id=7, name='新教师', phone='2', password_hash='test'),
+            OrganizationUnit(id=1, tenant_id=7, name='化学组', unit_type='subject_group', subject_id=1),
+            StaffAppointment(id=1, tenant_id=7, organization_unit_id=1, staff_id=2, position_code='member'),
+            TeachingClass(id=1, tenant_id=7, grade_id=1, subject_id=1, sequence=1,
+                name='化学01', academic_year='2026-2027', term='2', weekly_periods=4, teacher_id=1),
+            TeachingClass(id=2, tenant_id=7, grade_id=1, subject_id=1, sequence=2,
+                name='化学02', academic_year='2026-2027', term='1', weekly_periods=4, teacher_id=1),
+            TeachingClass(id=3, tenant_id=8, grade_id=1, subject_id=1, sequence=3,
+                name='其他租户化学班', academic_year='2026-2027', term='2', weekly_periods=4, teacher_id=1),
+            TeachingClassSchedule(tenant_id=7, teaching_class_id=1, subject_id=1, teacher_id=1,
+                academic_year='2026-2027', term='2', weekday=1, period=1),
+            TeachingClassSchedule(tenant_id=7, teaching_class_id=1, subject_id=1, teacher_id=1,
+                academic_year='2026-2027', term='1', weekday=2, period=2),
+            TeachingClassSchedule(tenant_id=7, teaching_class_id=2, subject_id=1, teacher_id=1,
+                academic_year='2026-2027', term='1', weekday=1, period=1),
+            TeachingClassSchedule(tenant_id=8, teaching_class_id=3, subject_id=1, teacher_id=1,
+                academic_year='2026-2027', term='2', weekday=1, period=1),
+        ])
+        db.commit()
+
+        class Adapter:
+            async def execute(self, stmt): return db.execute(stmt)
+            def add(self, item): db.add(item)
+            async def commit(self): db.commit()
+
+        async def verify():
+            result = await clear_walk_schedule(
+                ClearWalkScheduleIn(grade_id=1, academic_year='2026-2027', term='2'),
+                session=Adapter(), tenant_id=7,
+            )
+            assert result['data'] == {'cleared': 2, 'teaching_class_count': 1}
+            assert db.get(TeachingClassSchedule, 1) is None
+            assert db.get(TeachingClassSchedule, 2) is None
+            assert db.get(TeachingClassSchedule, 3) is not None
+            assert db.get(TeachingClassSchedule, 4) is not None
+
+            changed = WalkTeachersIn(grade_id=1, academic_year='2026-2027', term='2', assignments=[{
+                'teaching_class_id': 1, 'teacher_id': 2, 'expected_teacher_id': 1,
+            }])
+            update = await assign_walk_teachers(changed, session=Adapter(), tenant_id=7)
+            assert update['data']['updated'] == 1
+            assert db.get(TeachingClass, 1).teacher_id == 2
         asyncio.run(verify())
     engine.dispose()

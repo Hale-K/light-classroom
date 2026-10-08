@@ -45,12 +45,19 @@ GUIDE_HARNESS = HarnessProfile(
     label="页面说明",
     strategy="direct_or_react",
     instructions=(
-        "优先直接解释当前页面和下一步；只有回答依赖本校真实数据时才调用工具。"
+        "先理解用户当前的问题：能直接回答就直接回答，范围不明确先追问，"
+        "只有回答依赖本校真实数据时才调用工具。"
+        "根据每次工具返回的证据决定是否继续查询，不因问题标签而执行固定检查链。"
+        "明确区分事实、推断和未核实项；证据不足时不要声称已完成全面检查。"
+        "排课问题按问题选择日志、容量或走班数据工具，不默认检查全校。"
+        "走班人数与固定任课用 lookup_walk_classes，缺年级先澄清；禁止凭经验编造根因。"
         "不要创建规则草稿。"
     ),
     allowed_tools=frozenset({
         "lookup_playbook", "lookup_schedule_setup", "lookup_teachers", "lookup_rules",
         "lookup_generation_status",
+        "lookup_generation_log", "lookup_subject_capacity", "lookup_remaining_capacity",
+        "lookup_slot_role_capacity", "lookup_walk_classes",
     }),
     max_steps=3,
     step_timeout_seconds=60,
@@ -67,6 +74,21 @@ DIRECT_HARNESS = HarnessProfile(
     step_timeout_seconds=30,
     turn_timeout_seconds=45,
 )
+
+PLAN_HARNESS = replace(
+    GUIDE_HARNESS,
+    name='plan', label='计划模式',
+    instructions=(
+        '本轮为计划模式：只分析、查询和提出方案，不创建规则草稿、不执行页面操作或数据修改。'
+        '先说明结论，再给必要的步骤和待确认项；简单问题直接回答，模糊问题先追问。'
+        '不要把建议说成已完成；用户要求保存或执行时说明需退出计划模式并明确确认。'
+        + GUIDE_HARNESS.instructions
+    ),
+)
+
+
+def apply_assistant_mode(profile: HarnessProfile, page_context: dict | None) -> HarnessProfile:
+    return PLAN_HARNESS if (page_context or {}).get('assistant_mode') == 'plan' else profile
 
 READINESS_HARNESS = HarnessProfile(
     name="readiness",
@@ -90,11 +112,15 @@ DIAGNOSIS_HARNESS = HarnessProfile(
     strategy="evidence_first_react",
     instructions=(
         "先读取排课任务状态，再核对准备数据和规则。明确区分观测事实与推断，"
-        "给出可验证的恢复步骤；本任务禁止创建规则草稿。"
+        "给出可验证的恢复步骤。班数、人数、走班任课问题查询 lookup_walk_classes；"
+        "容量和求解日志按需查询，不要把准备完整或容量足够当成求解成功。"
+        "本任务禁止创建规则草稿。"
     ),
     allowed_tools=frozenset({
         "lookup_generation_status", "lookup_schedule_setup", "lookup_teachers",
         "lookup_rules", "lookup_playbook",
+        "lookup_generation_log", "lookup_subject_capacity", "lookup_remaining_capacity",
+        "lookup_slot_role_capacity", "lookup_walk_classes",
     }),
     max_steps=6,
     step_timeout_seconds=75,
@@ -141,10 +167,12 @@ class HarnessRouter:
     def select(self, decision: IntentDecision) -> HarnessProfile:
         if decision.route is AssistantRoute.DIRECT:
             return DIRECT_HARNESS
+        # Interactive read-only topics share one bounded evidence loop. Hints
+        # must not prevent the model from choosing the next query after observing
+        # a result. Only server-owned tools can appear in the capability set.
+        if decision.kind is not AssistantIntent.CONFIGURATION:
+            return GUIDE_HARNESS
         profile = self._intent_profiles[decision.kind]
-        # Jev can narrow the query scope, but can never add a tool or bypass
-        # the server-owned harness allowlist. Supervisor branches keep their
-        # fixed task tool sets because they coordinate several checks.
         if decision.tool_hints and decision.route not in {AssistantRoute.SUPERVISOR, AssistantRoute.WORKFLOW}:
             allowed = profile.allowed_tools.intersection(decision.tool_hints)
             if allowed:

@@ -49,6 +49,47 @@ def partition_candidates(counts, subjects, capacity, attempts=12):
         yield (*partitions, {i: subjects[(i + attempt) % len(subjects)] for i in range(group_count)})
 
 
+def fixed_walk_teacher_mapping(existing_classes, generated_classes):
+    """Keep each configured subject/sequence teacher on its regenerated class."""
+    teacher_mapping, _ = fixed_walk_class_mapping(existing_classes, generated_classes)
+    return teacher_mapping
+
+
+def fixed_walk_class_mapping(existing_classes, generated_classes):
+    """Map a regroup draft onto the existing class shells without changing their IDs."""
+    existing_by_subject = defaultdict(list)
+    generated_by_subject = defaultdict(list)
+    for row in existing_classes:
+        existing_by_subject[row.subject_id].append(row)
+    for row in generated_classes:
+        generated_by_subject[row['subject_id']].append(row)
+
+    teacher_mapping, class_mapping = {}, {}
+    for subject_id, generated in generated_by_subject.items():
+        current = sorted(existing_by_subject.get(subject_id, []), key=lambda row: row.sequence)
+        generated = sorted(generated, key=lambda row: row['id'])
+        if not current:
+            raise ValueError(f'走班学科 {subject_id} 尚未配置任课关系，请先指定任课教师')
+        unassigned = [row.name for row in current if row.teacher_id is None]
+        if unassigned:
+            raise ValueError(f'走班学科 {subject_id} 的任课关系未指定教师：{"、".join(unassigned)}')
+        if len(current) != len(generated):
+            raise ValueError(
+                f'走班学科 {subject_id} 已配置 {len(current)} 个教学班任课关系，'
+                f'本次分班将生成 {len(generated)} 个；为避免擅自调整老师，请先核对教学班和任课关系'
+            )
+        if any('configured_class_id' in row for row in generated):
+            by_id = {row.id: row for row in current}
+            mapped_ids = [row.get('configured_class_id') for row in generated]
+            if len(set(mapped_ids)) != len(current) or set(mapped_ids) != set(by_id):
+                raise ValueError('教学班均衡分配对应关系不完整')
+            current = [by_id[row['configured_class_id']] for row in generated]
+        for old, new in zip(current, generated):
+            teacher_mapping[new['id']] = old.teacher_id
+            class_mapping[new['id']] = old.id
+    return teacher_mapping, class_mapping
+
+
 def is_generated_coordination_rule(rule_id):
     """Recognize only IDs emitted by the retired joint-rule writer."""
     return rule_id in {'regroup-daytime-range', 'regroup-student-contiguous'} or bool(
@@ -103,7 +144,7 @@ async def source_fingerprint(session, tenant_id, lock=False):
     from app.models.gaokao import (StudentSubjectChoice, TeachingClass, TeachingClassStudent,
         TeachingClassSchedule, TeachingSubjectHourPlan, WalkSchedulingPlan, GaokaoScheme)
     from app.models.facility import Room, Building, ResourceAllocationRule, RoomCohortAllocation
-    state = {'roster_version': 'semester-membership-v1', 'joint_workflow_version': 'minimum-range-v3'}
+    state = {'roster_version': 'semester-membership-v1', 'joint_workflow_version': 'teacher-student-balance-v4'}
     for model in (Grade, Class, Student, StudentGradeMembership, StudentClassMembership, StudentSubjectChoice,
                   TeachingAssignment, CourseHourPlan, Schedule, TeachingClass, TeachingClassStudent,
                   TeachingClassSchedule, TeachingSubjectHourPlan, WalkSchedulingPlan, GaokaoScheme,
@@ -152,11 +193,46 @@ def validate_candidate_rules(group, candidate, admins):
         raise HTTPException(status_code=422, detail='规则校验未通过：' + '；'.join(r.message for r in failures))
 
 
+def candidate_display(candidate, grade_name, subjects, admins, students, teachers, rooms, slots, choice_profiles=None,
+                      configured_names=None):
+    """Read-only display of the exact candidate bound to the preview token."""
+    sequence, names = Counter(), {}
+    for c in candidate['classes']:
+        sid = c['subject_id']; sequence[sid] += 1
+        names[c['id']] = f'{grade_name}{subjects[sid]}走班{sequence[sid]:02d}'
+        if configured_names is not None:
+            names[c['id']] = configured_names[candidate['class_id_map'][c['id']]]
+    lessons = []
+    for kind, rows in [('admin', candidate['calendar']['public']), ('walk', candidate['placements'])]:
+        for r in rows:
+            cid = r['class_id'] if kind == 'admin' else r['teaching_class_id']
+            lessons.append({'kind': kind, 'class_id': cid,
+                'class_name': admins[cid] if kind == 'admin' else names[cid],
+                'subject_name': subjects[r['subject_id']], 'teacher_id': r['teacher_id'],
+                'teacher_name': teachers.get(r['teacher_id'], '未安排'),
+                'room': r['room'] if kind == 'admin' else rooms[r['room_id']],
+                'weekday': r['weekday'], 'period': r['period']})
+    memberships = defaultdict(list)
+    for cid, sid in candidate['members']:
+        memberships[sid].append(cid)
+    return {'lessons': lessons,
+        'classes': [{'id': c['id'], 'name': names[c['id']], 'subject_name': subjects[c['subject_id']],
+            'student_count': c['size'], 'capacity': c['capacity']} for c in candidate['classes']],
+        'admin_classes': [{'id': cid, 'name': name} for cid, name in sorted(admins.items())],
+        'students': [{'id': int(sid), 'name': students[int(sid)], 'class_id': cid,
+            'class_name': admins[cid], 'teaching_class_ids': memberships[int(sid)],
+            **(choice_profiles or {}).get(int(sid), {'primary_subject_name': '', 'secondary_subject_names': []})}
+            for sid, cid in candidate['admin_by_student'].items()],
+        'slots': [{'weekday': d, 'period': p} for d, p in sorted(slots)]}
+
+
 async def preview_plan(body, session, tenant_id):
     import asyncio
     from app.api.v1.gaokao import (_regroup_roster, WalkRegroupPreviewIn, _preview_regroup_calendar)
     from app.api.v1.scheduling import _load_rule_group, _load_grid_config
-    from app.models.org import Subject, User, TenantConfig
+    from app.models.org import Subject, User, TenantConfig, Class, Student
+    from app.models.facility import Room
+    from app.models.gaokao import StudentSubjectChoice, TeachingClass
     from app.models.enums import BaseUserRole, UserStatus
     from app.services.scheduling.grid_slots import allowed_slots
     from app.services.scheduling.walk_regroup import regroup_walk_students
@@ -174,15 +250,32 @@ async def preview_plan(body, session, tenant_id):
         check_supported_user_rules(group)
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    existing_classes = list((await session.execute(select(TeachingClass).where(
+        TeachingClass.tenant_id == tenant_id, TeachingClass.grade_id == body.grade_id,
+        TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.term,
+    ).order_by(TeachingClass.subject_id, TeachingClass.sequence))).scalars())
+    if not existing_classes:
+        raise HTTPException(status_code=422, detail='请先生成教学班并安排任课教师，再进行联合排课')
+    expected_counts = Counter(c.subject_id for c in existing_classes
+                              if c.subject_id in set().union(*selected.values()))
+    effective_capacity = body.capacity + body.capacity_overflow
+    if any(c.teacher_id is None for c in existing_classes if c.subject_id in expected_counts):
+        raise HTTPException(status_code=422, detail='请先为所有教学班指定任课教师')
     candidate = None
+    count_matched = False
     for ag, bg, excluded in partition_candidates(Counter(admins.values()),
-            sorted(set().union(*selected.values())), body.capacity, attempts=4):
+            sorted(set().union(*selected.values())), effective_capacity, attempts=12):
         config = WalkRegroupPreviewIn(**body.model_dump(), a_groups=ag, b_groups=bg,
                                      b_excluded_subject=excluded)
         draft = await asyncio.to_thread(regroup_walk_students, selected, admins, ag, bg, excluded,
-                                       capacity=body.capacity)
+            capacity=effective_capacity, class_counts=dict(expected_counts),
+            configured_classes=[{'id': c.id, 'subject_id': c.subject_id, 'teacher_id': c.teacher_id}
+                                for c in existing_classes if c.subject_id in expected_counts])
         if draft['status'] != 'feasible':
             continue
+        if Counter(c['subject_id'] for c in draft['classes']) != expected_counts:
+            continue
+        count_matched = True
         calendar = await _preview_regroup_calendar(config, session, tenant_id, grade, selected, admins, draft)
         if not calendar.get('schedule_validated'):
             continue
@@ -190,6 +283,11 @@ async def preview_plan(body, session, tenant_id):
         validate_candidate_rules(group, candidate, admins)
         break
     if candidate is None:
+        if not count_matched:
+            raise HTTPException(status_code=422, detail=(
+                '当前分组结果与已生成的各科教学班数量不一致，未改动班级或任课关系。'
+                '请调整班额或重新核对教学班数量后再预览'
+            ))
         raise HTTPException(status_code=422, detail='当前班额、课时和资源下未找到联合方案，原数据未修改')
     teacher_ids = set(candidate['calendar']['teachers'].values()) | {
         r['teacher_id'] for r in candidate['calendar']['public']}
@@ -201,7 +299,27 @@ async def preview_plan(body, session, tenant_id):
         raise HTTPException(status_code=409, detail='计算期间数据已变化，请重新预览')
     subject_names = dict((await session.execute(select(Subject.id, Subject.name).where(
         or_(Subject.tenant_id == tenant_id, Subject.tenant_id.is_(None)),
-        Subject.id.in_({c['subject_id'] for c in candidate['classes']})))).all())
+        ))).all())
+    choices = (await session.execute(select(StudentSubjectChoice).where(
+        StudentSubjectChoice.tenant_id == tenant_id, StudentSubjectChoice.student_id.in_(selected),
+        StudentSubjectChoice.academic_year == body.academic_year,
+        StudentSubjectChoice.effective_term == body.term,
+        StudentSubjectChoice.status.in_(['confirmed', 'locked'])))).scalars().all()
+    profiles = {c.student_id: {'primary_subject_name': subject_names.get(c.primary_subject_id, ''),
+        'secondary_subject_names': sorted(subject_names[sid] for sid in c.secondary_subject_ids)} for c in choices}
+    admin_names = dict((await session.execute(select(Class.id, Class.name).where(
+        Class.tenant_id == tenant_id, Class.id.in_(set(admins.values()))))).all())
+    student_names = dict((await session.execute(select(Student.id, Student.name).where(
+        Student.tenant_id == tenant_id, Student.id.in_(selected)))).all())
+    teacher_names = dict((await session.execute(select(User.id, User.name).where(
+        User.tenant_id == tenant_id, User.id.in_(teacher_ids)))).all())
+    room_names = {r.id: f'楼栋{r.building_id} · {r.name}' for r in (await session.execute(
+        select(Room).where(Room.tenant_id == tenant_id,
+            Room.id.in_({r['room_id'] for r in candidate['placements']})))).scalars()}
+    display = candidate_display(candidate, grade.name, subject_names, admin_names,
+        student_names, teacher_names, room_names,
+        {(d, p) for d, p in daytime['odd'] & daytime['even'] if d in body.weekdays}, profiles,
+        configured_names={c.id: c.name for c in existing_classes})
     token = str(uuid4())
     cached = {'token': token, 'scope': [body.grade_id, body.academic_year, body.term],
         'fingerprint': before, 'expires_at': time.time() + 1800,
@@ -215,47 +333,41 @@ async def preview_plan(body, session, tenant_id):
     await session.commit()
     return {'preview_token': token, 'student_count': len(selected), 'class_count': len(candidate['classes']),
         'audit': candidate['audit'], 'replaced_rule_ids': [],
-        'classes': [{'id': c['id'], 'subject_name': subject_names[c['subject_id']],
-                     'student_count': c['size'], 'capacity': c['capacity']} for c in candidate['classes']]}
+        **display}
 
 
 async def persist_candidate(body, candidate, session, tenant_id, user_id):
-    """Replace the exact scope in the caller's transaction; never creates a backup."""
-    from app.models.org import Schedule, Subject, Grade
+    """Save the joint timetable and roster into the already-created teaching classes."""
+    from app.models.org import Schedule
     from app.models.gaokao import (TeachingClass, TeachingClassStudent, TeachingClassSchedule,
         TeachingSubjectHourPlan, WalkSchedulingPlan, WalkSchedulingRoom, WalkSchedulingSlot)
     from app.models.facility import Room
     scope = (TeachingClass.tenant_id == tenant_id, TeachingClass.grade_id == body.grade_id,
              TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.term)
-    old_ids = list((await session.execute(select(TeachingClass.id).where(*scope))).scalars())
-    if old_ids:
-        for model in (TeachingClassSchedule, TeachingClassStudent):
-            await session.execute(delete(model).where(model.tenant_id == tenant_id,
-                model.teaching_class_id.in_(old_ids)))
-        await session.execute(delete(TeachingClass).where(*scope))
+    class_id_map = {int(key): int(value) for key, value in candidate.get('class_id_map', {}).items()}
+    expected_generated_ids = {int(row['id']) for row in candidate['classes']}
+    if set(class_id_map) != expected_generated_ids:
+        raise HTTPException(status_code=409, detail='预览中的教学班对应关系不完整，请重新预览')
+    target_class_ids = set(class_id_map.values())
+    existing_classes = list((await session.execute(select(TeachingClass).where(
+        *scope, TeachingClass.id.in_(target_class_ids)))).scalars()) if target_class_ids else []
+    if {row.id for row in existing_classes} != target_class_ids:
+        raise HTTPException(status_code=409, detail='已生成的教学班发生变化，请重新预览')
+    existing_by_id = {row.id: row for row in existing_classes}
+    for generated in candidate['classes']:
+        existing = existing_by_id[class_id_map[int(generated['id'])]]
+        allowed_capacity = generated.get('capacity', existing.capacity or body.capacity)
+        if existing.subject_id != generated['subject_id'] or generated['size'] > allowed_capacity:
+            raise HTTPException(status_code=422, detail='学生分班与已生成教学班的科目或班额不匹配，请重新生成教学班')
+        existing.capacity = allowed_capacity
+    for model in (TeachingClassSchedule, TeachingClassStudent):
+        await session.execute(delete(model).where(model.tenant_id == tenant_id,
+            model.teaching_class_id.in_(target_class_ids)))
     admins = {int(cid) for cid in candidate['a_groups']}
     await session.execute(delete(Schedule).where(Schedule.tenant_id == tenant_id,
         Schedule.academic_year == body.academic_year, Schedule.term == body.term,
         Schedule.class_id.in_(admins)))
-    subjects = dict((await session.execute(select(Subject.id, Subject.name).where(
-        or_(Subject.tenant_id == tenant_id, Subject.tenant_id.is_(None))))).all())
-    grade = await session.get(Grade, body.grade_id)
-    plans = {p.subject_id: p for p in (await session.execute(select(TeachingSubjectHourPlan).where(
-        TeachingSubjectHourPlan.tenant_id == tenant_id, TeachingSubjectHourPlan.grade_id == body.grade_id,
-        TeachingSubjectHourPlan.academic_year == body.academic_year,
-        TeachingSubjectHourPlan.term == body.term))).scalars()}
-    sequence, ids = Counter(), {}
-    for c in candidate['classes']:
-        sid = c['subject_id']; sequence[sid] += 1
-        row = TeachingClass(tenant_id=tenant_id, grade_id=body.grade_id, academic_year=body.academic_year,
-            term=body.term, subject_id=sid, sequence=sequence[sid], capacity=c['capacity'],
-            name=f'{grade.name}{subjects[sid]}走班{sequence[sid]:02d}',
-            weekly_periods=plans[sid].weekly_periods, hour_plan_id=plans[sid].id,
-            weekday_periods=plans[sid].weekday_periods, weekend_periods=plans[sid].weekend_periods,
-            teacher_id=candidate['calendar']['teachers'].get(c['id'],
-                candidate['calendar']['teachers'].get(str(c['id']))), source='selection', status='generated')
-        session.add(row); await session.flush()
-        ids[c['id']] = row.id
+    ids = class_id_map
     session.add_all([TeachingClassStudent(tenant_id=tenant_id, teaching_class_id=ids[cid], student_id=sid)
                      for cid, sid in candidate['members']])
     rooms = {r.id: r for r in (await session.execute(select(Room).where(Room.tenant_id == tenant_id,

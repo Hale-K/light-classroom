@@ -26,6 +26,8 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   '/students': { title: '学生档案', roles: ['academic_director', 'school_admin', 'director'] },
   '/file-center': { title: '文件中心', roles: ['academic_director', 'school_admin', 'director'] },
   '/teacher-preparation': { title: '备课' },
+  '/courseware': { title: '课件管理' },
+  '/courseware/studio': { title: '课件工作台' },
   '/teacher-classes': { title: '学生管理' },
   '/teacher-students': { title: '选课审核' },
   '/onboarding': { title: '新手引导' },

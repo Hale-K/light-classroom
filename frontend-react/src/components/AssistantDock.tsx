@@ -6,6 +6,9 @@ import { watchAssistantRun } from '@/assistant/task'
 import { assistantPageContext } from '@/assistant/context'
 import { useAuthStore } from '@/store/auth'
 import AssistantRulePlan from '@/components/AssistantRulePlan'
+import AssistantAddMenu from '@/components/AssistantAddMenu'
+import { MATERIAL_ACCEPT, mergeMaterials, materialsForTurn, type AssistantMaterial } from '@/assistant/materials'
+import { canUsePageActions, modeForTurn, type AssistantMode } from '@/assistant/mode'
 import AssistMarkdown from '@/components/AssistMarkdown'
 import Icon from '@/components/Icon'
 import { type HoursDraft } from '@/assistant/hoursPlan'
@@ -37,6 +40,8 @@ type ChatMsg = {
   execution?: AssistantExecution
   /** False for transport/recovery/degraded UI notices that must not enter an LLM prompt. */
   modelVisible?: boolean
+  materials?: AssistantMaterial[]
+  assistantMode?: AssistantMode
 }
 
 function InboxTaskBar({
@@ -139,39 +144,18 @@ function readExecution(raw: unknown): AssistantExecution | undefined {
 }
 
 function ExecutionBadge({ execution }: { execution?: AssistantExecution }) {
-  if (!execution || execution.mode === 'pending') return null
+  if (!execution || execution.mode === 'pending' || execution.tasks.length === 0) return null
   const label = execution.mode === 'supervisor'
-    ? `${execution.kind === 'diagnosis' ? '排课诊断' : '排课准备'} · Supervisor 编排`
-    : execution.mode === 'agent' ? '单 Agent 执行' : '直接处理'
+    ? execution.kind === 'diagnosis' ? '排课诊断' : '排课准备'
+    : '检查进度'
   const statusText = (status: AssistantExecution['tasks'][number]['status']) => status === 'succeeded' ? '完成' : status === 'failed' ? '失败' : '进行中'
   return (
-    <div className="assist-execution" role="status" aria-label="Agent 执行树">
-      {execution.mode === 'supervisor' ? (
-        <div className="assist-execution-tree">
-          <div className="assist-execution-node assist-execution-root">
-            <span className="assist-execution-dot" aria-hidden="true" />
-            <strong>主 Agent</strong><small>负责理解需求与汇总结果</small>
-          </div>
-          <div className="assist-execution-branch">
-            <div className="assist-execution-node assist-execution-supervisor">
-              <span className="assist-execution-dot" aria-hidden="true" />
-              <strong>{label}</strong><small>受控编排层 · {execution.multi_agent ? '多 Agent' : '工具子任务'}</small>
-            </div>
-            {execution.tasks.length > 0 && <ul className="assist-execution-children" aria-label="Supervisor 子任务">
-              {execution.tasks.map((task) => (
-                <li key={task.id} className={`assist-execution-node assist-execution-leaf is-${task.status}`}>
-                  <span className="assist-execution-dot" aria-hidden="true" />
-                  <span className="assist-execution-task-copy"><strong>{task.label}</strong><small>{statusText(task.status)}{task.retry_count ? ` · 重试 ${task.retry_count} 次` : ''}</small></span>
-                  {task.allowed_tools?.length ? <span className="assist-execution-tools" title={`允许工具：${task.allowed_tools.join('、')}`}>{task.allowed_tools.length} 个工具</span> : null}
-                </li>
-              ))}
-            </ul>}
-          </div>
-        </div>
-      ) : (
-        <><strong>{label}</strong>{execution.tasks.length > 0 && <ul aria-label="检查项状态">{execution.tasks.map((task) => <li key={task.id}>{task.status === 'succeeded' ? '✓' : task.status === 'failed' ? '!' : '…'} {task.label} · {statusText(task.status)}</li>)}</ul>}</>
-      )}
-    </div>
+    <details className="assist-execution" aria-label="检查进度">
+      <summary>{label} · {execution.tasks.filter((task) => task.status === 'succeeded').length}/{execution.tasks.length} 项完成{execution.tasks.some((task) => task.status === 'failed') ? ' · 有失败项' : ''}</summary>
+      <ul aria-label="检查项状态">
+        {execution.tasks.map((task) => <li key={task.id}>{task.label} · {statusText(task.status)}</li>)}
+      </ul>
+    </details>
   )
 }
 
@@ -210,30 +194,6 @@ function ThinkDial({ live, progress, connection }: { live: string; progress: Ass
       </div>}
       {!progress && connection && <div role="status">{connection}</div>}
     </div>
-  )
-}
-
-function MidCopy({ id }: { id: string }) {
-  const [ok, setOk] = useState(false)
-  return (
-    <span className="assist-mid">
-      <code>{id}</code>
-      <button
-        type="button"
-        className="assist-mid-copy"
-        aria-label={ok ? '已复制' : '复制消息编号'}
-        title={ok ? '已复制' : '复制消息编号'}
-        onClick={() => {
-          void navigator.clipboard.writeText(id).then(() => {
-            setOk(true)
-            window.setTimeout(() => setOk(false), 1200)
-          })
-        }}
-      >
-        <Icon name="clipboard" size={12} />
-        {ok ? '已复制' : '复制'}
-      </button>
-    </span>
   )
 }
 
@@ -301,10 +261,62 @@ export default function AssistantDock() {
   const threadStorageKey = `lc-assistant-thread:${schoolCode}:${userId ?? 'anonymous'}`
   const runStorageKey = `lc-assistant-run:${schoolCode}:${userId ?? 'anonymous'}`
   const subjectStorageKey = `lc-assistant-subject:v2:${schoolCode}:${userId ?? 'anonymous'}`
+  const modeStorageKey = `lc-assistant-mode:${schoolCode}:${userId ?? 'anonymous'}`
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem(DOCK_KEY) === '1')
   const [panel, setPanel] = useState<Panel>(null)
   const [noticeUnread, setNoticeUnread] = useState(true)
   const [draft, setDraft] = useState('')
+  const [assistantMode, setAssistantMode] = useState<AssistantMode>('standard')
+  const modeRef = useRef<AssistantMode>('standard')
+  const changeMode = (mode: AssistantMode) => {
+    modeRef.current = mode
+    setAssistantMode(mode)
+    sessionStorage.setItem(modeStorageKey, mode)
+  }
+  const [materials, setMaterials] = useState<AssistantMaterial[]>([])
+  const [readingFiles, setReadingFiles] = useState(false)
+  const [materialError, setMaterialError] = useState('')
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const folderInputRef = useRef<HTMLInputElement>(null)
+  const uploadRef = useRef<AbortController | null>(null)
+  const materialsRef = useRef<AssistantMaterial[]>([])
+
+  const updateMaterials = (items: AssistantMaterial[]) => {
+    materialsRef.current = items
+    setMaterials(items)
+  }
+  const readFiles = async (files: File[]) => {
+    if (readingFiles || busyRef.current || !files.length) return
+    setMaterialError('')
+    if (files.length + materialsRef.current.length > 8) {
+      setMaterialError('每条消息最多添加 8 个文件；请缩小文件夹或分批选择')
+      return
+    }
+    const controller = new AbortController()
+    uploadRef.current = controller
+    setReadingFiles(true)
+    const errors: string[] = []
+    try {
+      for (const file of files) {
+        try {
+          const material = await assistantApi.readAttachment(file, controller.signal)
+          if (controller.signal.aborted) return
+          // Relative folder names are display data, never server filesystem paths.
+          material.name = (file.webkitRelativePath || material.name).slice(0, 200)
+          updateMaterials(mergeMaterials(materialsRef.current, [material]))
+        } catch (error) {
+          if (controller.signal.aborted) return
+          errors.push(`${file.name}：${error instanceof Error ? error.message : '读取失败'}`)
+        }
+      }
+      setMaterialError(errors.join('；'))
+    } finally {
+      if (uploadRef.current === controller) {
+        uploadRef.current = null
+        setReadingFiles(false)
+      }
+    }
+  }
   const [thread, setThread] = useState<ChatMsg[]>(() => storedThread(threadStorageKey))
   const [conversationReady, setConversationReady] = useState(false)
   const [chatting, setChatting] = useState(false)
@@ -484,6 +496,7 @@ export default function AssistantDock() {
         assistLog(tid, 'turn', merged.slice(0, 80))
         const hereNow = hereOf(location.pathname, location.search)
         const withTrace = (extra?: ToolExtra) => ({ ...extra, here: hereNow, traceId: tid })
+        const turnMode = modeForTurn(threadRef.current, modeRef.current)
         const previousAnswer = [...threadRef.current].reverse().find((item) => item.role === 'bot' && item.text)
         const jumpDecision = previousAnswer?.jumps ? decideJumpReply(merged, previousAnswer.jumps) : { kind: 'none' as const }
         if (jumpDecision.kind === 'confirm') {
@@ -508,7 +521,7 @@ export default function AssistantDock() {
         }
         const forced = forcedRef.current
         forcedRef.current = null
-        if (forced) {
+        if (forced && canUsePageActions(turnMode)) {
           lockMergeRef.current = forced.tool === 'executeHours'
           assistLog(tid, 'forced', forced.tool)
           const result = await runAssistantTool(forced.tool, forced.path, withTrace(forced.extra), (line) => {
@@ -559,7 +572,7 @@ export default function AssistantDock() {
             })),
             page_title: pageName,
             page_path: hereNow,
-            page_context: assistantPageContext(hereNow),
+            page_context: { ...assistantPageContext(hereNow), assistant_mode: turnMode, reference_materials: materialsForTurn(history) },
             can: snap.can,
             cannot: snap.cannot,
             message_id: tid,
@@ -637,6 +650,11 @@ export default function AssistantDock() {
 
   useEffect(() => {
     abortRef.current?.abort()
+    uploadRef.current?.abort()
+    updateMaterials([])
+    setReadingFiles(false)
+    setMaterialError('')
+    changeMode(sessionStorage.getItem(modeStorageKey) === 'plan' ? 'plan' : 'standard')
     subjectDraftRef.current = readPendingSubjectDraft(sessionStorage.getItem(subjectStorageKey))
     subjectRunningRef.current = false
     epochRef.current++
@@ -790,7 +808,16 @@ export default function AssistantDock() {
 
   const send = (text?: string) => {
     const content = (text ?? draft).trim()
-    if (!content) return
+    if (!content || readingFiles) return
+    const attached = materialsRef.current
+    const hasMaterials = attached.length > 0 || materialsForTurn(threadRef.current).length > 0
+    if (attached.length && subjectDraftRef.current && canUsePageActions(modeRef.current)) {
+      setMaterialError('请先完成或取消当前科目草稿，再发送附件')
+      return
+    }
+    const userMessage: ChatMsg = { role: 'user', text: content, assistantMode: modeRef.current, materials: attached.length ? attached : undefined }
+    updateMaterials([])
+    setMaterialError('')
     followLatestRef.current = true
     setDraft('')
     setPanel('home')
@@ -801,24 +828,24 @@ export default function AssistantDock() {
       else commitThread(prev => [...prev, { role: 'bot', text: '科目操作正在进行，请先停止当前操作，再提供新的要求。', modelVisible: false }])
       return
     }
-    if (!busyRef.current && !subjectDraftRef.current && isSubjectChoiceReply(content)) {
+    if (canUsePageActions(modeRef.current) && !busyRef.current && !subjectDraftRef.current && isSubjectChoiceReply(content)) {
       const lastUser = [...threadRef.current].reverse().find(item => item.role === 'user')
       const name = lastUser && isSubjectCreationRequest(lastUser.text) ? readExplicitSubjectName(lastUser.text) : null
       if (name) subjectDraftRef.current = { name, course_type: null, evening_study_allowed: null }
     }
-    if (!busyRef.current && subjectDraftRef.current) {
+    if (canUsePageActions(modeRef.current) && !busyRef.current && subjectDraftRef.current) {
       if (isSubjectTaskCancellation(content)) {
         subjectDraftRef.current = null
         sessionStorage.removeItem(subjectStorageKey)
-        commitThread(prev => [...prev, { role: 'user', text: content, mid }, { role: 'bot', text: '已取消新增科目。', mid }])
+        commitThread(prev => [...prev, { ...userMessage, mid }, { role: 'bot', text: '已取消新增科目。', mid }])
         return
       }
-      commitThread(prev => upsertThink([...prev, { role: 'user', text: content, mid }], '正在校验科目数据'))
+      commitThread(prev => upsertThink([...prev, { ...userMessage, mid }], '正在校验科目数据'))
       void runSubjectConversation(content, mid)
       return
     }
-    if (!busyRef.current && mayRequestPageAction(content)) {
-      commitThread(prev => upsertThink([...prev, { role: 'user', text: content, mid }], '正在识别操作意图'))
+    if (canUsePageActions(modeRef.current) && !busyRef.current && !hasMaterials && mayRequestPageAction(content)) {
+      commitThread(prev => upsertThink([...prev, { ...userMessage, mid }], '正在识别操作意图'))
       void runPageIntentConversation(content, mid)
       return
     }
@@ -826,7 +853,7 @@ export default function AssistantDock() {
     if (busyRef.current) {
       const runId = activeRunRef.current
       if (!runId || lockMergeRef.current) {
-        commitThread((prev) => [...prev, { role: 'user', text: content, mid }])
+        commitThread((prev) => [...prev, { ...userMessage, mid }])
         return
       }
       setSteerVisible(true)
@@ -841,7 +868,7 @@ export default function AssistantDock() {
           }
         }
         if (pending >= 0) next.splice(pending, 1)
-        return upsertThink([...next, { role: 'user', text: content, mid }], '已收到方向调整，将在下一步处理')
+        return upsertThink([...next, { ...userMessage, mid }], '已收到方向调整，将在下一步处理')
       })
       void assistantApi.steerRun(runId, content).catch((err) => {
         if (err instanceof ApiError && err.status === 409) {
@@ -854,13 +881,14 @@ export default function AssistantDock() {
       })
       return
     }
-    commitThread((prev) => upsertThink([...prev, { role: 'user', text: content, mid }], '分析意图'))
+    commitThread((prev) => upsertThink([...prev, { ...userMessage, mid }], '分析意图'))
     void runLoop()
   }
 
   const pushMsg = (msg: ChatMsg) => commitThread((prev) => [...prev, msg])
 
   const runTask = (item: AssistantTask, extra?: ToolExtra) => {
+    if (!canUsePageActions(modeRef.current)) { send(item.label); return }
     followLatestRef.current = true
     forcedRef.current = { tool: item.tool, path: item.path, extra }
     if (!busyRef.current) midRef.current = newMsgId()
@@ -885,6 +913,11 @@ export default function AssistantDock() {
   }
 
   const newChat = () => {
+    changeMode('standard')
+    uploadRef.current?.abort()
+    updateMaterials([])
+    setMaterialError('')
+    setReadingFiles(false)
     if (activeRunRef.current) void assistantApi.cancelRun(activeRunRef.current).catch(() => undefined)
     epochRef.current++
     subjectDraftRef.current = null
@@ -933,6 +966,7 @@ export default function AssistantDock() {
   }
 
   const startRuleWizard = () => {
+    if (!canUsePageActions(modeRef.current)) { send('帮我规划一条排课规则，先给方案'); return }
     setPanel('home')
     if (busyRef.current) return
     if (!busyRef.current) midRef.current = newMsgId()
@@ -1191,7 +1225,7 @@ export default function AssistantDock() {
               <Face className="assist-sheet-face" />
               <div>
                 <strong>轻课堂助手</strong>
-                <span>当前在「{pageName}」</span>
+                <span>{pageName}</span>
               </div>
             </div>
             <button type="button" title="新对话" onClick={newChat}>
@@ -1240,12 +1274,13 @@ export default function AssistantDock() {
                       <div className={`assist-bubble is-${msg.role}`}>
                         {msg.role === 'bot' && <ExecutionBadge execution={msg.execution} />}
                         {msg.role === 'bot' ? <AssistMarkdown text={msg.text} /> : msg.text}
-                        {msg.mid ? <MidCopy id={msg.mid} /> : null}
+                        {msg.role === 'user' && msg.assistantMode === 'plan' && <small className="assist-turn-mode">计划模式</small>}
+                        {msg.role === 'user' && msg.materials?.length ? <div className="assist-sent-materials">{msg.materials.map(item => <span key={item.id}><Icon name="file-text" size={12} />{item.name}</span>)}</div> : null}
                       </div>
                     ) : null}
                     {msg.role === 'bot' && msg.hoursDraft && i === shownThread.length - 1 && (
                       <div className="assist-plan-actions">
-                        <button type="button" className="is-ok" onClick={() => confirmHours(msg.hoursDraft!)}>
+                        <button type="button" className="is-ok" disabled={assistantMode === 'plan'} onClick={() => confirmHours(msg.hoursDraft!)}>
                           确认写入课时
                         </button>
                         <button
@@ -1265,7 +1300,7 @@ export default function AssistantDock() {
                     {msg.role === 'bot' && msg.plan && (
                       <AssistantRulePlan
                         plan={msg.plan}
-                        disabled={chatting || i !== shownThread.length - 1}
+                        disabled={chatting || assistantMode === 'plan' || i !== shownThread.length - 1}
                         onChange={(plan) => commitThread((prev) => prev.map((item) => item.plan?.id === plan.id ? { ...item, plan } : item))}
                       />
                     )}
@@ -1349,16 +1384,40 @@ export default function AssistantDock() {
               composerRef.current?.focus()
             }}
           />
-          <div className="assist-composer">
+          <div className={`assist-composer${materials.length || materialError || readingFiles ? ' has-materials' : ''}`}>
+            {assistantMode === 'plan' && <div className="assist-mode-chip" role="status"><Icon name="clipboard" size={14} /><span>计划模式 · 只分析</span><button type="button" aria-label="退出计划模式" disabled={chatting} onClick={() => changeMode('standard')}><Icon name="x" size={12} /></button></div>}
+            <input type="file" hidden ref={fileInputRef} multiple accept={MATERIAL_ACCEPT} aria-label="选择助手附件"
+              onChange={event => { void readFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+            <input type="file" hidden ref={folderInputRef} multiple {...{ webkitdirectory: '', directory: '' }} aria-label="选择附件文件夹"
+              onChange={event => { void readFiles(Array.from(event.target.files ?? [])); event.target.value = '' }} />
+            {materials.length > 0 && <div className="assist-materials" aria-label="待发送附件">
+              {materials.map(item => <div key={item.id} className="assist-material" title={item.name}>
+                <Icon name="file-text" size={14} /><span>{item.name}{item.truncated ? '（已截取）' : ''}</span>
+                <button type="button" aria-label={`移除 ${item.name}`} onClick={() => updateMaterials(materialsRef.current.filter(value => value.id !== item.id))}><Icon name="x" size={12} /></button>
+              </div>)}
+            </div>}
+            {readingFiles && <p className="assist-material-status" role="status">正在读取附件…</p>}
+            {materialError && <p className="assist-material-error" role="alert">{materialError}</p>}
             <div className="assist-composer-row">
-              <button type="button" className="assist-plus" title="新对话" aria-label="新对话" onClick={newChat}>
-                <Icon name="plus" size={14} />
-              </button>
+              <AssistantAddMenu disabled={chatting || readingFiles}
+                planMode={assistantMode === 'plan'} onPlanMode={() => changeMode(modeRef.current === 'plan' ? 'standard' : 'plan')}
+                onFiles={() => fileInputRef.current?.click()} onFolder={() => folderInputRef.current?.click()}
+                onPage={() => {
+                  const main = document.querySelector('main')
+                  const raw = `页面：${pageName}\n路径：${here}\n${main?.innerText ?? ''}`.trim()
+                  try {
+                    updateMaterials(mergeMaterials(materialsRef.current, [{
+                      id: `page:${here}`, name: `当前页 · ${pageName}`, text: raw.slice(0, 6000), truncated: raw.length > 6000, original_chars: raw.length,
+                    }]))
+                    setMaterialError('')
+                  } catch (error) { setMaterialError(error instanceof Error ? error.message : '无法附加页面') }
+                }} />
               <textarea
+                aria-label="消息"
                 ref={composerRef}
                 rows={1}
                 value={draft}
-                placeholder={chatting ? subjectRunningRef.current ? '科目操作进行中，可点击停止' : '随心输入新的处理方向' : '随心输入'}
+                placeholder={chatting ? subjectRunningRef.current ? '科目操作进行中，可点击停止' : '补充要求或调整方向…' : assistantMode === 'plan' ? '描述问题，先一起梳理方案…' : '问问题，或告诉我你想做什么…'}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
@@ -1370,7 +1429,7 @@ export default function AssistantDock() {
               <button
                 type="button"
                 className={`assist-send${chatting ? ' is-wait' : ''}`}
-                disabled={!chatting && !draft.trim()}
+                disabled={readingFiles || (!chatting && !draft.trim())}
                 onClick={() => (chatting && !draft.trim() ? stopTurn() : send())}
                 aria-label={chatting && !draft.trim() ? '停止' : '发送'}
                 title={chatting && !draft.trim() ? '停止' : '发送'}
@@ -1379,7 +1438,7 @@ export default function AssistantDock() {
               </button>
             </div>
           </div>
-          <p className="assist-here">{chatting ? subjectRunningRef.current ? '正在操作科目页面 · 可随时停止' : '当前任务进行中 · 可调整方向' : `当前页 · ${pageName}`}</p>
+          <p className="assist-here">{chatting ? subjectRunningRef.current ? '正在操作 · 可停止' : '处理中 · 可补充要求' : 'Enter 发送 · Shift + Enter 换行'}</p>
           {recoverable && (
             <button
               type="button"

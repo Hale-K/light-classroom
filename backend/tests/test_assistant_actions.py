@@ -87,6 +87,7 @@ def database(monkeypatch):
     SQLModel.metadata.create_all(engine, tables=tables)
     sync = Session(engine, expire_on_commit=False)
     class SessionAdapter:
+        info = {}
         add = sync.add
         async def execute(self, stmt):
             return sync.execute(stmt)

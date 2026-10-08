@@ -231,11 +231,121 @@
 .sk-page {
   margin: 0;
 }
+.sk-readiness {
+  margin: 8px 0 14px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.sk-readiness-summary {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(120px, 220px) auto;
+  align-items: center;
+  gap: 12px 20px;
+}
+.sk-readiness-heading,
+.sk-readiness-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sk-readiness-heading h3 {
+  margin: 0;
+  color: var(--text-1);
+  font-size: 14px;
+  font-weight: 650;
+}
+.sk-readiness-copy p {
+  margin: 4px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.sk-readiness-progress {
+  min-width: 120px;
+}
+.sk-readiness-actions {
+  justify-content: flex-end;
+}
+.sk-readiness-details {
+  margin-top: 10px;
+  border-top: 1px solid var(--border);
+  color: var(--text-1);
+  font-size: 12px;
+}
+.sk-readiness-details > summary {
+  width: fit-content;
+  padding-top: 10px;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.sk-readiness-details ol {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.sk-readiness-details li {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border-radius: 6px;
+  background: var(--surface-2);
+}
+.sk-readiness-state {
+  flex: 0 0 18px;
+  color: var(--text-2);
+  font-weight: 700;
+  text-align: center;
+}
+.sk-readiness-details li.is-done .sk-readiness-state {
+  color: var(--success, #16845b);
+}
+.sk-readiness-details li > div {
+  flex: 1;
+  min-width: 0;
+}
+.sk-readiness-details li p {
+  margin: 3px 0 0;
+  color: var(--text-2);
+  line-height: 1.45;
+}
+.sk-readiness-details li .ant-btn-link {
+  flex: 0 0 auto;
+  padding-inline: 4px;
+}
+.sk-readiness-footnote {
+  margin: 10px 0 0;
+  color: var(--text-2);
+  line-height: 1.5;
+}
 .sk-page > .chapter {
   position: relative;
   margin-bottom: 12px;
   padding-left: 12px;
   border-left: 3px solid #22a6d8;
+}
+@media (max-width: 800px) {
+  .sk-readiness-summary {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+  }
+  .sk-readiness-progress {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .sk-readiness-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+  .sk-readiness-details ol {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 .sk-page > .chapter .chapter-title {
   letter-spacing: 0.015em;
@@ -3054,6 +3164,9 @@
   gap: 16px;
   padding: 4px 0 10px;
 }
+.admin-hours .sk-hours-intro {
+  justify-content: flex-end;
+}
 .sk-hours-kicker {
   color: #0e7490;
   font-size: 11px;
@@ -4268,3 +4381,15 @@ body[data-theme='tech'] .sk-adj-cell.is-risky {
   color: #fdba74;
 }
 
+.schedule-table .st-lesson.is-interactive {
+  cursor: pointer;
+  user-select: none;
+}
+.schedule-table .st-lesson.is-interactive:hover,
+.schedule-table .st-lesson.is-interactive:focus-visible {
+  outline: 2px solid var(--primary, #0ea5e9);
+  outline-offset: -2px;
+}
+.schedule-table .st-lesson.is-interactive:active {
+  box-shadow: inset 0 0 0 2px var(--primary, #0ea5e9);
+}

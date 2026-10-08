@@ -35,7 +35,9 @@ export default function TeachingClassResults({ gradeId, academicYear, term, grad
   return <>
     <Modal title="已生成教学班结果" open width={1100} onCancel={onClose} footer={<Button onClick={onClose}>关闭</Button>}>
       <p>{gradeName} · {academicYear} · 第 {term} 学期</p>
-      <Alert type="info" showIcon message="这里展示已保存的教学班和实际学生名单。生成班级后，还需要安排教师、教室及课表。" />
+      <Alert type="info" showIcon message={classes.length > 0 && studentCount === 0
+        ? '教学班已生成，当前尚未分配学生；学生分班和课表将在联合排课确认时一起保存。'
+        : '这里展示已保存的教学班和学生名单。生成班级后，还需要安排教师、教室及课表。'} />
       {error && <Alert style={{ marginTop: 12 }} type="error" showIcon message={error} action={<Button onClick={() => setRevision((value) => value + 1)}>重试</Button>} />}
       <Space wrap style={{ margin: '16px 0' }}>
         <Button type="primary" onClick={() => navigate(`/scheduling?tab=assignments&assignmentMode=walk&grade=${gradeId}`)}>安排教师</Button>
@@ -53,7 +55,9 @@ export default function TeachingClassResults({ gradeId, academicYear, term, grad
           { title: '每周课时', render: (_, item) => <>{item.weekly_periods} {item.hours_overridden && <Tag>单班调整</Tag>}</> },
           { title: '教师', render: (_, item) => item.teacher_name ?? (item.teacher_id ? '已绑定（姓名不可用）' : '未安排') },
           { title: '教室', render: (_, item) => item.room || '未安排' },
-          { title: '操作', render: (_, item) => <Button type="link" onClick={() => { setSelectedClass(item); setSearch('') }}>查看名单</Button> },
+          { title: '操作', render: (_, item) => <Button type="link" disabled={!item.student_count} onClick={() => { setSelectedClass(item); setSearch('') }}>
+            {item.student_count ? '查看名单' : '尚未分班'}
+          </Button> },
         ]} />
     </Modal>
     <Modal title={`${selectedClass?.name ?? ''} · 学生名单`} open={Boolean(selectedClass)} width={780} onCancel={() => setSelectedClass(undefined)}

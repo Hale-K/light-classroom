@@ -120,9 +120,10 @@ export default function StudentsView() {
         (item.student_no ?? '').toLowerCase().includes(query)
       const matchesCampus = !appliedCampusFilter || item.campus_id === appliedCampusFilter
       const matchesClass =
-      appliedClassFilter === '' ||
-        appliedClassFilter === 'unassigned' ||
-        item.class_id === appliedClassFilter
+        appliedClassFilter === '' ||
+        (appliedClassFilter === 'unassigned'
+          ? !item.class_id
+          : item.class_id === appliedClassFilter)
       const matchesGrade = !appliedGradeFilter || item.grade_id === appliedGradeFilter
       const matchesGender = !appliedGenderFilter || item.gender === appliedGenderFilter
       return matchesKeyword && matchesCampus && matchesGrade && matchesClass && matchesGender

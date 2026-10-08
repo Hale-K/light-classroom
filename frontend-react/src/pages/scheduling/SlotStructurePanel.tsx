@@ -95,7 +95,7 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
     <Spin spinning={loading}>
       <div className="slot-slider-layout">
         <section className="slot-structure-section slot-slider-controls">
-          <div className="slot-slider-heading"><h3>每日正式课位</h3><p>拖动滑块设置节数，0 表示当天不启用。</p></div>
+          <div className="slot-slider-heading"><h3>每日正式课位</h3></div>
           {DAYS.map((day, i) => <div className="slot-slider-day" key={day}>
             <div><strong>{day}</strong><span>{daily[i] ? <><b>{daily[i]}</b> 节</> : '不启用'}</span></div>
             <Slider ariaLabelForHandle={`${day}正式课位数`} min={0} max={12 - specialMax} step={1} value={daily[i]} disabled={saving || loading}
@@ -104,12 +104,12 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
           <div className="slot-slider-total">{daily.filter(Boolean).length} 个教学日 · 每周 <strong>{daily.reduce((a, b) => a + b, 0)}</strong> 个正式课位</div>
         </section>
         <section className="slot-structure-section slot-slider-preview">
-          <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>一周课位预览</h3><p>拖动框选，或点击星期 / 节次选择整列 / 整行；单击课位可单独编辑。</p></div>
+          <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>一周课位预览</h3></div>
             <Segmented aria-label="课位预览周次" value={parity} options={[{ label: '单周', value: 'odd' }, { label: '双周', value: 'even' }]} onChange={(value) => setParity(value as 'odd' | 'even')} />
           </div>
-          <div className="slot-slider-legend"><span><i className="is-formal" />正式课位</span><span><i className="is-special" />晚自习</span><span>— 不启用</span><span>单 / 双 · 仅对应周次启用</span></div>
+          <div className="slot-slider-legend"><span><i className="is-formal" />正式课位</span><span><i className="is-special" />晚自习</span><span>— 不启用</span><span>单 / 双周</span></div>
           <div className="slot-slider-selection-bar">
-            <span aria-live="polite">{selected.length ? `已选择 ${selected.length} 个课位` : '选择多个课位后，可统一设置'}</span>
+            <span aria-live="polite">{selected.length ? `已选 ${selected.length} 个课位` : ''}</span>
             <Space><Button size="small" disabled={saving || loading || !cells.length} onClick={() => setSelected(cells)}>全选课位</Button>
               <Button size="small" disabled={!selected.length || saving || loading} onClick={() => setSelected([])}>清除选择</Button>
               <Button size="small" type="primary" disabled={!selected.length || saving || loading} onClick={() => { setSlotMode('all'); setEditing(selected) }}>批量设置</Button></Space>
@@ -156,18 +156,17 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
                 aria-label={`${parity === 'odd' ? '单周' : '双周'}${day}第${period}节${formal ? '正式课位' : special ? '晚自习' : '不启用'}`}>{formal ? '正式' : special ? '晚自习' : '—'}{badge && <small>{badge}</small>}</button></td>
             })}</tr>)}</tbody></table></div>
           {!rows && <p className="slot-slider-no-days">尚未启用任何课位，请拖动左侧滑块。</p>}
-          <div className="slot-slider-preview-note">课位定义可排课的时间，不代表已安排课程。各年级、各学期独立保存。</div>
         </section>
       </div>
       <section className="slot-structure-section slot-slider-special">
-        <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>晚自习</h3><p>接在正式课上限之后，单周和双周分别设置。</p></div>
+        <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>晚自习</h3></div>
           <Button disabled={saving || loading || !specialMax} onClick={() => onChange(normalizeGridConfig({ ...config, enable_evening: false, slot_overrides: (config.slot_overrides ?? []).filter((slot) => slot.period <= formalMax), evening_daily_periods_odd: [0,0,0,0,0,0,0], evening_daily_periods_even: [0,0,0,0,0,0,0] }))}>清空晚自习</Button>
         </div>
         <div className="slot-special-slider-grid">{DAYS.map((day, i) => <div className="slot-special-slider-day" key={day}><strong>{day}</strong>
           {(['odd', 'even'] as const).map((kind) => <div key={kind}><label>{kind === 'odd' ? '单周' : '双周'}</label><Slider ariaLabelForHandle={`${kind === 'odd' ? '单周' : '双周'}${day}晚自习数`} min={0} max={Math.min(3, 12 - formalMax)} step={1}
             value={kind === 'odd' ? odd[i] : even[i]} disabled={saving || loading || formalMax === 12} onChange={(value) => changeSpecial(kind, i, value)} /><span>{(kind === 'odd' ? odd[i] : even[i])} 节</span></div>)}
         </div>)}</div>
-        <div className="slot-slider-parity"><span>首周周次</span><Select aria-label="学期首周周次" value={config.first_week_parity} disabled={saving || loading} options={[{ value: 'odd', label: '单周' }, { value: 'even', label: '双周' }]} onChange={(value) => onChange({ ...config, first_week_parity: value })} /><span>正式与晚自习合计不超过每日 12 节。</span></div>
+        <div className="slot-slider-parity"><span>首周周次</span><Select aria-label="学期首周周次" value={config.first_week_parity} disabled={saving || loading} options={[{ value: 'odd', label: '单周' }, { value: 'even', label: '双周' }]} onChange={(value) => onChange({ ...config, first_week_parity: value })} /><span>每日上限 12 节</span></div>
       </section>
     </Spin>
     <Modal title={editing?.length === 1 ? `${DAYS[editing[0].day - 1]} · 第 ${editing[0].period} 节${editing[0].kind === 'evening' ? ' · 晚自习' : ''}` : `批量设置 ${editing?.length ?? 0} 个课位`}

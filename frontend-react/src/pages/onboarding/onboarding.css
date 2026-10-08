@@ -256,6 +256,42 @@
   white-space: nowrap;
 }
 
+.ob-optional-card {
+  padding: 14px 20px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+}
+.ob-optional-card > header {
+  margin-bottom: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ob-optional-card article {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+}
+.ob-optional-card article strong {
+  color: var(--text-1);
+  font-size: 13px;
+}
+.ob-optional-card article p {
+  margin: 3px 0 0;
+  color: var(--text-2);
+  font-size: 12px;
+}
+.ob-optional-card article button {
+  flex: 0 0 auto;
+  border: 0;
+  background: transparent;
+  color: var(--blue-ink);
+  cursor: pointer;
+}
+
 .ob-empty {
   margin: 0;
   padding: 20px;

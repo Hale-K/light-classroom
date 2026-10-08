@@ -161,11 +161,17 @@ def normalize_supervisor_result(task: SupervisorTask, output: Any, *, metadata: 
         if isinstance(value, str):
             value = [value]
         return tuple(str(item).strip() for item in value if str(item).strip()) if isinstance(value, (list, tuple)) else ()
+    failed = payload.get("ok") is False or payload.get("status") in {"error", "failed"}
+    summary = str(payload.get("summary") or payload.get("message") or output or "").strip()
+    missing = values("missing")
+    if payload.get("status") == "empty":
+        missing = (*missing, summary or "未取得检查对象，无法判断")
     return SupervisorResult(
         task_id=task.id,
-        status=SupervisorResultStatus.SUCCEEDED,
-        facts=values("facts"), missing=values("missing"), next_steps=values("next_steps"),
-        summary=str(payload.get("summary") or payload.get("message") or output or "").strip(),
+        status=SupervisorResultStatus.FAILED if failed else SupervisorResultStatus.SUCCEEDED,
+        facts=values("facts"), missing=missing, next_steps=values("next_steps"),
+        summary=summary,
+        error=summary if failed else None,
         metadata=metadata or {},
     )
 

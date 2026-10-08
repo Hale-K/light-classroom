@@ -5,7 +5,8 @@ the tool gateway, so a mistaken classification cannot grant extra privileges.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+import asyncio
 from enum import StrEnum
 import logging
 import re
@@ -108,14 +109,24 @@ class IntentGateway:
         *,
         decision_classifier: DecisionClassifier | None = None,
         minimum_decision_confidence: float = 0.70,
+        classification_timeout_seconds: float = 2.0,
     ):
         self._semantic_classifier = semantic_classifier
         self._decision_classifier = decision_classifier
         self._minimum_decision_confidence = minimum_decision_confidence
+        self._classification_timeout = classification_timeout_seconds
 
     _SIMPLE_ARITHMETIC = re.compile(
         r"^\s*\d{1,9}\s*[+\-*/×÷]\s*\d{1,9}\s*(?:=\s*)?[?？]?\s*$"
     )
+    # “当前页面内容有什么”这类问题不表达五类业务意图，答案就在本轮注入的
+    # 页面上下文里；不识别会让分类器判成 unknown，落进“需要澄清”死胡同。
+    _PAGE_WORDS = ("页面", "当前页", "本页", "界面")
+    _PAGE_ASK_WORDS = ("有什么", "什么内容", "是什么", "干什么", "干嘛", "干啥", "功能", "作用", "介绍")
+
+    @classmethod
+    def _asks_page_description(cls, text: str) -> bool:
+        return len(text) <= 30 and any(w in text for w in cls._PAGE_WORDS) and any(w in text for w in cls._PAGE_ASK_WORDS)
 
     @staticmethod
     def _route_for(kind: AssistantIntent, route: AssistantRoute) -> AssistantRoute:
@@ -123,10 +134,18 @@ class IntentGateway:
         if route is AssistantRoute.DIRECT:
             return route
         if kind in {AssistantIntent.READINESS, AssistantIntent.DIAGNOSIS}:
-            return AssistantRoute.SUPERVISOR
+            return AssistantRoute.AGENT
         if kind is AssistantIntent.CONFIGURATION:
             return AssistantRoute.HUMAN_REVIEW
         return route
+
+    def _resolve_execution(self, decision: IntentDecision, query: str) -> IntentDecision:
+        """Keep topic labels for tracing, not as mandatory workflow commands."""
+        if decision.needs_clarification or decision.kind is AssistantIntent.UNKNOWN:
+            return replace(decision, needs_clarification=True, route=AssistantRoute.AGENT)
+        if decision.confidence < self._minimum_decision_confidence:
+            return replace(decision, needs_clarification=True, route=AssistantRoute.AGENT)
+        return replace(decision, route=self._route_for(decision.kind, decision.route))
 
     @staticmethod
     def failure_policy(*, retry_count: int, max_retries: int, missing: tuple[str, ...] = ()) -> RouterPolicyDecision:
@@ -159,6 +178,7 @@ class IntentGateway:
     ) -> IntentDecision:
         text = " ".join((query or "").split())
         turns = list((recent_turns or [])[-6:])
+        deadline = asyncio.get_running_loop().time() + self._classification_timeout
 
         # Avoid loading the embedding model for requests whose complexity is
         # structurally trivial and which never need school data or tools.
@@ -169,23 +189,29 @@ class IntentGateway:
                 source="fast_path",
                 route=AssistantRoute.DIRECT,
             )
+        if self._asks_page_description(text):
+            return IntentDecision(
+                kind=AssistantIntent.GUIDE,
+                confidence=1.0,
+                source="fast_path",
+                route=AssistantRoute.AGENT,
+            )
 
         # Jev or another bounded decision service is optional. Any unavailable
         # or low-confidence result falls through to the existing pgvector path.
         if self._decision_classifier is not None:
             try:
-                decision = await self._decision_classifier(session, query, page_path, turns)
+                decision = await asyncio.wait_for(
+                    self._decision_classifier(session, query, page_path, turns),
+                    timeout=max(0.0, deadline - asyncio.get_running_loop().time()),
+                )
             except Exception as exc:  # decision layer must never block the assistant
                 logger.warning("assistant.router decision layer unavailable: %s", exc)
                 decision = None
-            if decision is not None and decision.confidence >= self._minimum_decision_confidence:
-                return IntentDecision(
-                    kind=decision.kind,
-                    confidence=decision.confidence,
-                    source=decision.source or "decision_layer",
-                    needs_clarification=decision.needs_clarification,
-                    route=self._route_for(decision.kind, decision.route),
-                )
+            if decision is not None and (decision.needs_clarification
+                    or decision.kind is AssistantIntent.UNKNOWN
+                    or decision.confidence >= self._minimum_decision_confidence):
+                return self._resolve_execution(decision, text)
             if decision is not None:
                 logger.info(
                     "assistant.router decision fallback source=%s confidence=%.3f threshold=%.3f",
@@ -194,17 +220,17 @@ class IntentGateway:
                     self._minimum_decision_confidence,
                 )
 
-        if self._semantic_classifier is not None:
-            semantic = await self._semantic_classifier(session, query, page_path, turns)
-            if semantic is not None:
-                route = self._route_for(semantic.kind, semantic.route)
-                return IntentDecision(
-                    kind=semantic.kind,
-                    confidence=semantic.confidence,
-                    source=semantic.source,
-                    needs_clarification=semantic.needs_clarification,
-                    route=route,
+        if self._semantic_classifier is not None and asyncio.get_running_loop().time() < deadline:
+            try:
+                semantic = await asyncio.wait_for(
+                    self._semantic_classifier(session, query, page_path, turns),
+                    timeout=max(0.0, deadline - asyncio.get_running_loop().time()),
                 )
+            except Exception as exc:
+                logger.warning("assistant.router semantic fallback: %s", type(exc).__name__)
+                semantic = None
+            if semantic is not None:
+                return self._resolve_execution(semantic, text)
 
         if text:
             return IntentDecision(

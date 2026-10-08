@@ -12,6 +12,7 @@ import type { OrganizationTreeResult, OrganizationUnit, OrganizationUnitType, St
 import { academicYearOptions } from '@/academicYear'
 import { flattenOrganizationUnits, organizationExpandedKeys } from '@/pages/organization/tree-utils'
 import PersonnelTree, { type PersonnelTreeKey } from './personnel-tree'
+import './personnel.css'
 
 interface AccountForm { name: string; phone: string; password: string; roles?: StaffRoleCode[]; teacher_level?: string; unit_ids?: number[] }
 interface PersonEditForm {
@@ -275,7 +276,7 @@ export default function PersonnelView() {
   }
 
   const columns: TableProps<StaffAccount>['columns'] = [
-    { title: '人员', dataIndex: 'name', render: (name, row) => <div className="zh-person-cell"><strong>{name}</strong><span>{row.is_school_admin ? '校长账号' : row.phone}</span></div> },
+    { title: '姓名 / 账号', dataIndex: 'name', width: 180, render: (name, row) => <div className="zh-person-cell"><strong>{name}</strong><span>{row.is_school_admin ? '校长账号' : row.phone}</span></div> },
     { title: '所属组织', key: 'organization', render: (_, row) => {
       if (row.is_school_admin) {
         return <Tag color="blue">{org?.school.name || '本校'} · 校长管理员</Tag>
@@ -289,14 +290,14 @@ export default function PersonnelView() {
         ))}</Space>
         : '未分配'
     } },
-    { title: '岗位职责', key: 'roles', render: (_, row) => row.is_school_admin ? '校长管理员' : row.roles.length ? `${row.roles.length} 项职责` : '待配置' },
-    { title: '账号状态', width: 120, render: (_, row) => <Switch checked={row.status === 'active'} disabled={row.is_school_admin} checkedChildren="启用" unCheckedChildren="停用" onChange={(value) => void toggleAccount(row, value)} /> },
-    { title: '操作', key: 'action', width: 145, align: 'right', render: (_, row) => row.is_school_admin ? <span className="zh-locked">校长账号</span> : <Button type="link" size="small" onClick={() => openPersonEdit(row)}>编辑</Button> },
+    { title: '岗位职责', key: 'roles', width: 120, render: (_, row) => row.is_school_admin ? '校长管理员' : row.roles.length ? `${row.roles.length} 项职责` : '待配置' },
+    { title: '账号状态', width: 104, render: (_, row) => <Switch aria-label={`${row.name}账号状态`} checked={row.status === 'active'} disabled={row.is_school_admin} checkedChildren="启用" unCheckedChildren="停用" onChange={(value) => void toggleAccount(row, value)} /> },
+    { title: '操作', key: 'action', width: 96, align: 'right', render: (_, row) => row.is_school_admin ? <span className="zh-locked">校长账号</span> : <Button type="link" size="small" onClick={() => openPersonEdit(row)}>编辑</Button> },
   ]
 
-  return <div className="zh-page">
+  return <div className="zh-page personnel-page">
     <PageHeader
-      title={<span>人员账号 <ReadOutlined style={{ color: '#8c8c8c', cursor: 'pointer', marginLeft: 6 }} onClick={() => navigate('/tutorial')} /></span>}
+      title={<span>人员账号 <Button type="text" className="personnel-help" aria-label="查看人员账号使用指南" icon={<ReadOutlined />} onClick={() => navigate('/tutorial')} /></span>}
       extra={(
         <Space>
           <Button onClick={() => openUnit(false)}>新建组织</Button>
@@ -317,7 +318,7 @@ export default function PersonnelView() {
       />
       <section className="personnel-directory" aria-label={`${selectedLabel}人员列表`}>
         <header className="personnel-directory-head">
-          <div><span>当前范围</span><h3>{selectedLabel}</h3></div>
+          <div className="personnel-scope"><h3>{selectedLabel}</h3><span>{visibleAccounts.length} 人</span></div>
           {selectedUnit && (
             <Space>
               <Button size="small" onClick={() => openUnit(true)}>编辑组织</Button>
@@ -326,16 +327,18 @@ export default function PersonnelView() {
           )}
         </header>
         <div className="personnel-filters">
-          <Input allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索姓名或手机号" onPressEnter={searchAccounts} />
-          <Select allowClear value={status} onChange={setStatus} placeholder="全部状态" options={[{ label: '启用', value: 'active' }, { label: '停用', value: 'disabled' }]} />
+          <Input aria-label="搜索姓名或手机号" allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索姓名或手机号" onPressEnter={searchAccounts} />
+          <Select aria-label="账号状态筛选" allowClear value={status} onChange={setStatus} placeholder="全部状态" options={[{ label: '启用', value: 'active' }, { label: '停用', value: 'disabled' }]} />
           <Button type="primary" onClick={searchAccounts}>查询</Button>
-          <Button onClick={resetFilters}>重置查询</Button>
+          <Button onClick={resetFilters}>重置</Button>
         </div>
         <Table
           rowKey="id"
           columns={columns}
           dataSource={pagedAccounts}
           loading={loading}
+          size="middle"
+          scroll={{ x: 820 }}
           pagination={{
             current: page,
             pageSize,

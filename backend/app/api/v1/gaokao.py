@@ -48,6 +48,7 @@ class WalkRegroupAutoIn(BaseModel):
     academic_year: str = Field(min_length=4, max_length=20)
     term: str = Field(pattern=r'^[12]$')
     capacity: int = Field(default=45, ge=1, le=100)
+    capacity_overflow: int = Field(default=5, ge=0, le=10)
     weekdays: list[int] = Field(default_factory=lambda: list(range(1, 7)))
     periods: list[int] = Field(default_factory=lambda: list(range(1, 8)))
 
@@ -91,6 +92,7 @@ class WalkRegroupPreviewIn(BaseModel):
     academic_year: str = Field(min_length=4, max_length=20)
     term: str = Field(pattern=r'^[12]$')
     capacity: int = Field(default=45, ge=1, le=100)
+    capacity_overflow: int = Field(default=5, ge=0, le=10)
     a_groups: dict[int, int] = Field(min_length=1, max_length=100)
     b_groups: dict[int, int] = Field(min_length=1, max_length=100)
     b_excluded_subject: dict[int, int] = Field(min_length=1, max_length=100)
@@ -127,7 +129,8 @@ async def preview_walk_regroup(body: WalkRegroupPreviewIn,
     if set(body.a_groups) != set(admin_by_student.values()):
         raise HTTPException(status_code=422, detail='分组必须覆盖本学期所有在读行政班，不能包含其他班级')
     result = await asyncio.to_thread(regroup_walk_students, selected, admin_by_student,
-        body.a_groups, body.b_groups, body.b_excluded_subject, capacity=body.capacity)
+        body.a_groups, body.b_groups, body.b_excluded_subject,
+        capacity=body.capacity + body.capacity_overflow)
     if result['status'] == 'feasible':
         result.update(await _preview_regroup_calendar(body, session, tenant_id, grade,
             selected, admin_by_student, result))
@@ -186,6 +189,7 @@ async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, a
     from app.api.v1.scheduling import GenerateIn, _generation_assignment_payloads, _load_rule_group, _load_grid_config
     from app.services.scheduling.grid_slots import allowed_slots as configured_slots
     from app.services.scheduling.walk_regroup_calendar import trial_calendar, audit_draft, check_hour_bounds
+    from app.services.scheduling.walk_regroup_save import fixed_walk_class_mapping
     from app.services.scheduling.rules import generation_subject_allowed_slots, rules_for_schedule
     assignments = await _generation_assignment_payloads(session, GenerateIn(
         academic_year=body.academic_year, term=body.term,
@@ -240,15 +244,24 @@ async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, a
         raise HTTPException(status_code=422, detail='周六课时不满足走班分组要求')
     old_classes = list((await session.execute(select(TeachingClass).where(
         TeachingClass.tenant_id == tenant_id, TeachingClass.grade_id == body.grade_id,
-        TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.term))).scalars())
+        TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.term)
+        .order_by(TeachingClass.subject_id, TeachingClass.sequence))).scalars())
+    try:
+        fixed_teachers, fixed_class_ids = fixed_walk_class_mapping(
+            [c for c in old_classes if c.subject_id in subjects], draft['classes'])
+    except ValueError as error:
+        subject_names = dict((await session.execute(select(Subject.id, Subject.name).where(
+            Subject.id.in_(subjects)))).all())
+        detail = str(error)
+        for subject_id, subject_name in subject_names.items():
+            detail = detail.replace(f'学科 {subject_id}', f'{subject_name}')
+        raise HTTPException(status_code=422, detail=detail) from error
     teachers = defaultdict(set)
-    for c in old_classes:
-        if c.teacher_id and c.subject_id in subjects:
-            teachers[c.subject_id].add(c.teacher_id)
-    if any(not teachers[s] for s in subjects):
-        raise HTTPException(status_code=422, detail='请先为各走班学科配置任课教师')
+    for c in draft['classes']:
+        teachers[c['subject_id']].add(fixed_teachers[c['id']])
+    required_room_capacity = max((c['size'] for c in draft['classes']), default=0)
     rooms = [r for r in await _shared_teaching_rooms(session, tenant_id, grade, body.academic_year, body.term)
-             if r.capacity >= body.capacity]
+             if r.capacity >= required_room_capacity]
     if not rooms:
         raise HTTPException(status_code=422, detail='没有满足班额的共享教室')
     external, blocked_rooms = set(), defaultdict(set)
@@ -268,7 +281,7 @@ async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, a
     calendar = await asyncio.to_thread(trial_calendar, draft, assignments, set(admins.values()),
         body.a_groups, body.b_groups, teachers, len(rooms), external, slots=slots,
         phase_hours=hours, saturday_hours=saturday_hours, subject_allowed=allowed, blocked_rooms=blocked_rooms,
-        required_slots=required_slots)
+        required_slots=required_slots, fixed_teachers=fixed_teachers)
     if calendar['status'] not in ('OPTIMAL', 'FEASIBLE'):
         return {'status': calendar['status'].lower(), 'schedule_validated': False}
     report, placements = audit_draft(draft, calendar, selected, admins, assignments,
@@ -277,7 +290,7 @@ async def _preview_regroup_calendar(body, session, tenant_id, grade, selected, a
     # The legacy blanket reservation/prefix rules are deliberately NOT treated as satisfied.
     # No rule is silently changed: the preview describes the required coordinated replacement.
     return {'schedule_validated': True, 'calendar': calendar, 'placements': placements,
-        'audit': report, 'current_rules_validated': False,
+        'audit': report, 'class_id_map': fixed_class_ids, 'current_rules_validated': False,
         'rules_requiring_review': [r.id for r in group.rules if r.enabled and r.code != 'subject_allowed_slots']}
 
 
@@ -838,6 +851,12 @@ class GenerateWalkScheduleIn(BaseModel):
     days: int = Field(default=5, ge=1, le=7)
     periods_per_day: int = Field(default=8, ge=1, le=12)
     forbidden_slots: list[tuple[int, int]] = Field(default_factory=list, max_length=84)
+
+
+class ClearWalkScheduleIn(BaseModel):
+    grade_id: int = Field(ge=1)
+    academic_year: str = Field(min_length=4, max_length=20)
+    term: str = Field(pattern=r"^[12]$")
 
 
 class WalkClassSpacePoolIn(BaseModel):
@@ -1451,7 +1470,7 @@ async def generate_teaching_classes(
         warnings.append(f"{('、'.join(missing_hours))}未设置科目课时，本次使用每周 {body.weekly_periods} 节。")
     if body.preview:
         return {"code": 0, "message": "ok", "data": {
-            "created": len(drafts), "memberships": sum(len(d.student_ids) for d in drafts),
+            "created": len(drafts), "memberships": 0,
             "existing_class_count": len(old_classes), "available_room_count": len(shared_rooms),
             "preview_token": token, "warnings": warnings,
             "classes": [{"subject_id": d.subject_id, "subject_name": subject_names.get(d.subject_id, str(d.subject_id)),
@@ -1467,7 +1486,6 @@ async def generate_teaching_classes(
         await session.execute(delete(TeachingClassStudent).where(TeachingClassStudent.tenant_id == tenant_id, TeachingClassStudent.teaching_class_id.in_(old_ids)))
         await session.execute(delete(TeachingClass).where(TeachingClass.tenant_id == tenant_id, TeachingClass.id.in_(old_ids)))
     created_classes: list[TeachingClass] = []
-    member_count = 0
     for draft in drafts:
         inherited = plan_by_subject.get(draft.subject_id)
         if inherited and effective_hours[draft.subject_id] != inherited.weekly_periods:
@@ -1494,20 +1512,11 @@ async def generate_teaching_classes(
             status="generated",
         )
         session.add(teaching_class)
-        await session.flush()
-        session.add_all([
-            TeachingClassStudent(
-                tenant_id=tenant_id,
-                teaching_class_id=teaching_class.id,
-                student_id=student_id,
-            ) for student_id in draft.student_ids
-        ])
         created_classes.append(teaching_class)
-        member_count += len(draft.student_ids)
     await session.commit()
     return {"code": 0, "message": "ok", "data": {
         "created": len(created_classes),
-        "memberships": member_count,
+        "memberships": 0,
         "student_count": len(student_ids),
         "subject_count": len({item.subject_id for item in created_classes}),
     }}
@@ -1716,6 +1725,36 @@ async def save_walk_class_space_pool(
     tenant_id: int = Depends(get_current_tenant),
 ):
     raise HTTPException(status_code=410, detail="旧教室池配置已停用，请在空间资源中维护本学期的同届复用分配规则。")
+
+
+@router.post("/schedules/clear", dependencies=[Depends(require_management_user)], summary="清空指定年级学期走班课表")
+async def clear_walk_schedule(
+    body: ClearWalkScheduleIn,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    grade = (await session.execute(select(Grade).where(
+        Grade.id == body.grade_id, Grade.tenant_id == tenant_id,
+    ).with_for_update())).scalar_one_or_none()
+    if grade is None:
+        raise HTTPException(status_code=404, detail="年级不存在")
+    teaching_class_ids = list((await session.execute(select(TeachingClass.id).where(
+        TeachingClass.tenant_id == tenant_id,
+        TeachingClass.grade_id == body.grade_id,
+        TeachingClass.academic_year == body.academic_year,
+        TeachingClass.term == body.term,
+    ))).scalars().all())
+    cleared = 0
+    if teaching_class_ids:
+        result = await session.execute(delete(TeachingClassSchedule).where(
+            TeachingClassSchedule.tenant_id == tenant_id,
+            TeachingClassSchedule.teaching_class_id.in_(teaching_class_ids),
+        ))
+        cleared = result.rowcount or 0
+    await session.commit()
+    return {"code": 0, "message": "ok", "data": {
+        "cleared": cleared, "teaching_class_count": len(teaching_class_ids),
+    }}
 
 
 @router.post("/schedules/generate", summary="生成走班课表")

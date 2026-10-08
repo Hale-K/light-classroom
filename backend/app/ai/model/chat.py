@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 
 import httpx
@@ -294,6 +296,67 @@ async def complete_chat(
     if not text:
         raise ChatError("模型没有返回文本，请重试。", "empty")
     return text
+
+
+async def stream_chat(
+    *,
+    base_url: str,
+    api_key: str,
+    model: str,
+    timeout: int,
+    messages: list[dict],
+    temperature: float = 0.4,
+    max_tokens: int | None = None,
+) -> AsyncIterator[str]:
+    """流式逐段产出模型回复。
+
+    长输出场景（如整份课件 HTML）整体耗时远超单次读超时，
+    走 SSE 后每个数据块都会刷新读计时，连接不会被中断。
+    """
+    headers = {"Accept": "text/event-stream", "Content-Type": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    payload: dict = {
+        "model": model,
+        "messages": messages,
+        "stream": True,
+        "temperature": temperature,
+    }
+    if max_tokens is not None:
+        payload["max_tokens"] = max_tokens
+    started = time.monotonic()
+    total = 0
+    try:
+        async with httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0, read=max(timeout, 120.0))
+        ) as client:
+            async with client.stream("POST", _chat_url(base_url), headers=headers, json=payload) as resp:
+                if resp.status_code < 200 or resp.status_code >= 300:
+                    body = (await resp.aread()).decode("utf-8", "ignore")[:400]
+                    logger.warning("assistant.llm stream http_fail status=%s body=%s", resp.status_code, body)
+                    raise _status_error(resp.status_code, body)
+                async for line in resp.aiter_lines():
+                    if not line.startswith("data:"):
+                        continue
+                    data = line[5:].strip()
+                    if not data or data == "[DONE]":
+                        continue
+                    try:
+                        delta = json.loads(data)["choices"][0].get("delta") or {}
+                    except (ValueError, KeyError, IndexError, TypeError):
+                        continue
+                    piece = delta.get("content")
+                    if isinstance(piece, str) and piece:
+                        total += len(piece)
+                        yield piece
+    except httpx.HTTPError as exc:
+        raise ChatError("模型请求失败，请稍后重试。", "network") from exc
+    logger.info(
+        "assistant.llm stream model=%s ms=%d chars=%d",
+        model, int((time.monotonic() - started) * 1000), total,
+    )
+    if not total:
+        raise ChatError("模型没有返回文本，请重试。", "empty")
 
 
 async def complete_chat_tools(

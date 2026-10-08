@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Alert, App, Button, Dropdown, Modal, Select, Space, Spin, Table, Tag } from 'antd'
+import { Alert, App, Button, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { gaokaoApi } from '@/api'
 import type { Grade } from '@/types'
+import WalkRosterModal from './WalkRosterModal'
 
 type WalkScheduleRow = Awaited<ReturnType<typeof gaokaoApi.schedules>>[number]
 type TeachingClassRoster = Awaited<ReturnType<typeof gaokaoApi.teachingClassRoster>>
@@ -30,6 +31,7 @@ export default function WalkSchedulePanel({
   const [rows, setRows] = useState<WalkScheduleRow[]>([])
   const [loading, setLoading] = useState(false)
   const [generating, setGenerating] = useState(false)
+  const [clearing, setClearing] = useState(false)
   const [loadError, setLoadError] = useState('')
   const [generationError, setGenerationError] = useState('')
   // 「查看班级」弹窗：教学班成员按行政班分组
@@ -68,7 +70,7 @@ export default function WalkSchedulePanel({
   }, [gradeId, academicYear, term])
 
   const generate = async () => {
-    if (!gradeId) return
+    if (jointSupported || !gradeId) return
     setGenerating(true)
     setGenerationError('')
     try {
@@ -87,7 +89,7 @@ export default function WalkSchedulePanel({
   }
 
   const confirmGenerate = () => {
-    if (!gradeId) return
+    if (jointSupported || !gradeId) return
     if (rows.length) {
       modal.confirm({
         title: '重新生成走班课表？',
@@ -101,6 +103,32 @@ export default function WalkSchedulePanel({
     void generate()
   }
 
+  const confirmClear = () => {
+    if (!gradeId || rows.length === 0 || clearing) return
+    const gradeName = grades.find((grade) => grade.id === gradeId)?.name ?? '当前年级'
+    modal.confirm({
+      title: '清空走班课表？',
+      content: `清空${gradeName}当前列表中的 ${rows.length} 节走班课位。行政班课表、课时和任课关系不变。`,
+      okText: '清空课表',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setClearing(true)
+        try {
+          const result = await gaokaoApi.clearSchedules({ grade_id: gradeId, academic_year: academicYear, term })
+          const data = await gaokaoApi.schedules({ academic_year: academicYear, term, grade_id: gradeId })
+          setRows(data)
+          setLoadError('')
+          message.success(`已清空 ${result.cleared} 节走班课位，可修改任课关系`)
+        } catch (cause) {
+          message.error(cause instanceof Error ? cause.message : '清空失败，请重试')
+        } finally {
+          setClearing(false)
+        }
+      },
+    })
+  }
+
   const openRoster = (row: WalkScheduleRow) => {
     setRoster({ id: row.teaching_class_id, name: row.teaching_class_name })
     setRosterLoading(true)
@@ -111,17 +139,6 @@ export default function WalkSchedulePanel({
       .catch((cause) => setRosterError(cause instanceof Error ? cause.message : '学生名单加载失败'))
       .finally(() => setRosterLoading(false))
   }
-
-  const rosterGroups = (() => {
-    const map = new Map<string, RosterItem[]>()
-    for (const item of rosterItems) {
-      const key = item.class_name || '未分班'
-      const bucket = map.get(key)
-      if (bucket) bucket.push(item)
-      else map.set(key, [item])
-    }
-    return [...map.entries()].sort((a, b) => a[0].localeCompare(b[0], 'zh'))
-  })()
 
   const columns: ColumnsType<WalkScheduleRow> = [
     { title: '星期', dataIndex: 'weekday', width: 100, render: (day: number) => WEEKDAYS[day] || `周${day}` },
@@ -134,7 +151,7 @@ export default function WalkSchedulePanel({
       title: '操作',
       key: 'roster',
       width: 110,
-      render: (_, row) => <Button size="small" onClick={() => openRoster(row)}>查看班级</Button>,
+      render: (_, row) => <Button size="small" onClick={() => openRoster(row)}>学生名单</Button>,
     },
   ]
 
@@ -151,20 +168,13 @@ export default function WalkSchedulePanel({
             options={grades.map((grade) => ({ value: grade.id, label: grade.name }))}
             onChange={(value) => { setGradeId(value); onGradeChange?.(value) }}
           />
-          {jointSupported ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'walk', label: '单独生成走班课表',
-            disabled: !gradeId || loading || generating, onClick: confirmGenerate,
-          }] }}><Button loading={generating}>高级操作</Button></Dropdown> : <Button type="primary" loading={generating} disabled={!gradeId || loading} onClick={confirmGenerate}>
+          {!jointSupported && <Button type="primary" loading={generating} disabled={!gradeId || loading} onClick={confirmGenerate}>
             {rows.length ? '重新生成走班课表' : '生成走班课表'}
           </Button>}
+          <Button danger disabled={!gradeId || loading || generating || clearing || rows.length === 0}
+            loading={clearing} onClick={confirmClear}>清空走班课表</Button>
         </Space>
       </div>
-      <Alert
-        type="info"
-        showIcon
-        message={`${academicYear} 学年 · 第 ${term} 学期`}
-        description={jointSupported ? '使用页首“联合排课”同步分班和排课；高级操作仅重排走班课表，不调整行政课。' : '先保存行政班课表，再生成走班课表；走班单独保存，不修改行政课和规则。'}
-        style={{ marginBottom: 16 }}
-      />
       {generationError && <Alert type="error" showIcon message={generationError} style={{ marginBottom: 16 }} />}
       {loadError && <Alert type="error" showIcon message={loadError} style={{ marginBottom: 16 }} />}
       <Table<WalkScheduleRow>
@@ -176,38 +186,8 @@ export default function WalkSchedulePanel({
         pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 节` }}
         locale={{ emptyText: loadError ? '课表加载失败，请重试' : '当前年级本学期尚无走班课表' }}
       />
-      <Modal
-        title={roster ? `学生构成 · ${roster.name}` : '学生构成'}
-        open={Boolean(roster)}
-        onCancel={() => setRoster(null)}
-        footer={null}
-        width={520}
-      >
-        {rosterLoading && <div style={{ textAlign: 'center', padding: '32px 0' }}><Spin tip="正在加载学生名单…" /></div>}
-        {!rosterLoading && rosterError && <Alert type="error" showIcon message={rosterError} />}
-        {!rosterLoading && !rosterError && (
-          <>
-            <div style={{ marginBottom: 12, color: 'var(--text-2)', fontSize: 13 }}>
-              共 <strong style={{ color: 'var(--ink)' }}>{rosterItems.length}</strong> 人
-              {rosterGroups.length > 0 && <> · 来自 {rosterGroups.length} 个行政班</>}
-            </div>
-            {rosterGroups.length === 0 && (
-              <div style={{ color: 'var(--text-3)', padding: '12px 0' }}>该教学班暂无学生。</div>
-            )}
-            {rosterGroups.map(([className, members]) => (
-              <div key={className} style={{ marginBottom: 14 }}>
-                <div style={{ marginBottom: 4 }}>
-                  <Tag color="blue">{className}</Tag>
-                  <span style={{ color: 'var(--text-2)', fontSize: 12 }}>{members.length} 人</span>
-                </div>
-                <div style={{ color: 'var(--text-1)', fontSize: 13, lineHeight: 1.8 }}>
-                  {members.map((item) => item.student_name).join('、')}
-                </div>
-              </div>
-            ))}
-          </>
-        )}
-      </Modal>
+      {roster && <WalkRosterModal key={roster.id} name={roster.name} items={rosterItems}
+        loading={rosterLoading} error={rosterError} onClose={() => setRoster(null)} />}
     </section>
   )
 }

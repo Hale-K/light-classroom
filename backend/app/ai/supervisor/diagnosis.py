@@ -72,7 +72,8 @@ class SchedulingDiagnosisSupervisor:
                     output = await execute(task, task_context)
                     result = normalize_supervisor_result(task, output, metadata=task_context.trace_data())
                     if on_event:
-                        await on_event("supervisor.task_succeeded", {"task_id": task.id, "attempt": attempts + 1})
+                        event = "supervisor.task_failed" if result.status is SupervisorResultStatus.FAILED else "supervisor.task_succeeded"
+                        await on_event(event, {"task_id": task.id, "attempt": attempts + 1, "error": result.error})
                     break
                 except Exception as exc:
                     policy = IntentGateway.failure_policy(retry_count=attempts, max_retries=max_retries)

@@ -1,0 +1,26 @@
+.walk-roster-class-name { margin: 4px 0 20px; color: var(--text-2); font-size: 14px; overflow-wrap: anywhere; }
+.walk-roster-loading { padding: 16px 0; }
+.walk-roster-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 16px 20px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface-2); }
+.walk-roster-summary > div { display: flex; flex-direction: column; gap: 4px; }
+.walk-roster-summary > div + div { padding-left: 20px; border-left: 1px solid var(--border); }
+.walk-roster-summary span { color: var(--text-2); font-size: 13px; }
+.walk-roster-summary strong { color: var(--ink); font-size: 28px; line-height: 1.3; font-variant-numeric: tabular-nums; }
+.walk-roster-summary small { margin-left: 8px; color: var(--text-2); font-size: 13px; font-weight: 400; }
+.walk-roster-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0 12px; }
+.walk-roster-toolbar .ant-input-affix-wrapper { flex: 1 1 180px; max-width: 320px; }
+.walk-roster-toolbar > span { color: var(--text-2); font-size: 13px; }
+.walk-roster-list { max-height: min(420px, 42vh); overflow-y: auto; overscroll-behavior: contain; padding-right: 4px; }
+.walk-roster-group { margin-bottom: 12px; padding: 16px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); }
+.walk-roster-group:last-child { margin-bottom: 0; }
+.walk-roster-group-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.walk-roster-group-head h3 { margin: 0; color: var(--ink); font-size: 14px; font-weight: 600; }
+.walk-roster-group-head > span { color: var(--text-2); font-size: 13px; white-space: nowrap; }
+.walk-roster-students { display: grid; grid-template-columns: repeat(auto-fill, minmax(88px, 1fr)); gap: 8px; margin: 0; padding: 0; list-style: none; }
+.walk-roster-students li { padding: 8px 12px; background: var(--surface-2); border-radius: 6px; color: var(--text-1); text-align: center; font-size: 14px; line-height: 1.5; overflow-wrap: anywhere; }
+.walk-roster-modal .ant-modal-title { padding-right: 24px; }
+@media (max-width: 480px) {
+  .walk-roster-summary { padding: 12px; gap: 12px; }
+  .walk-roster-summary > div + div { padding-left: 12px; }
+  .walk-roster-group { padding: 12px; }
+  .walk-roster-students { grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); }
+}

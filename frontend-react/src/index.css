@@ -2061,6 +2061,31 @@ body[data-theme='tech'] .st-subject-self-study {
   color: var(--text-3);
   font-size: 10px;
   white-space: nowrap;
+  margin-left: auto;
+}
+.zh-org-tree-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  opacity: .55;
+  transition: opacity .15s ease, background .15s ease, color .15s ease;
+}
+.zh-org-tree-add:hover {
+  opacity: 1;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: var(--ink);
+}
+.zh-org-tree-add:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--border);
 }
 .zh-org-school-title > span {
   font-weight: 650;
@@ -4243,3 +4268,58 @@ body[data-theme='tech'] .tp-ratio-foot,
 body[data-theme='tech'] .tp-lesson-unit {
   color: #e4e4e7 !important;
 }
+
+/* ===== 课件管理 ===== */
+.cw-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 14px; }
+.cw-stats { color: var(--text-3); font-size: 12px; margin-left: auto; }
+.cw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 12px; }
+.cw-card { border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 13px 15px 10px; display: flex; flex-direction: column; gap: 7px; transition: box-shadow .15s ease, transform .15s ease; }
+.cw-card:hover { box-shadow: 0 6px 18px rgba(15, 23, 42, .08); transform: translateY(-1px); }
+.cw-head { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.cw-badge { font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; color: #fff; flex-shrink: 0; }
+.cw-badge-file { background: #1677ff; }
+.cw-badge-html { background: #7c3aed; }
+.cw-badge-link { background: #0891b2; }
+.cw-subject { color: var(--text-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cw-title { font-weight: 600; font-size: 14px; color: var(--ink); line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 20px; }
+.cw-chapter { color: var(--text-3); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.cw-meta { display: flex; flex-wrap: wrap; gap: 6px; }
+.cw-tag { font-size: 11px; color: var(--text-2); background: var(--surface-2); border-radius: 6px; padding: 2px 7px; }
+.cw-foot { margin-top: auto; display: flex; align-items: center; gap: 10px; padding-top: 8px; border-top: 1px dashed var(--border); color: var(--text-3); font-size: 11.5px; }
+.cw-foot .ant-btn { padding: 0; height: auto; }
+.cw-drop { border: 1.5px dashed var(--border); border-radius: 10px; padding: 22px 14px; text-align: center; color: var(--text-3); font-size: 12.5px; cursor: pointer; transition: border-color .15s, color .15s; }
+.cw-drop:hover { border-color: #1677ff; color: #1677ff; }
+.cw-gen-tip { color: var(--text-3); font-size: 12px; margin-top: 8px; line-height: 1.6; }
+
+/* ===== 课件工作台 ===== */
+.cw-studio { display: grid; grid-template-columns: 360px 1fr; gap: 14px; align-items: stretch; min-height: calc(100vh - 170px); }
+.cw-studio-side { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.cw-studio-side-head { display: flex; align-items: center; gap: 10px; }
+.cw-back { border: 1px solid var(--border); background: transparent; border-radius: 8px; padding: 3px 10px; cursor: pointer; color: var(--text-2); font-size: 12px; }
+.cw-back:hover { color: #1677ff; border-color: #1677ff; }
+.cw-studio-title { font-weight: 700; font-size: 15px; color: var(--ink); }
+.cw-studio-form { flex: 1; }
+.cw-examples { color: var(--text-3); font-size: 12px; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cw-examples a { color: #1677ff; cursor: pointer; }
+.cw-gen-status { display: flex; flex-direction: column; gap: 8px; font-size: 12.5px; color: var(--text-2); }
+.cw-gen-bar { height: 6px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.cw-gen-bar span { display: block; height: 100%; background: linear-gradient(90deg, #7c3aed, #1677ff); transition: width .4s ease; }
+.cw-studio-main { border: 1px solid var(--border); border-radius: 14px; background: var(--surface); display: flex; flex-direction: column; overflow: hidden; }
+.cw-studio-toolbar { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.cw-studio-doc { font-weight: 600; color: var(--ink); font-size: 13.5px; display: flex; gap: 8px; align-items: center; }
+.cw-studio-actions { margin-left: auto; display: flex; gap: 8px; }
+.cw-studio-canvas { flex: 1; min-height: 420px; background: var(--surface-2); display: flex; }
+.cw-studio-frame { flex: 1; width: 100%; border: 0; background: #fff; }
+.cw-studio-empty { margin: auto; text-align: center; color: var(--text-3); max-width: 420px; padding: 30px; }
+.cw-studio-empty h3 { color: var(--ink); font-size: 16px; margin-bottom: 8px; }
+.cw-orbit { width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 50%; border: 3px solid rgba(124, 58, 237, .25); border-top-color: #7c3aed; animation: cw-spin 1s linear infinite; }
+@keyframes cw-spin { to { transform: rotate(360deg); } }
+.cw-error { color: #dc2626; }
+.cw-image-panel { border-top: 1px solid var(--border); padding: 10px 14px; display: flex; flex-direction: column; gap: 8px; }
+.cw-image-head { display: flex; align-items: center; gap: 10px; font-size: 12.5px; color: var(--text-3); }
+.cw-image-head strong { color: var(--ink); font-size: 13px; }
+.cw-image-row { display: flex; gap: 8px; }
+.cw-image-grid { display: flex; gap: 10px; flex-wrap: wrap; max-height: 180px; overflow: auto; }
+.cw-image-item { width: 132px; display: flex; flex-direction: column; gap: 4px; }
+.cw-image-item img { width: 132px; height: 99px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border); }
+.cw-image-item a { font-size: 11px; color: #1677ff; cursor: pointer; }

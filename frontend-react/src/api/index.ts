@@ -17,5 +17,6 @@ export * from './files'
 export * from './teacherProfiles'
 export * from './ai'
 export * from './onboarding'
+export * from './courseware'
 
 export type { AuthResolver } from './http'

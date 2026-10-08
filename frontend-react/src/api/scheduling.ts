@@ -31,18 +31,6 @@ export const schedulingApi = {
       evening_periods_even: number
   }) => unwrap<import('@/types').CourseHourPlanInfo>(http.post('/scheduling/course-hours', data)),
   deleteCourseHour: (id: number) => unwrap<null>(http.delete(`/scheduling/course-hours/${id}`)),
-  inheritTermData: (data: { academic_year: string; from_term: string; to_term: string; class_ids?: number[]; copy_course_hours: boolean; copy_assignments: boolean; copy_rules: boolean }) =>
-    unwrap<{
-      academic_year: string
-      from_term: string
-      to_term: string
-      course_hours_created: number
-      course_hours_replaced: number
-      assignments_created: number
-      assignments_updated: number
-      rule_groups_created_or_copied: number
-      rule_groups_replaced: number
-    }>(http.post('/scheduling/inherit-term-data', data)),
   gridConfig: (params: { academic_year: string; term: string; grade_id?: number }) =>
     unwrap<import('@/types').SchedulingGridConfig>(http.get('/scheduling/grid-config', { params })),
   saveGridConfig: (data: import('@/types').SchedulingGridConfig & { academic_year: string; term: string; grade_id?: number }) =>

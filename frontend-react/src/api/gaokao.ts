@@ -121,10 +121,16 @@ export const gaokaoApi = {
       classes?: Array<{ subject_id: number; subject_name: string; sequence: number; student_count: number; weekly_periods: number }> }>(
       http.post('/gaokao/teaching-classes/generate', data),
     ),
-  previewRegroupPlan: (data: { grade_id: number; academic_year: string; term: string; capacity: number; weekdays: number[]; periods: number[] }) =>
+  previewRegroupPlan: (data: { grade_id: number; academic_year: string; term: string; capacity: number; capacity_overflow: number; weekdays: number[]; periods: number[] }) =>
     unwrap<{ preview_token: string; student_count: number; class_count: number;
       audit: Record<string, number>; replaced_rule_ids: string[];
-      classes: Array<{ id: number; subject_name: string; student_count: number; capacity: number }> }>(
+      classes: Array<{ id: number; name: string; subject_name: string; student_count: number; capacity: number }>;
+      admin_classes: Array<{ id: number; name: string }>;
+      students: Array<{ id: number; name: string; class_id: number; class_name: string; teaching_class_ids: number[];
+        primary_subject_name: string; secondary_subject_names: string[] }>;
+      slots: Array<{ weekday: number; period: number }>;
+      lessons: Array<{ kind: 'admin' | 'walk'; class_id: number; class_name: string; subject_name: string;
+        teacher_id: number; teacher_name: string; room: string; weekday: number; period: number }> }>(
       http.post('/gaokao/teaching-classes/regroup-plan', data, { timeout: 180000 }),
     ),
   saveRegroupPlan: (data: { grade_id: number; academic_year: string; term: string; preview_token: string; confirm_replace: true }) =>
@@ -189,6 +195,8 @@ export const gaokaoApi = {
       period: number
       room: string | null
     }>>(http.get('/gaokao/schedules', { params })),
+  clearSchedules: (data: { grade_id: number; academic_year: string; term: string }) =>
+    unwrap<{ cleared: number; teaching_class_count: number }>(http.post('/gaokao/schedules/clear', data)),
   generateSchedule: (data: {
     grade_id: number
     academic_year: string

@@ -26,7 +26,7 @@ def check_hour_bounds(total, work, weekend, slots, required):
 
 def trial_calendar(draft, assignments, admins, ag, bg, teachers, room_count, external,
                    *, slots=None, phase_hours=4, saturday_hours=None, subject_allowed=None,
-                   blocked_rooms=None, required_slots=None):
+                   blocked_rooms=None, required_slots=None, fixed_teachers=None):
     model = cp_model.CpModel()
     slots = slots if slots is not None else [(d, p) for d in range(1, 7) for p in range(1, 8)]
     required = set(slots) if required_slots is None else set(required_slots)
@@ -35,6 +35,7 @@ def trial_calendar(draft, assignments, admins, ag, bg, teachers, room_count, ext
     saturday_hours = saturday_hours if saturday_hours is not None else {'A': 1, 'B': 2}
     subject_allowed = subject_allowed or {}
     blocked_rooms = blocked_rooms or {}
+    fixed_teachers = fixed_teachers or {}
     weekdays = sorted({d for d, _ in slots if d < 6})
     by_phase = defaultdict(list)
     for c in draft['classes']:
@@ -82,7 +83,10 @@ def trial_calendar(draft, assignments, admins, ag, bg, teachers, room_count, ext
             model.Add(occupied == 1) if slot in required else model.Add(occupied <= 1)
     selections = {}
     for c in draft['classes']:
-        pool = teachers[c['subject_id']]
+        # A configured teacher-to-walk-class relationship is an assignment, not
+        # a preference for the solver to override. Joint regrouping can change
+        # rosters, but it must keep the teacher mapped to each class sequence.
+        pool = [fixed_teachers[c['id']]] if c['id'] in fixed_teachers else teachers[c['subject_id']]
         for teacher in pool:
             sel = model.NewBoolVar(f'teacher_{c["id"]}_{teacher}')
             selections[c['id'], teacher] = sel
@@ -109,7 +113,8 @@ def trial_calendar(draft, assignments, admins, ag, bg, teachers, room_count, ext
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         result['phase_slots'] = {str(ph): [s for s in slots if solver.Value(z[ph, s])]
                                  for ph in by_phase}
-        result['teachers'] = {c['id']: next(t for t in teachers[c['subject_id']]
+        result['teachers'] = {c['id']: next(t for t in (
+            [fixed_teachers[c['id']]] if c['id'] in fixed_teachers else teachers[c['subject_id']])
             if solver.Value(selections[c['id'], t])) for c in draft['classes']}
         result['public'] = [dict(a, weekday=s[0], period=s[1])
             for i, a in enumerate(assignments) for s in slots if solver.Value(public[i, s])]

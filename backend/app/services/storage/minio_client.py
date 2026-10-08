@@ -61,6 +61,11 @@ def get_bytes(object_key: str) -> bytes:
         response.release_conn()
 
 
+def remove_object(object_key: str) -> None:
+    client = _client()
+    client.remove_object(settings.minio_bucket, object_key)
+
+
 def presigned_get_url(object_key: str, expires_seconds: int = 3600) -> str:
     client = _client()
     return client.presigned_get_object(

@@ -23,7 +23,7 @@ ReadinessExecutor = Callable[[SupervisorTask, SupervisorTaskContext], Awaitable[
 ReadinessEvent = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
-def preparation_guidance(steps: list[dict]) -> tuple[str, list[dict], bool]:
+def preparation_guidance(steps: list[dict], *, detailed: bool = True) -> tuple[str, list[dict], bool]:
     """按业务顺序推荐第一个未完成步骤；缺少基础条件时不评价排课细项。"""
     first_missing = next((step for step in steps if not step["done"]), None)
     foundations = {"year", "personnel", "space", "allocation", "class_planning", "grid", "hours", "assignments"}
@@ -53,6 +53,10 @@ def preparation_guidance(steps: list[dict]) -> tuple[str, list[dict], bool]:
         "label": first_missing["title"], "path": first_missing["path"],
         "requires_confirmation": True,
     }] if first_missing else []
+    if not detailed:
+        lines = lines[:3] if first_missing else lines[:2]
+        if not foundations_ready and steps:
+            lines.append("尚未完成基础准备；没有检查对象不等于检查通过。")
     return "\n".join(lines), jumps, foundations_ready
 
 
@@ -105,7 +109,8 @@ class SchedulingReadinessSupervisor:
                     output = await execute(task, task_context)
                     result = normalize_supervisor_result(task, output, metadata=task_context.trace_data())
                     if on_event:
-                        await on_event("supervisor.task_succeeded", {"task_id": task.id, "attempt": attempts + 1})
+                        event = "supervisor.task_failed" if result.status is SupervisorResultStatus.FAILED else "supervisor.task_succeeded"
+                        await on_event(event, {"task_id": task.id, "attempt": attempts + 1, "error": result.error})
                     break
                 except Exception as exc:  # one failed check must not hide the other checks
                     policy = IntentGateway.failure_policy(retry_count=attempts, max_retries=max_retries)

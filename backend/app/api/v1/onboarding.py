@@ -205,7 +205,7 @@ def evaluate_steps(
             "title": "建立任教关系",
             "done": class_total > 0 and teacher_count > 0 and asg_class_count >= class_total,
             "detail": (
-                f"{teacher_count} 位教师覆盖 {asg_class_count} 个班" if teacher_count
+                f"{asg_class_count}/{class_total} 个班已有任教关系（涉及 {teacher_count} 位教师）" if teacher_count
                 else (
                     f"检测到 {history_year} 学年的任教关系，新学期请重新对老师" if history_year
                     else "还没有教师和班的对应关系"
@@ -215,11 +215,12 @@ def evaluate_steps(
         },
         {
             "key": "rules",
-            "title": "配置排课规则",
+            "title": "按需配置排课规则",
+            "required": False,
             "done": enabled_rules > 0,
             "detail": (
                 f"{rule_group_count} 个规则组 · 启用 {enabled_rules} 条规则" if rule_group_count
-                else "还没有规则组，可按模板添加禁排、连堂等"
+                else "可按需添加教师禁排、连堂等额外要求；普通排课无需先创建规则"
             ),
             "path": "/scheduling?tab=rules",
         },
@@ -265,8 +266,9 @@ async def onboarding_status(
         ]
     else:
         result["data"]["audience"] = "management"
-    result["data"]["done_count"] = sum(1 for step in result["data"]["steps"] if step["done"])
-    result["data"]["total"] = len(result["data"]["steps"])
+    required_steps = [step for step in result["data"]["steps"] if step.get("required", True)]
+    result["data"]["done_count"] = sum(1 for step in required_steps if step["done"])
+    result["data"]["total"] = len(required_steps)
     return result
 
 

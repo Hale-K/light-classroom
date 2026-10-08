@@ -61,6 +61,8 @@ def test_preview_without_rooms_then_confirm_and_guard_replacement():
                 assert no_preview.value.status_code == 409
                 result = await generate_teaching_classes(GenerateTeachingClassesIn(**scope, preview_token=preview["preview_token"]), **deps)
                 assert result["data"]["created"] == 4
+                assert result["data"]["memberships"] == 0
+                assert db.execute(select(TeachingClassStudent)).scalars().all() == []
                 current = db.execute(select(TeachingClass).where(TeachingClass.term == "2")).scalars().all()
                 current[0].teacher_id = 9
                 current[0].room = "保留教室"

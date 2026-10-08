@@ -222,7 +222,11 @@ export default function ScheduleGrid({
       cells.push(
         <div
           key={`lesson-${column.key}-${period}`}
-          className={`st-lesson${entry ? ' filled' : ''}${dailyPeriods && period > dayCap ? ' unavailable' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
+          className={`st-lesson${entry ? ' filled' : ''}${entry && onLessonClick ? ' is-interactive' : ''}${dailyPeriods && period > dayCap ? ' unavailable' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
+          role={entry && onLessonClick ? 'button' : undefined}
+          tabIndex={entry && onLessonClick ? 0 : undefined}
+          aria-label={entry && onLessonClick ? `${column.label}第${period}节 ${cellEntries.map((item) => item.subject_name).join(' / ')}` : undefined}
+          onKeyDown={entry && onLessonClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click() } } : undefined}
           onClick={entry && onLessonClick ? (event) => onLessonClick(entry, event) : undefined}
         >
           {dailyPeriods && period > dayCap ? (
@@ -255,7 +259,11 @@ export default function ScheduleGrid({
         cells.push(
           <div
             key={`evening-${row.key}-${column.key}`}
-            className={`st-lesson${cellEntries.length ? ' filled' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
+            className={`st-lesson${cellEntries.length ? ' filled' : ''}${entry && onLessonClick ? ' is-interactive' : ''}${cellHighlightClass(cellEntries)}${isTodayCol ? ' today' : ''}`}
+            role={entry && onLessonClick ? 'button' : undefined}
+            tabIndex={entry && onLessonClick ? 0 : undefined}
+            aria-label={entry && onLessonClick ? `${column.label}${row.sub}晚自习 ${cellEntries.map((item) => item.subject_name).join(' / ')}` : undefined}
+            onKeyDown={entry && onLessonClick ? (event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.currentTarget.click() } } : undefined}
             onClick={entry && onLessonClick ? (event) => onLessonClick(entry, event) : undefined}
           >
             {cellEntries.length ? (

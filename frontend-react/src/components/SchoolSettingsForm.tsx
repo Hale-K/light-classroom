@@ -173,76 +173,68 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         icoColor: 'blue',
         icoName: 'building',
         title: '学校所在省份',
-        subtitle: settings?.name || '学校',
         chipColor: 'blue',
         chipLabel: settings?.province || '未设置',
         modeTag: '',
         desc: settings?.province
-          ? `当前省份为「${settings.province}」，会作为选科方案、考务信息的默认省域。`
-          : '尚未配置学校所在省份，请点击“编辑”选择。',
+          ? '用于选科方案和考务信息。'
+          : '未设置，请编辑。',
       },
       {
         key: 'gaokao_mode' as BasicKey,
         icoColor: 'purple',
         icoName: 'book',
         title: '默认高考模式',
-        subtitle: settings?.code || '租户默认',
         chipColor: 'purple',
         chipLabel: (MODES.find((item) => item.value === settings?.gaokao_mode)?.label) || '未设置',
         modeTag: MODES.find((item) => item.value === settings?.gaokao_mode)?.note || '',
         desc: MODES.find((item) => item.value === settings?.gaokao_mode)
-          ? `全校默认采用「${MODES.find((item) => item.value === settings?.gaokao_mode)?.label}」模式，新建届别自动继承，已建立的届别可独立修改。`
-          : '尚未指定高考模式，请点击“编辑”选择。',
+          ? '新建届别会沿用此模式；已建届别可单独修改。'
+          : '未设置，请编辑。',
       },
       {
         key: 'current_entry_year' as BasicKey,
         icoColor: 'green',
         icoName: 'school' as any,
         title: '当前高一届别',
-        subtitle: curCohort ? `${curCohort.grade_years['高一']} 学年入学` : '届次列表为空',
         chipColor: 'green',
         chipLabel: curCohort?.cohort_label || '未设置',
         modeTag: curCohort ? `高一：${curCohort.grade_years['高一']}` : '',
         desc: curCohort
-          ? `新生入学届别：${curCohort.cohort_label}，对应高一学年 ${curCohort.grade_years['高一']}，高二 ${curCohort.grade_years['高二']}，高三 ${curCohort.grade_years['高三']}。`
-          : '尚未设置当前届别，请到“届次管理”Tab 新建届别并设为当前。',
+          ? `覆盖高一至高三：${curCohort.grade_years['高一']} 至 ${curCohort.grade_years['高三']}`
+          : '未设置，请在“届次管理”中新建。',
       },
       {
         key: 'timetable_mode' as BasicKey,
         icoColor: 'cyan',
         icoName: 'calendar',
         title: '课表模式',
-        subtitle: '决定排课、教学班和学生课表的组织方式',
         chipColor: 'cyan',
         chipLabel: TIMETABLE_MODES.find((item) => item.value === settings?.timetable_mode)?.label || '未设置',
         modeTag: TIMETABLE_MODES.find((item) => item.value === settings?.timetable_mode)?.note || '',
         desc: settings?.timetable_mode === 'walk_class'
-          ? '当前使用选科走班课表，学生最终课表以教学班选课结果为准。'
-          : '当前使用行政班课表，适合按行政班统一安排课程。',
+          ? '学生课表按教学班选课结果生成。'
+          : '按行政班统一安排课程。',
       },
       {
         key: 'current_academic_year' as BasicKey,
         icoColor: 'orange',
         icoName: 'calendar',
         title: '当前学年',
-        subtitle: '排课 / 选科的默认学年',
         chipColor: 'orange',
         chipLabel: currentAcademicYear || '未设置',
         modeTag: '',
-        desc: currentAcademicYear
-          ? `所有学年相关模块默认显示 ${currentAcademicYear}学年 的数据。`
-          : '尚未指定当前学年，请先在届次管理中建立届别。',
+        desc: currentAcademicYear ? '' : '未设置，请先建立届别。',
       },
       {
         key: 'current_term' as BasicKey,
         icoColor: 'pink',
         icoName: 'circle-check',
         title: '当前学期',
-        subtitle: '影响排课、考试、考勤的学期维度',
         chipColor: 'pink',
         chipLabel: currentTerm === '1' ? '上学期' : '下学期',
         modeTag: currentTerm === '1' ? '第 1 学期' : '第 2 学期',
-        desc: `当前处于第 ${currentTerm === '1' ? '一' : '二'} 学期，切换后各学年相关模块的默认学期随之更新。`,
+        desc: '新建排课、考试和考勤默认使用此学期。',
       },
     ]
   }, [settings, academicYears, currentEntryYear, currentAcademicYear, currentTerm])
@@ -410,11 +402,10 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
 
   return (
     <div className="ssf-form-v2">
-      {/* 顶部：大标题 + 说明 */}
+      {/* 顶部标题 */}
       <div className="ssf-page-head">
         <div className="ssf-page-head-title">
           <h1>系统设置</h1>
-          <p>按规则管理学校的学年届次与默认高考模式；配置项一行一条，不再凌乱摆放。</p>
         </div>
       </div>
 
@@ -433,7 +424,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         <div className="ssf-brief-card">
           <span>当前学期</span>
           <strong>第{currentTerm === '1' ? '一' : '二'}学期</strong>
-          <small>高考模式：{MODES.find((m) => m.value === settings.gaokao_mode)?.label}</small>
+          <small>新建排课默认学期</small>
         </div>
       </div>
 
@@ -452,7 +443,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                   <div>配置项</div>
                   <div>当前值</div>
                   <div>标记</div>
-                  <div>说明</div>
+                  <div>影响</div>
                   <div style={{ textAlign: 'right' }}>操作</div>
                 </div>
                 {basicRules.map((rule) => (
@@ -468,7 +459,6 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                             <Tag color="blue">当前</Tag>
                           )}
                         </strong>
-                        <small>{rule.subtitle}</small>
                       </span>
                     </div>
                     <div>

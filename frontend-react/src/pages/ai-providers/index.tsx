@@ -16,6 +16,7 @@ const PROVIDER_PRESETS = [
   { value: 'SILICONFLOW', label: '硅基流动 SiliconFlow', defaultBaseUrl: 'https://api.siliconflow.cn/v1', helpUrl: 'https://cloud.siliconflow.cn/account/ak' },
   { value: 'ZHIPU', label: '智谱 GLM', defaultBaseUrl: 'https://open.bigmodel.cn/api/paas/v4', helpUrl: 'https://open.bigmodel.cn/usercenter/proj-mgmt/apikeys' },
   { value: 'HUNYUAN', label: '腾讯混元', defaultBaseUrl: 'https://api.hunyuan.cloud.tencent.com/v1', helpUrl: 'https://console.cloud.tencent.com/hunyuan/api-key' },
+  { value: 'JIMENG', label: '即梦（火山方舟）', defaultBaseUrl: 'https://ark.cn-beijing.volces.com/api/v3', helpUrl: 'https://jimeng.jianying.com/ai-tool/jimeng-api/console/guide', helpLabel: '查看即梦 API 指南' },
 ]
 
 const MODEL_CATEGORIES = [

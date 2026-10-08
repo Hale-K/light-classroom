@@ -38,6 +38,7 @@ def _run(status: str):
         phase="waiting" if status == "queued" else "done",
         message="排队中" if status == "queued" else "完成",
         events=[],
+        checkpoint={},
         result=None if status == "queued" else {"text": "完成"},
         created_at=now,
         updated_at=now,

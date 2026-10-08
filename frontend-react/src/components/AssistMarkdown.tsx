@@ -2,7 +2,7 @@ import type { ReactNode } from 'react'
 
 /**
  * 助手气泡的轻量 markdown 渲染。
- * 只支持模型约定输出：# 标题、- 列表、1. 列表、- [x]/- [ ] 任务清单、**加粗**、`代码`。
+ * 只支持模型约定输出：# 标题、- 列表、1. 列表、- [x]/- [ ] 任务清单、**加粗**、`代码`、表格。
  * 不渲染链接、图片和 HTML——模型输出不可信，堵住钓鱼与注入面。
  */
 const INLINE_RE = /(\*\*[^*]+\*\*|`[^`]+`)/g
@@ -20,13 +20,47 @@ function inline(text: string, keyBase: string): ReactNode[] {
   })
 }
 
+function splitRow(line: string): string[] {
+  return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
+}
+
+function isSeparatorRow(cells: string[]): boolean {
+  return cells.length > 0 && cells.every((cell) => /^:?-{2,}:?$/.test(cell))
+}
+
 export default function AssistMarkdown({ text }: { text: string }) {
   const lines = (text || '').replace(/\r\n/g, '\n').split('\n')
   const blocks: ReactNode[] = []
   let list: { ordered: boolean; items: string[] } | null = null
   let tasks: { done: boolean; text: string }[] | null = null
+  let table: string[] | null = null
 
   const flush = () => {
+    if (table) {
+      const rows = table.map(splitRow)
+      const header = rows[0]
+      const body = rows.slice(1)
+      if (header.length && body.length && isSeparatorRow(body[0])) {
+        blocks.push(
+          <table className="assist-md-table" key={`b${blocks.length}`}>
+            <thead>
+              <tr>{header.map((cell, i) => <th key={i}>{inline(cell, `h${blocks.length}-${i}`)}</th>)}</tr>
+            </thead>
+            <tbody>
+              {body.slice(1).map((row, r) => (
+                <tr key={r}>{row.map((cell, i) => <td key={i}>{inline(cell, `d${blocks.length}-${r}-${i}`)}</td>)}</tr>
+              ))}
+            </tbody>
+          </table>,
+        )
+      } else {
+        // 不是规范的表头+分隔线结构，按原始行渲染，避免吞内容。
+        for (const raw of table) {
+          blocks.push(<p key={`b${blocks.length}`}>{inline(raw, `p${blocks.length}`)}</p>)
+        }
+      }
+      table = null
+    }
     if (list) {
       const { ordered, items } = list
       blocks.push(
@@ -66,7 +100,13 @@ export default function AssistMarkdown({ text }: { text: string }) {
     const task = bullet?.[1].match(/^\[([xX ])\]\s+(.*)$/)
     const ordered = line.match(/^\s*\d+[.、]\s+(.*)$/)
     const heading = line.match(/^#{1,4}\s+(.*)$/)
-    if (bullet && task) {
+    if (/^\s*\|.*\|\s*$/.test(line) && !bullet && !ordered && !heading) {
+      if (table) table.push(line)
+      else {
+        flush()
+        table = [line]
+      }
+    } else if (bullet && task) {
       if (tasks) tasks.push({ done: task[1] !== ' ', text: task[2] })
       else {
         flush()

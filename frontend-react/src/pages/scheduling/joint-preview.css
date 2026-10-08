@@ -1,0 +1,30 @@
+.joint-preview-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.joint-preview-toolbar .ant-select { width: 320px; max-width: 100%; }
+.joint-preview-filters { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; min-width: 0; }
+.joint-preview-filters label { display: flex; flex-direction: column; gap: 4px; color: var(--text-2); font-size: 12px; max-width: 100%; }
+.joint-preview-filters label .ant-select { width: 260px; max-width: 100%; }
+.joint-preview-filters .joint-grade-filter .ant-select { width: 200px; }
+.joint-student-context { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 12px; padding: 8px 12px; background: var(--surface-2); border-radius: 4px; }
+.joint-student-context > span:last-child { margin-left: auto; color: var(--text-2); font-size: 12px; }
+.joint-preview-note { color: var(--text-2); margin: 12px 0; font-size: 13px; }
+.joint-workload-summary { margin: 4px 0 12px; padding: 10px 12px; color: var(--text-1); background: var(--surface-2); border-radius: var(--radius); font-weight: 500; }
+.joint-preview-grid { width: 100%; max-width: 100%; max-height: 48vh; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius); }
+.joint-preview-grid table { width: 100%; min-width: 840px; border-collapse: separate; border-spacing: 0; table-layout: fixed; }
+.joint-preview-grid th { padding: 12px 8px; background: var(--surface-2); color: var(--text-1); }
+.joint-preview-grid thead th { position: sticky; top: 0; z-index: 1; }
+.joint-preview-grid th:first-child { width: 64px; }
+.joint-preview-grid td { padding: 4px; border-top: 1px solid var(--border); border-left: 1px solid var(--border); vertical-align: top; }
+.joint-lesson { padding: 8px; border-radius: 4px; background: var(--surface-2); border-left: 3px solid var(--primary, #1890ff); min-height: 64px; }
+.joint-lesson.walk { border-left-color: #d89614; }
+.joint-lesson + .joint-lesson { margin-top: 4px; }
+.joint-lesson > div { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+.joint-lesson span { font-size: 11px; color: var(--text-2); }
+.joint-lesson small { display: block; color: var(--text-2); font-size: 11px; margin-top: 4px; overflow-wrap: anywhere; }
+.joint-empty { display: block; text-align: center; color: var(--text-2); padding: 24px 4px; font-size: 12px; }
+.joint-preview-modal .ant-modal-body { max-height: 78vh; overflow-y: auto; }
+.joint-preview-modal .ant-modal-body > .ant-space { display: flex; width: 100%; }
+.joint-preview-modal .ant-modal-body > .ant-space > .ant-space-item { min-width: 0; max-width: 100%; }
+.joint-preview-modal .ant-tabs { min-width: 0; }
+.joint-preview-settings { width: 100%; }
+.joint-preview-settings summary { cursor: pointer; color: var(--text-2); padding: 8px 0; }
+.joint-preview-settings > .ant-space, .joint-preview-settings > .ant-select { margin-bottom: 12px; }

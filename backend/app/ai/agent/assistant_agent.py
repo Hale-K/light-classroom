@@ -14,21 +14,20 @@ from app.ai.agent.models import AssistantTurn
 from app.ai.agent.fallback import text_only_fallback
 from app.ai.agent.context import blocked_destructive_request, last_user_message, trim_turns
 from app.ai.conversations import project_messages, project_summary
+from app.ai.consultation import consultation_reply
 from app.ai.gateway import ModelGatewayService, ToolGatewayService
 from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import fast_reply as _local_fast_reply
 from app.ai.guide import rule_jumps
 from app.ai.harness import HarnessProfile, HarnessRouterService
-from app.ai.intent import AssistantIntent, IntentGatewayService
-from app.ai.intent import IntentGateway
+from app.ai.harness.router import apply_assistant_mode
+from app.ai.intent import IntentGatewayService
 from app.ai.model.chat import ChatError
 from app.ai.resilience import provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.progress import Progress, report_progress
 from app.ai.runtime import AssistantRuntime
-from app.ai.supervisor import SchedulingDiagnosisSupervisor, SchedulingReadinessSupervisor, SupervisorContext, SupervisorTaskContext
 from app.ai.runs.service import RUN_TIMEOUT
-from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +41,8 @@ _FALLBACK_MAX_SPENT = 20
 _TEXT_ONLY_FALLBACK_ERRORS = {"bad_request", "parse", "empty", "context_overflow", "unavailable"}
 # 服务明显活着、只是本轮请求没能完成的类别：保留精确报错抛出，不吞进"服务不可用"的本地文案。
 _PRECISE_FAILURE_CLASSES = {"bad_request", "parse", "empty", "context_overflow", "exhausted"}
+# 意图确实无法归类时的本地澄清话术；不预设用户在报错，避免答非所问的观感。
+CLARIFY_REPLY = "你具体想处理什么问题？可以说明要查的数据或想做的操作，也可以附上相关文件，我再帮你核对。"
 async def agent_reply(
     session: AsyncSession,
     tenant_id: int,
@@ -73,8 +74,9 @@ async def agent_reply(
         on_trace=on_trace,
         circuits=provider_circuits,
     )
-    if harness is None and session is not None:
-        session.info["tenant_id"] = tenant_id
+    if harness is None:
+        if session is not None:
+            session.info["tenant_id"] = tenant_id
         last_user = last_user_message(turns)
         decision = await cast(
             IntentGatewayService, runtime.service("intent_gateway")
@@ -82,6 +84,7 @@ async def agent_reply(
             session, last_user, page_path=page_path, recent_turns=turns,
         )
         harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
+    harness = apply_assistant_mode(harness, page_context)
     model_gateway = cast(ModelGatewayService, runtime.service("model_gateway"))
     tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))
     tool_scope = tool_gateway.open_scope(
@@ -175,10 +178,15 @@ async def handle_assistant_turn(
                 "若要处理具体数据，请说明业务对象和范围，由管理员在对应页面人工操作。"
             )
         )
+    has_materials = bool((page_context or {}).get("reference_materials"))
+    plan_mode = (page_context or {}).get('assistant_mode') == 'plan'
+    fixed_consultation = None if has_materials or plan_mode else consultation_reply(query)
+    if fixed_consultation:
+        return AssistantTurn(text=fixed_consultation)
     # 本地问候是按“最新一条用户消息”判断的。对话带有历史时，重复问候
     # 仍然不需要经过意图分类、向量检索和模型调用，否则简单的“你好”会被
     # 历史上下文拖进完整 Agent 流程。
-    if last.get("role") == "user":
+    if last.get("role") == "user" and not has_materials:
         guide = runtime.service("ui_guide")
         fixed = guide.local_reply(str(last.get("content") or ""), page_path)
         if fixed:
@@ -190,148 +198,23 @@ async def handle_assistant_turn(
         session, query, page_path=page_path, recent_turns=turns,
     )
     await runtime.emit("intent.classified", decision.trace_data())
+    # 分类器拿不准时才本地澄清。本轮带附件或处于计划模式时，问题已有明确的
+    # 分析对象（材料和页面上下文已注入 LLM 消息），兜底反问只会答非所问；
+    # 只读 harness 的指令本就要求模型在范围不明时自行追问。
+    if decision.needs_clarification and not has_materials and not plan_mode:
+        logger.info(
+            "assistant.turn clarify id=%s kind=%s source=%s confidence=%.2f",
+            message_id or "-", decision.kind.value, decision.source, decision.confidence,
+        )
+        return AssistantTurn(text=CLARIFY_REPLY)
     harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
+    harness = apply_assistant_mode(harness, page_context)
     await runtime.emit("harness.selected", harness.trace_data())
-    if harness.name == "direct":
+    if harness.name == "direct" and not has_materials:
         fast = _local_fast_reply(query)
         if fast is not None:
             await runtime.progress("completed", "已快速完成本地计算")
             return AssistantTurn(text=fast, think=["Router 判定为快速处理，未调用模型或工具"])
-    if decision.kind is AssistantIntent.READINESS:
-        from app.api.v1.onboarding import load_onboarding_status
-        from app.ai.supervisor.readiness import preparation_guidance
-
-        await runtime.emit("supervisor.task_started", {"task_id": "prerequisites", "label": "读取学校基础准备清单"})
-        await runtime.progress("preparing", "正在核对学年、教师人员、空间和班级准备情况")
-        preparation = await load_onboarding_status(session, tenant_id)
-        guidance, next_jumps, foundations_ready = preparation_guidance(preparation["data"]["steps"])
-        await runtime.emit("supervisor.task_succeeded", {"task_id": "prerequisites"})
-        if not foundations_ready:
-            await runtime.emit("supervisor.completed", {"kind": "readiness", "failed_tasks": []})
-            return AssistantTurn(text=guidance, jumps=next_jumps)
-        tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))
-        allowed_tools = frozenset().union(*(task.allowed_tools for task in SchedulingReadinessSupervisor.tasks))
-        scope = tool_gateway.open_scope(
-            session=session,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            can_manage_rules=can_manage_rules,
-            page_context=page_context,
-            allowed_tools=allowed_tools,
-            on_trace=on_trace,
-        )
-
-        async def execute_readiness_task(task, task_context: SupervisorTaskContext | None = None):
-            tool_name = next(iter(task_context.allowed_tools if task_context else task.allowed_tools), "")
-            if not tool_name:
-                raise RuntimeError(f"任务 {task.id} 没有配置只读工具")
-            async with AsyncSessionLocal() as task_session:
-                task_scope = tool_gateway.open_scope(
-                    session=task_session, tenant_id=task_context.tenant_id or tenant_id,
-                    user_id=task_context.user_id, can_manage_rules=can_manage_rules,
-                    page_context=page_context, allowed_tools=task_context.allowed_tools,
-                    on_trace=on_trace,
-                )
-                return await task_scope.execute(tool_name, "{}")
-
-        async def trace_readiness(kind: str, data: dict) -> None:
-            await runtime.emit(kind, data)
-
-        report = await cast(SchedulingReadinessSupervisor, runtime.service("readiness_supervisor")).run(
-            execute_readiness_task,
-            context=SupervisorContext(
-                run_id=message_id,
-                request_id=message_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                intent=decision.kind.value,
-                page_path=page_path,
-                allowed_tools=allowed_tools,
-            ),
-            parallel=True,
-            on_event=trace_readiness,
-        )
-        await runtime.emit("supervisor.completed", {
-            "kind": report.kind.value,
-            "failed_tasks": list(report.failed_tasks),
-            "facts": list(report.facts),
-            "missing": list(report.missing),
-            "next_steps": list(report.next_steps),
-        })
-        await runtime.emit("router.review_decision", IntentGateway.review_policy(
-            failed_tasks=report.failed_tasks,
-            missing=report.missing,
-        ).trace_data())
-        return AssistantTurn(
-            text=guidance + "\n\n### 排课细项检查\n\n" + (report.summary or "排课细项没有返回结果，请稍后重试。"),
-            think=[
-                f"已完成 {len(report.results)} 项排课准备检查",
-                *([f"检查失败：{'、'.join(report.failed_tasks)}"] if report.failed_tasks else []),
-            ],
-            jumps=next_jumps,
-        )
-    if decision.kind is AssistantIntent.DIAGNOSIS:
-        tool_gateway = cast(ToolGatewayService, runtime.service("tool_gateway"))
-        allowed_tools = frozenset().union(*(task.allowed_tools for task in SchedulingDiagnosisSupervisor.tasks))
-        scope = tool_gateway.open_scope(
-            session=session,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            can_manage_rules=can_manage_rules,
-            page_context=page_context,
-            allowed_tools=allowed_tools,
-            on_trace=on_trace,
-        )
-
-        async def execute_diagnosis_task(task, task_context: SupervisorTaskContext | None = None):
-            tool_name = next(iter(task_context.allowed_tools if task_context else task.allowed_tools), "")
-            if not tool_name:
-                raise RuntimeError(f"任务 {task.id} 没有配置只读工具")
-            async with AsyncSessionLocal() as task_session:
-                task_scope = tool_gateway.open_scope(
-                    session=task_session, tenant_id=task_context.tenant_id or tenant_id,
-                    user_id=task_context.user_id, can_manage_rules=can_manage_rules,
-                    page_context=page_context, allowed_tools=task_context.allowed_tools,
-                    on_trace=on_trace,
-                )
-                return await task_scope.execute(tool_name, "{}")
-
-        async def trace_diagnosis(kind: str, data: dict) -> None:
-            await runtime.emit(kind, data)
-
-        report = await cast(SchedulingDiagnosisSupervisor, runtime.service("diagnosis_supervisor")).run(
-            execute_diagnosis_task,
-            context=SupervisorContext(
-                run_id=message_id,
-                request_id=message_id,
-                tenant_id=tenant_id,
-                user_id=user_id,
-                intent=decision.kind.value,
-                page_path=page_path,
-                allowed_tools=allowed_tools,
-            ),
-            parallel=True,
-            on_event=trace_diagnosis,
-        )
-        await runtime.emit("supervisor.completed", {
-            "kind": report.kind.value,
-            "failed_tasks": list(report.failed_tasks),
-            "facts": list(report.facts),
-            "missing": list(report.missing),
-            "next_steps": list(report.next_steps),
-        })
-        await runtime.emit("router.review_decision", IntentGateway.review_policy(
-            failed_tasks=report.failed_tasks,
-            missing=report.missing,
-        ).trace_data())
-        return AssistantTurn(
-            text=report.summary or "排课诊断没有返回结果，请到排课页查看任务记录。",
-            think=[
-                f"已收集 {len(report.results)} 项排课诊断证据",
-                *([f"检查失败：{'、'.join(report.failed_tasks)}"] if report.failed_tasks else []),
-            ],
-            jumps=rule_jumps(query, report.summary, page_path),
-        )
     retrieved = ""
     knowledge_base_id = (page_context or {}).get("knowledge_base_id")
     if knowledge_base_id:

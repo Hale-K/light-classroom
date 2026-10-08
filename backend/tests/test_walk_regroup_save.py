@@ -11,6 +11,45 @@ def test_partitions_cover_arbitrary_admin_ids_and_respect_capacity():
     assert all(sum(counts[c] for c in b if b[c] == g) <= 135 for g in excluded)
 
 
+def test_regroup_keeps_configured_teacher_by_subject_class_sequence():
+    from types import SimpleNamespace
+    from app.services.scheduling.walk_regroup_save import fixed_walk_class_mapping, fixed_walk_teacher_mapping
+    existing = [
+        SimpleNamespace(id=1001, subject_id=10, sequence=1, teacher_id=501, name='政治走班01'),
+        SimpleNamespace(id=1002, subject_id=10, sequence=2, teacher_id=502, name='政治走班02'),
+    ]
+    generated = [
+        {'id': 21, 'subject_id': 10},
+        {'id': 22, 'subject_id': 10},
+    ]
+    assert fixed_walk_teacher_mapping(existing, generated) == {21: 501, 22: 502}
+    assert fixed_walk_class_mapping(existing, generated) == (
+        {21: 501, 22: 502}, {21: 1001, 22: 1002},
+    )
+
+
+def test_regroup_refuses_to_silently_change_teacher_assignment_count():
+    from types import SimpleNamespace
+    from app.services.scheduling.walk_regroup_save import fixed_walk_teacher_mapping
+    existing = [SimpleNamespace(id=1001, subject_id=10, sequence=1, teacher_id=501, name='政治走班01')]
+    generated = [{'id': 21, 'subject_id': 10}, {'id': 22, 'subject_id': 10}]
+    with pytest.raises(ValueError, match='为避免擅自调整老师'):
+        fixed_walk_teacher_mapping(existing, generated)
+
+
+def test_balanced_rosters_keep_the_selected_existing_class_identity_and_teacher():
+    from types import SimpleNamespace
+    from app.services.scheduling.walk_regroup_save import fixed_walk_class_mapping
+    existing = [SimpleNamespace(id=1001, subject_id=10, sequence=1, teacher_id=501, name='政治01'),
+                SimpleNamespace(id=1002, subject_id=10, sequence=2, teacher_id=502, name='政治02')]
+    generated = [{'id': 1, 'subject_id': 10, 'configured_class_id': 1002},
+                 {'id': 2, 'subject_id': 10, 'configured_class_id': 1001}]
+    assert fixed_walk_class_mapping(existing, generated) == ({1: 502, 2: 501}, {1: 1002, 2: 1001})
+    generated[1]['configured_class_id'] = 1002
+    with pytest.raises(ValueError, match='对应关系不完整'):
+        fixed_walk_class_mapping(existing, generated)
+
+
 def test_fingerprint_detects_changes_and_is_order_independent():
     assert fingerprint({'a': 1, 'b': [2]}) == fingerprint({'b': [2], 'a': 1})
     assert fingerprint({'a': 1}) != fingerprint({'a': 2})
@@ -80,6 +119,13 @@ def test_save_input_requires_explicit_replacement_confirmation():
         WalkRegroupSaveIn(grade_id=12, academic_year='2026-2027', term='2', preview_token='t')
 
 
+def test_joint_preview_defaults_to_five_student_capacity_overflow():
+    from app.api.v1.gaokao import WalkRegroupAutoIn
+    body = WalkRegroupAutoIn(grade_id=12, academic_year='2026-2027', term='2')
+    assert body.capacity == 45
+    assert body.capacity_overflow == 5
+
+
 @pytest.mark.asyncio
 async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students(monkeypatch):
     from sqlalchemy import create_engine, select
@@ -106,7 +152,8 @@ async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students
                 academic_year='2026-2027', term='2', weekly_periods=4)])
         for cid, term, tenant in [(1, '2', 7), (2, '1', 7), (3, '2', 8)]:
             db.add(TeachingClass(id=cid, tenant_id=tenant, grade_id=12, subject_id=25,
-                sequence=cid, name=f'旧班{cid}', academic_year='2026-2027', term=term))
+                sequence=1, name=f'旧班{cid}', academic_year='2026-2027', term=term,
+                teacher_id=500 if cid == 1 else None, capacity=45))
             db.add(TeachingClassStudent(tenant_id=tenant, teaching_class_id=cid, student_id=1))
             db.add(TeachingClassSchedule(tenant_id=tenant, teaching_class_id=cid, subject_id=25,
                 academic_year='2026-2027', term=term, weekday=1, period=1))
@@ -127,7 +174,8 @@ async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students
         monkeypatch.setattr(scheduling, '_load_rule_catalog', load)
         body = WalkRegroupSaveIn(grade_id=12, academic_year='2026-2027', term='2',
                                 preview_token='t', confirm_replace=True)
-        candidate = {'a_groups': {101: 0}, 'classes': [{'id': 1, 'subject_id': 25, 'capacity': 45}],
+        candidate = {'a_groups': {101: 0}, 'classes': [{'id': 1, 'subject_id': 25, 'capacity': 50,
+                    'size': 1}], 'class_id_map': {'1': 1},
             'members': [[1, 1]], 'calendar': {'teachers': {'1': 500}, 'public': [
                 {'class_id': 101, 'subject_id': 25, 'teacher_id': 500, 'weekday': 1, 'period': 2, 'room': '本班'}]},
             'placements': [{'teaching_class_id': 1, 'subject_id': 25, 'teacher_id': 500,
@@ -137,7 +185,17 @@ async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students
         assert result['saved'] is True
         assert db.get(Student, 1).class_id == 101
         all_classes = db.execute(select(TeachingClass)).scalars().all()
-        assert sorted(c.name for c in all_classes) == ['旧班2', '旧班3', '高一地理走班01']
+        assert sorted(c.name for c in all_classes) == ['旧班1', '旧班2', '旧班3']
+        assert db.get(TeachingClass, 1).teacher_id == 500
+        assert db.get(TeachingClass, 1).capacity == 50
+        memberships = db.execute(select(TeachingClassStudent).where(
+            TeachingClassStudent.tenant_id == 7,
+            TeachingClassStudent.teaching_class_id == 1)).scalars().all()
+        assert [row.student_id for row in memberships] == [1]
+        saved_walk = db.execute(select(TeachingClassSchedule).where(
+            TeachingClassSchedule.tenant_id == 7,
+            TeachingClassSchedule.teaching_class_id == 1)).scalars().all()
+        assert len(saved_walk) == 1 and saved_walk[0].teaching_class_id == 1
         assert sorted((r.tenant_id, r.term, r.period) for r in db.execute(select(Schedule)).scalars()) == [
             (7, '1', 1), (7, '2', 2), (8, '2', 1)]
         keys = [r.config_key for r in db.execute(select(TenantConfig)).scalars()]
@@ -149,5 +207,5 @@ async def test_atomic_replacement_preserves_upper_term_other_tenant_and_students
         await persist_candidate(body, candidate, Adapter(), 7, 100)
         db.rollback()
         assert sorted(c.name for c in db.execute(select(TeachingClass)).scalars()) == [
-            '旧班2', '旧班3', '高一地理走班01']
+            '旧班1', '旧班2', '旧班3']
     engine.dispose()

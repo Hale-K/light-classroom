@@ -1,13 +1,14 @@
 """Tool Gateway: per-turn authorization, dispatch, proposal state, and audit."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.actions import PROPOSE_RULES_TOOL, RulesProposal, action_view, propose_rules
 from app.ai.runs.events import TraceCallback
 from app.ai.tools.school import SCHOOL_TOOLS, _term, execute_school_tool
+from app.ai.harness.router import GUIDE_HARNESS
 
 
 @dataclass
@@ -22,10 +23,17 @@ class ToolScope:
     allowed_tools: frozenset[str] | None = None
     on_trace: TraceCallback | None = None
     plan: dict | None = None
+    _plan_mode: bool = field(init=False, default=False)
+
+    def __post_init__(self):
+        # Snapshot request mode once: neither later page metadata nor model output can unlock it.
+        self._plan_mode = (self.page_context or {}).get('assistant_mode') == 'plan'
 
     @property
     def definitions(self) -> list[dict]:
         tools = [*SCHOOL_TOOLS, *([PROPOSE_RULES_TOOL] if self.can_manage_rules else [])]
+        if self._plan_mode:
+            tools = [item for item in tools if item['function']['name'] in GUIDE_HARNESS.allowed_tools]
         if self.allowed_tools is None:
             return tools
         return [item for item in tools if item["function"]["name"] in self.allowed_tools]
@@ -47,6 +55,8 @@ class ToolScope:
         return await self._propose_rules(arguments)
 
     async def _propose_rules(self, arguments: str) -> str:
+        if self._plan_mode:
+            return '计划模式仅提供方案，已拒绝生成规则草稿。'
         if not self.can_manage_rules or self.user_id is None:
             return "当前账号没有排课配置权限，请由教务管理员确认配置。"
         if self.plan is not None:

@@ -35,6 +35,7 @@ import CourseHoursPanel from './hours-management'
 import SlotStructurePanel from './SlotStructurePanel'
 import WalkSchedulePanel from './WalkSchedulePanel'
 import JointScheduling from './JointScheduling'
+import SchedulingReadinessCard from './SchedulingReadinessCard'
 import WalkTeachingAssignments from './walk-teaching-assignments'
 import {
   BUILTIN_PERIOD_PLANS,
@@ -54,6 +55,7 @@ import {
   localDateValue,
   normalizeGridConfig,
   parseGenerationDiagnosis,
+  resolveScheduleClassId,
   type GenerationDiagnosis,
   type GenTraceEvent,
 } from './scheduling-model'
@@ -1133,6 +1135,7 @@ export default function SchedulingView() {
   }, [academicYear, term])
 
   const openGenerationRulePreview = async () => {
+    if (jointSupported) return
     try {
       const gradeList = grades.length ? grades : await orgApi.grades().catch(() => [] as Grade[])
       if (!grades.length && gradeList.length) setGrades(gradeList)
@@ -1363,27 +1366,7 @@ export default function SchedulingView() {
         title="排课管理"
         extra={
           <Space wrap>
-          {jointSupported && <>
-            <Select aria-label="联合排课年级" value={gridGradeId} placeholder="选择年级" style={{ width: 180 }}
-              disabled={generating} options={grades.map((grade) => ({ value: grade.id, label: grade.name }))}
-              onChange={selectGrade} />
-            <Tooltip title={!jointReady ? '请先在学生选课中确认选科；也请核对当前年级和学期' : undefined}>
-              <span><JointScheduling key={`${gridGradeId}-${academicYear}-${term}`} gradeId={gridGradeId}
-                gradeName={grades.find((grade) => grade.id === gridGradeId)?.name}
-                academicYear={academicYear} term={term} disabled={generating || !jointReady}
-                onSaved={() => {
-                  setJointSaved(true)
-                  setJointRevision((value) => value + 1)
-                  setRuleCatalogEpoch((value) => value + 1)
-                  void loadResources()
-                  void loadTable()
-                  void loadVersions()
-                  const next = new URLSearchParams(searchParams)
-                  next.set('tab', 'schedule')
-                  setSearchParams(next)
-                }} /></span>
-            </Tooltip>
-          </>}
+          {jointSupported && jointSaved && <Tag color="success">联合课表已保存</Tag>}
           {activeTab === 'assignments' && assignmentMode === 'admin' && (
             <Button
               type={jointSupported ? 'default' : 'primary'}
@@ -1397,10 +1380,7 @@ export default function SchedulingView() {
           </Space>
         }
       />
-      {jointSupported && <p className="sk-workflow-hint">
-        核对课时、课位、任教和规则 → 联合排课预览 → 确认保存 → 查询课表
-        {jointSaved && <Tag color="success" style={{ marginLeft: 12 }}>联合课表已保存</Tag>}
-      </p>}
+      <SchedulingReadinessCard />
       {genStage !== 'idle' && (
         <section
           className={`sk-status${genStage === 'blocked' || genStage === 'error' ? ' sk-status-fail' : genStage === 'done' ? ' sk-status-done' : ''}`}
@@ -1559,7 +1539,6 @@ export default function SchedulingView() {
                 classId={selectedClassId}
                 onClassChange={selectClass}
                 classOptions={resources.classes.map(classOption)}
-                onInherited={loadResources}
                 daytimeCapacity={gridConfigured ? daytimeSlotCapacity(gridConfig) : undefined}
               />
             ),
@@ -1818,14 +1797,40 @@ export default function SchedulingView() {
             disabled: !gridConfigured,
             children: (
               <>
-              {timetableMode === 'walk_class' && (
-                <Segmented
-                  value={scheduleViewMode}
-                  options={[{ label: '行政班课表', value: 'administrative' }, { label: '走班课表', value: 'walk' }]}
-                  onChange={(value) => setScheduleViewMode(value as 'administrative' | 'walk')}
-                  style={{ marginBottom: 16 }}
-                />
-              )}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+                {timetableMode === 'walk_class' ? (
+                  <Segmented
+                    value={scheduleViewMode}
+                    options={[{ label: '行政班课表', value: 'administrative' }, { label: '走班课表', value: 'walk' }]}
+                    onChange={(value) => setScheduleViewMode(value as 'administrative' | 'walk')}
+                  />
+                ) : <span />}
+                {jointSupported && <Space wrap>
+                  <Select aria-label="联合排课年级" value={gridGradeId} placeholder="选择年级" style={{ width: 180 }}
+                    disabled={generating} options={grades.map((grade) => ({ value: grade.id, label: grade.name }))}
+                    onChange={selectGrade} />
+                  <Tooltip title={!jointReady ? '请先在学生选课中确认选科；也请核对当前年级和学期' : undefined}>
+                    <span><JointScheduling key={`${gridGradeId}-${academicYear}-${term}`} gradeId={gridGradeId}
+                      gradeName={grades.find((grade) => grade.id === gridGradeId)?.name}
+                      gradeOptions={grades.map(grade => ({ value: grade.id, label: grade.name }))}
+                      academicYear={academicYear} term={term} disabled={generating || !jointReady}
+                      onSaved={(savedGradeId) => {
+                        const savedClassId = resources.classes.find((item) => item.grade_id === savedGradeId)?.id
+                        if (savedGradeId !== gridGradeId) selectGrade(savedGradeId)
+                        setJointSaved(true)
+                        setJointRevision((value) => value + 1)
+                        setRuleCatalogEpoch((value) => value + 1)
+                        void loadResources()
+                        void loadTable(savedClassId)
+                        void loadVersions()
+                        const next = new URLSearchParams(searchParams)
+                        next.set('tab', 'schedule')
+                        next.set('grade', String(savedGradeId))
+                        setSearchParams(next)
+                      }} /></span>
+                  </Tooltip>
+                </Space>}
+              </div>
               {timetableMode === 'walk_class' && scheduleViewMode === 'walk' ? (
                 <WalkSchedulePanel
                   key={jointRevision}
@@ -1881,9 +1886,7 @@ export default function SchedulingView() {
                         ) : null}
                       </Button>
                     </Dropdown>
-                    {jointSupported ? <Dropdown trigger={['click']} menu={{ items: [{ key: 'admin', label: '单独生成行政课表',
-                      disabled: generating || !gridConfigured, onClick: openGenerationRulePreview,
-                    }] }}><Button disabled={generating}>高级操作</Button></Dropdown> : <Button
+                    {!jointSupported && <Button
                       type="primary"
                       loading={generating}
                       disabled={generating || !gridConfigured}
@@ -1934,16 +1937,21 @@ export default function SchedulingView() {
                     <EmptyState icon="calendar" title="课表加载中…" height={320} />
                   </div>
                 ) : (() => {
-                  const viewClassId = selectedClassId ?? resources.classes[0]?.id
+                  const viewClassId = resolveScheduleClassId(
+                    selectedClassId,
+                    gridGradeId,
+                    resources.classes,
+                  )
                   const entries = viewClassId
                     ? calendar.filter((item) => item.class_id === viewClassId)
                     : []
                   if (!viewClassId) {
+                    const hasClassesInGrade = resources.classes.some((item) => item.grade_id === gridGradeId)
                     return (
                       <EmptyState
                         icon="calendar"
-                        title="暂无班级"
-                        desc="请先在组织架构中配置班级。"
+                        title={hasClassesInGrade ? '请选择班级' : '该年级暂无班级'}
+                        desc={hasClassesInGrade ? '选择班级后查看对应课表。' : '当前年级没有可显示的班级课表。'}
                         height={260}
                       />
                     )
@@ -1963,7 +1971,7 @@ export default function SchedulingView() {
                       <EmptyState
                         icon="calendar"
                         title={`${selectedClassName}还没有课表`}
-                        desc="该班尚未排入课程，可切换其他班级查看，或重新生成课表。"
+                        desc={jointSupported ? '该班尚未排入课程，可切换其他班级查看，或使用页首「联合排课」。' : '该班尚未排入课程，可切换其他班级查看，或重新生成课表。'}
                         height={260}
                       />
                     )

@@ -977,3 +977,45 @@ export interface MenuPermissionBinding {
   permission_codes: string[];
   configured: boolean;
 }
+
+/** 课件（文件 / AI 互动课件 / 外部链接） */
+export interface CoursewareInfo {
+  id: number;
+  title: string;
+  courseware_type: "file" | "html" | "link";
+  stage: string;
+  grade_name: string;
+  subject_name: string;
+  textbook_version: string;
+  chapter: string;
+  file_name: string;
+  file_size: number;
+  content_type: string;
+  source_url: string;
+  origin: "upload" | "ai";
+  tags: string[];
+  remark: string;
+  created_by: number | null;
+  created_by_name: string;
+  created_at: string;
+  updated_at: string;
+  html_content?: string | null;
+}
+
+/** 学段目录（年级 + 学科） */
+export interface CourseCatalogStage {
+  name: string;
+  grades: string[];
+  subjects: string[];
+}
+
+/** 小学到高三标准课程目录 */
+export interface CourseCatalog {
+  stages: CourseCatalogStage[];
+  textbook_versions: string[];
+}
+
+/** AI 配图结果（附临时预签名地址） */
+export interface GeneratedImageInfo extends CoursewareInfo {
+  url: string;
+}

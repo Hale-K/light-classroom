@@ -26,6 +26,11 @@ JEV_TOOL_HINTS = {
     "rules": frozenset({"lookup_rules"}),
     "generation_status": frozenset({"lookup_generation_status"}),
     "playbook": frozenset({"lookup_playbook"}),
+    "walk_classes": frozenset({"lookup_walk_classes"}),
+    "generation_log": frozenset({"lookup_generation_log"}),
+    "subject_capacity": frozenset({"lookup_subject_capacity"}),
+    "remaining_capacity": frozenset({"lookup_remaining_capacity"}),
+    "slot_role_capacity": frozenset({"lookup_slot_role_capacity"}),
 }
 
 
@@ -87,10 +92,10 @@ class JevDecisionClassifier:
             "questions": {
                 "intent": {
                     "type": "choice",
-                    "instructions": "选择最适合处理这条教务助手请求的意图。",
+                    "instructions": "以最新用户消息为准，历史只用于理解指代。模糊求助或指代不清时选择 unknown 并澄清，不自动检查全校。单项数据查询选择 guide 和对应工具；明确检查整体排课准备选择 readiness，明确要求分析失败原因选择 diagnosis。不要因历史准备清单改变当前问题的意图。询问当前页面有什么内容、功能或作用，以及要求阅读分析已上传的附件资料，都属于 guide，不算模糊。",
                     "criteria": {
-                        "guide": "普通问答、使用说明、简单寒暄，不需要读取学校业务数据",
-                        "readiness": "检查排课前置条件、教师、教室、班级、规则等是否准备完成",
+                        "guide": "普通问答、使用说明、简单寒暄，查询教师任课、课时、规则、任务状态等单项学校数据，或询问当前页面有什么内容、功能和作用",
+                        "readiness": "明确要求检查整体排课前置条件是否准备完成，不包含单项数据查询",
                         "diagnosis": "诊断排课问题、课表冲突、资源不足或异常原因",
                         "configuration": "创建或修改排课规则、人员、空间、课表等业务配置",
                         "unknown": "无法可靠归类或需要用户补充信息",
@@ -100,7 +105,12 @@ class JevDecisionClassifier:
                     "type": "choice",
                     "instructions": "选择回答这个问题最主要需要的查询工具；如果需要多个工具或无需工具，选择 all。",
                     "criteria": {
-                        "teachers": "查询教师、任教关系或教师工作量",
+                        "teachers": "查询教师名册、行政任课关系或班主任；走班人数与工作量用 walk_classes",
+                        "walk_classes": "核对走班班数、班额、学生人数、固定任课、配置课时、已排课节及同科教师人数工作量",
+                        "generation_log": "读取已有任务求解阶段和失败过程原文",
+                        "subject_capacity": "验算科目课时需求与限排课位、教师并行容量",
+                        "remaining_capacity": "核对班级课时需求与剩余课位",
+                        "slot_role_capacity": "验算要求班主任等指定角色授课的硬规则是否有足够课时",
                         "schedule_setup": "查询课时、课位、班级或排课准备状态",
                         "rules": "查询已有排课规则或规则组",
                         "generation_status": "查询课表生成任务是否运行、失败或完成",
@@ -141,8 +151,8 @@ class JevDecisionClassifier:
             )
             route = {
                 AssistantIntent.GUIDE: AssistantRoute.AGENT,
-                AssistantIntent.READINESS: AssistantRoute.SUPERVISOR,
-                AssistantIntent.DIAGNOSIS: AssistantRoute.SUPERVISOR,
+                AssistantIntent.READINESS: AssistantRoute.AGENT,
+                AssistantIntent.DIAGNOSIS: AssistantRoute.AGENT,
                 AssistantIntent.CONFIGURATION: AssistantRoute.HUMAN_REVIEW,
             }.get(kind, AssistantRoute.AGENT)
             logger.info(

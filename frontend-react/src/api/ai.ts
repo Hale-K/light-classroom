@@ -1,5 +1,6 @@
 /** ai 领域 API（由 api/index.ts 拆分）。 */
 import { http, unwrap } from './http'
+import type { AssistantMaterial } from '@/assistant/materials'
 
 export type AiProvider = {
   id: number
@@ -94,6 +95,11 @@ export type AssistantConversation = {
 }
 
 export const assistantApi = {
+  readAttachment: (file: File, signal?: AbortSignal) => {
+    const data = new FormData()
+    data.append('file', file)
+    return unwrap<AssistantMaterial>(http.post('/assistant/attachments/read', data, { timeout: 30000, signal }))
+  },
   conversation: () => unwrap<AssistantConversation>(http.get('/assistant/conversation', { timeout: 5000 })),
   saveConversation: (messages: AssistantConversation['messages']) =>
     unwrap<AssistantConversation>(http.put('/assistant/conversation', { messages }, { timeout: 5000 })),

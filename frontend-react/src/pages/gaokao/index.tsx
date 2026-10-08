@@ -136,7 +136,7 @@ export default function GaokaoView() {
       }
       setGenerationOpen(false)
       setGenerationPreview(undefined)
-      message.success(`已生成 ${result.created} 个教学班`)
+      message.success(`已生成 ${result.created} 个教学班，学生将在联合排课时分入`)
       await load()
       setResultsOpen(true)
     } catch (e) {
@@ -194,10 +194,10 @@ export default function GaokaoView() {
           isWalkClass && !canReviewChoices ? (
             <>
               <Button disabled={!gradeId} onClick={() => setResultsOpen(true)}>查看教学班结果</Button>
-              <Dropdown trigger={['click']} menu={{ items: [{ key: 'classes', label: '单独生成教学班',
+              <Dropdown trigger={['click']} menu={{ items: [{ key: 'classes', label: '只生成教学班（暂不分学生）',
                 disabled: !workflow?.can_generate_teaching_classes || Boolean(generating),
                 onClick: () => { setGenerationPreview(undefined); setReplaceExisting(false); setGenerationOpen(true) },
-              }] }}><Button>高级操作</Button></Dropdown>
+              }] }}><Button>教学班生成</Button></Dropdown>
               <Button type="primary" disabled={!gradeId || !academicContextReady}
                 onClick={() => navigate(`/scheduling?tab=hours&grade=${gradeId}`)}>去排课管理</Button>
             </>
@@ -206,23 +206,23 @@ export default function GaokaoView() {
       />
       {resultsOpen && gradeId && <TeachingClassResults gradeId={gradeId} academicYear={academicYear} term={term}
         gradeName={overview?.grades.find((grade) => grade.id === gradeId)?.name} onClose={() => setResultsOpen(false)} />}
-      <Modal title="按选科生成教学班" open={generationOpen} width={820}
+      <Modal title="教学班生成" open={generationOpen} width={820}
         onCancel={() => { if (generating !== 'classes') setGenerationOpen(false) }} footer={<Space>
           <Button disabled={generating === 'classes'} onClick={() => setGenerationOpen(false)}>取消</Button>
           <Button loading={generating === 'classes'} onClick={() => void generateClasses(true)}>预览方案</Button>
           <Button type="primary" loading={generating === 'classes'} disabled={!generationPreview?.preview_token || Boolean(generationPreview.existing_class_count && !replaceExisting)}
-            onClick={() => void generateClasses(false)}>确认生成</Button>
+            onClick={() => void generateClasses(false)}>生成教学班</Button>
         </Space>}>
         <p>{academicYear} · 第 {term} 学期 · {overview?.grades.find((grade) => grade.id === gradeId)?.name}</p>
         <Space>每班人数上限<InputNumber aria-label="教学班人数上限" min={20} max={60} precision={0} value={capacity} disabled={generating === 'classes'}
           onChange={(value) => { setCapacity(value ?? 40); setGenerationPreview(undefined); setReplaceExisting(false) }} />人</Space>
-        <p>按科目人数确定班数后均衡分班，各班人数最多相差 1 人。课时读取当前年级本学期方案，教师和教室随后安排。</p>
+        <p>按已确认选科人数和班额创建教学班，人数均衡；此步骤不分配学生。学生分班和课表将在联合排课时确定并保存。</p>
         {generationPreview && <>
           <Alert type="info" showIcon message={`计划生成 ${generationPreview.created} 个教学班；本学期可用共享教室 ${generationPreview.available_room_count ?? 0} 间。教室按需使用，不要求全部用满。`} />
           {generationPreview.warnings?.map((warning) => <Alert key={warning} type="warning" showIcon message={warning} style={{ marginTop: 8 }} />)}
           <Table rowKey={(row) => `${row.subject_id}-${row.sequence}`} size="small" style={{ marginTop: 12 }} dataSource={generationPreview.classes} pagination={{ pageSize: 8 }} columns={[
             { title: '科目', dataIndex: 'subject_name' }, { title: '教学班序号', dataIndex: 'sequence' },
-            { title: '人数', dataIndex: 'student_count' }, { title: '每周课时', dataIndex: 'weekly_periods' },
+            { title: '预计人数', dataIndex: 'student_count' }, { title: '每周课时', dataIndex: 'weekly_periods' },
           ]} />
           {Boolean(generationPreview.existing_class_count) && <>
             <Alert type="warning" showIcon message={`已有 ${generationPreview.existing_class_count} 个教学班。替换会删除原班成员、教师和教室安排及已有走班课表，单班课时调整不会保留。`} />

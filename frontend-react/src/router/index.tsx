@@ -31,6 +31,8 @@ import SchoolSettingsView from '@/pages/settings'
 import SubjectManagementView from '@/pages/subjects'
 import TeacherProfilesView from '@/pages/teacher-profiles'
 import FileCenterView from '@/pages/file-center'
+import CoursewareView from '@/pages/courseware'
+import CoursewareStudio from '@/pages/courseware/Studio'
 import AiProvidersView from '@/pages/ai-providers'
 import KnowledgeView from '@/pages/knowledge'
 import TeacherModulePlaceholder from '@/pages/dashboard/TeacherModulePlaceholder'
@@ -118,6 +120,8 @@ export const router = createBrowserRouter([
           { path: 'teacher-students', element: <TeacherStudents /> },
           { path: 'onboarding', element: <OnboardingView /> },
           { path: 'file-center', element: <FileCenterView /> },
+          { path: 'courseware/studio', element: <CoursewareStudio /> },
+          { path: 'courseware', element: <CoursewareView /> },
           { path: 'ai-providers', element: <AiProvidersView /> },
           { path: 'knowledge', element: <KnowledgeView /> },
           { path: 'students', element: <StudentsView /> },

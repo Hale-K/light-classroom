@@ -32,6 +32,8 @@ async def test_chat_projects_transport_notices_before_agent_call(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_start_run_uses_projected_memory_and_only_spawns_new_run(monkeypatch):
+    monkeypatch.setattr(gateway_module, "remember_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(gateway_module, "memory_context", AsyncMock(return_value=""))
     monkeypatch.setattr(
         gateway_module,
         "get_conversation",
@@ -51,13 +53,17 @@ async def test_start_run_uses_projected_memory_and_only_spawns_new_run(monkeypat
 
     assert result["status"] == "running"
     payload = create.await_args.args[4]
-    assert payload["memory_summary"] == "用户：继续核对"
+    assert payload["memory_summary"].startswith("用户：继续核对")
+    assert "Network Error" not in payload["memory_summary"]
+    assert payload["context_state"]["latest_request"] == "继续"
     assert payload["page_path"] == "/scheduling"
     spawn.assert_called_once_with("a" * 32, 1, 2, payload)
 
 
 @pytest.mark.asyncio
 async def test_existing_run_is_not_spawned_twice(monkeypatch):
+    monkeypatch.setattr(gateway_module, "remember_messages", AsyncMock(return_value=[]))
+    monkeypatch.setattr(gateway_module, "memory_context", AsyncMock(return_value=""))
     monkeypatch.setattr(gateway_module, "get_conversation", AsyncMock(return_value=None))
     monkeypatch.setattr(
         gateway_module,

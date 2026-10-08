@@ -29,12 +29,14 @@ export default function OnboardingView() {
     refresh()
   }, [refresh])
 
-  const doneCount = steps.filter((s) => s.done).length
-  const total = steps.length || 1
+  const requiredSteps = steps.filter((step) => step.required !== false)
+  const optionalSteps = steps.filter((step) => step.required === false)
+  const doneCount = requiredSteps.filter((s) => s.done).length
+  const total = requiredSteps.length || 1
   const allDone = loaded && steps.length > 0 && doneCount === total
-  const firstPending = steps.findIndex((s) => !s.done)
-  const pending = steps.filter((s) => !s.done)
-  const doneSteps = steps.filter((s) => s.done)
+  const firstPendingKey = requiredSteps.find((s) => !s.done)?.key
+  const pending = requiredSteps.filter((s) => !s.done)
+  const doneSteps = requiredSteps.filter((s) => s.done)
 
   const skip = () => {
     void onboardingApi.dismiss().catch(() => undefined)
@@ -54,7 +56,7 @@ export default function OnboardingView() {
       <section className="ob-banner">
         <div className="ob-banner-copy">
           <h1>{audience === 'head_teacher' ? '班主任工作引导' : audience === 'subject_teacher' ? '任课教师工作引导' : '按步骤准备排课基础数据'}</h1>
-          <p>{audience === 'head_teacher' ? '从班级、学生到选科审核，快速完成班主任日常工作。' : audience === 'subject_teacher' ? '从课程、备课到课表和成绩，快速进入任课教师工作流程。' : '核对学年学期，准备教师人员，建全空间并完成资源分配与班级划分，再配置课位、课时、任教和规则，最后生成课表。'}</p>
+          <p>{audience === 'head_teacher' ? '从班级、学生到选科审核，快速完成班主任日常工作。' : audience === 'subject_teacher' ? '从课程、备课到课表和成绩，快速进入任课教师工作流程。' : '核对学年学期，准备教师人员，建全空间并完成资源分配与班级划分，再配置课位、课时和任教关系；特殊要求可按需添加规则，最后生成课表。'}</p>
           <div className="ob-banner-tips">
             <span>✓ 建议按顺序完成</span>
             {historyYear && !allDone && (
@@ -101,7 +103,7 @@ export default function OnboardingView() {
       <section className="ob-cards">
         {pending.map((step) => {
           const order = steps.indexOf(step)
-          const isNext = order === firstPending
+          const isNext = step.key === firstPendingKey
           return (
             <article key={step.key} className={`ob-card${isNext ? ' is-next' : ''}`}>
               <span className="ob-card-icon"><Icon name="sparkles" size={20} /></span>
@@ -132,6 +134,17 @@ export default function OnboardingView() {
               ))}
             </ul>
           </article>
+        )}
+        {optionalSteps.length > 0 && (
+          <section className="ob-optional-card" aria-label="可选准备项">
+            <header>按需设置</header>
+            {optionalSteps.map((step) => (
+              <article key={step.key}>
+                <div><strong>{step.title}</strong><p>{step.detail}</p></div>
+                <button type="button" onClick={() => navigate(step.path)}>查看设置</button>
+              </article>
+            ))}
+          </section>
         )}
         {loaded && steps.length === 0 && <p className="ob-empty">进度读取失败，请稍后点「刷新进度」重试。</p>}
       </section>
