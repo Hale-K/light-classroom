@@ -5,10 +5,11 @@ from typing import Literal
 
 import asyncio
 import json
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from fastapi.responses import StreamingResponse
 from sqlalchemy import select
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+from app.ai.attachments import MAX_FILE_BYTES, MAX_TEXT_CHARS, MAX_CONTEXT_CHARS, parse_attachment
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.actions import decide_action
@@ -28,7 +29,25 @@ class ChatTurn(BaseModel):
     model_visible: bool = True
 
 
+class ReferenceMaterial(BaseModel):
+    id: str = Field(min_length=1, max_length=80)
+    name: str = Field(min_length=1, max_length=200)
+    text: str = Field(min_length=1, max_length=MAX_TEXT_CHARS)
+    truncated: bool = False
+    original_chars: int | None = Field(default=None, ge=0)
+    analysis: str = Field(default='', max_length=4000)
+
+
 class PageContext(BaseModel):
+    assistant_mode: Literal['standard', 'plan'] = 'standard'
+    reference_materials: list[ReferenceMaterial] = Field(default_factory=list, max_length=8)
+
+    @model_validator(mode='after')
+    def limit_materials(self):
+        if sum(len(item.text) for item in self.reference_materials) > MAX_CONTEXT_CHARS:
+            raise ValueError('附件内容合计超过 24000 字，请减少附件')
+        return self
+
     knowledge_base_id: int | None = Field(default=None, ge=1)
     academic_year: str | None = Field(default=None, max_length=20)
     term: str | None = Field(default=None, max_length=20)
@@ -51,6 +70,28 @@ class ChatIn(BaseModel):
 
 class ConversationIn(BaseModel):
     messages: list[ChatTurn] = Field(default_factory=list, max_length=60)
+
+
+@router.post('/attachments/read', summary='读取本轮助手附件，不写入文件中心或知识库')
+async def read_assistant_attachment(
+    file: UploadFile = File(...), user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    try:
+        if user.tenant_id != tenant_id:
+            raise HTTPException(403, '学校与当前账号不一致')
+        data = await file.read(MAX_FILE_BYTES + 1)
+        if len(data) > MAX_FILE_BYTES:
+            raise HTTPException(413, '每个附件不能超过 5 MB')
+        try:
+            material = await asyncio.to_thread(parse_attachment, file.filename or '', data)
+        except Exception as exc:
+            if isinstance(exc, ValueError):
+                raise HTTPException(422, str(exc)) from None
+            raise HTTPException(422, '文档无法读取，请检查格式或换用 TXT、CSV') from None
+        return {'code': 0, 'message': 'ok', 'data': material}
+    finally:
+        await file.close()
 
 
 def _assistant_request(body: ChatIn) -> AssistantRequest:
