@@ -42,3 +42,4 @@ db/*.sql
 .zcode/
 .codex/backups/
 output/
+.codex/*.db
