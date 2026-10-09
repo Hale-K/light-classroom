@@ -3,7 +3,8 @@ import { ApiError } from '@/api/http'
 import { getAuthHeaders, getSseApiBaseURL } from '@/api/http'
 
 const MAX_READ_FAILURES = 12
-const MAX_WATCH_MS = 300000
+// 后台任务最多 10 分钟；给终态传输和轮询留下 10 秒。
+const MAX_WATCH_MS = 610000
 const SSE_IDLE_MS = 8000
 
 function isActiveRun(status: AssistantRun['status']) {

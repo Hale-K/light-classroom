@@ -10,6 +10,9 @@ import AssistantAddMenu from '@/components/AssistantAddMenu'
 import { MATERIAL_ACCEPT, mergeMaterials, materialsForTurn, type AssistantMaterial } from '@/assistant/materials'
 import { canUsePageActions, modeForTurn, type AssistantMode } from '@/assistant/mode'
 import AssistMarkdown from '@/components/AssistMarkdown'
+import AssistantActivity from '@/components/AssistantActivity'
+import AssistantExecutionBadge from '@/components/AssistantExecutionBadge'
+import { activityLines, restoreActivity, restoreExecution } from '@/assistant/activity'
 import Icon from '@/components/Icon'
 import { type HoursDraft } from '@/assistant/hoursPlan'
 import { runAssistantTool, type JumpLink, type ToolExtra } from '@/assistant/run'
@@ -37,6 +40,7 @@ type ChatMsg = {
   advice?: string
   choices?: { label: string; send: string; act?: () => void }[]
   think?: { done: string[]; live?: string }
+  activity?: ReturnType<typeof activityLines>
   execution?: AssistantExecution
   /** False for transport/recovery/degraded UI notices that must not enter an LLM prompt. */
   modelVisible?: boolean
@@ -85,7 +89,8 @@ function storedThread(key: string): ChatMsg[] {
         text: value.text.slice(0, 8000),
         mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
         modelVisible: value.modelVisible !== false,
-        execution: readExecution(value.execution),
+        execution: restoreExecution(value.execution),
+        activity: restoreActivity(value.activity),
       }]
     })
     const seen = new Set<string>()
@@ -110,53 +115,13 @@ function rememberThread(key: string, messages: ChatMsg[]) {
       mid: message.mid,
       modelVisible: message.modelVisible !== false,
       execution: message.execution,
+      activity: message.activity,
     }))
   try {
     localStorage.setItem(key, JSON.stringify(safe))
   } catch {
     // Storage can be unavailable or full; the live conversation must keep working.
   }
-}
-
-function readExecution(raw: unknown): AssistantExecution | undefined {
-  if (!raw || typeof raw !== 'object') return undefined
-  const value = raw as Record<string, unknown>
-  if (!['direct', 'agent', 'supervisor'].includes(String(value.mode))) return undefined
-  const tasks: AssistantExecution['tasks'] = Array.isArray(value.tasks) ? value.tasks.slice(0, 5).flatMap((item) => {
-    if (!item || typeof item !== 'object') return []
-    const task = item as Record<string, unknown>
-    if (typeof task.id !== 'string' || typeof task.label !== 'string' || !['running', 'succeeded', 'failed'].includes(String(task.status))) return []
-    return [{
-      id: task.id.slice(0, 40),
-      label: task.label.slice(0, 40),
-      status: task.status as AssistantExecution['tasks'][number]['status'],
-      attempt: typeof task.attempt === 'number' ? task.attempt : undefined,
-      retry_count: typeof task.retry_count === 'number' ? task.retry_count : undefined,
-      allowed_tools: Array.isArray(task.allowed_tools) ? task.allowed_tools.filter((tool): tool is string => typeof tool === 'string').slice(0, 8) : undefined,
-    }]
-  }) : []
-  return {
-    mode: value.mode as AssistantExecution['mode'],
-    multi_agent: value.multi_agent === true,
-    kind: value.kind === 'readiness' || value.kind === 'diagnosis' ? value.kind : null,
-    tasks,
-  }
-}
-
-function ExecutionBadge({ execution }: { execution?: AssistantExecution }) {
-  if (!execution || execution.mode === 'pending' || execution.tasks.length === 0) return null
-  const label = execution.mode === 'supervisor'
-    ? execution.kind === 'diagnosis' ? '排课诊断' : '排课准备'
-    : '检查进度'
-  const statusText = (status: AssistantExecution['tasks'][number]['status']) => status === 'succeeded' ? '完成' : status === 'failed' ? '失败' : '进行中'
-  return (
-    <details className="assist-execution" aria-label="检查进度">
-      <summary>{label} · {execution.tasks.filter((task) => task.status === 'succeeded').length}/{execution.tasks.length} 项完成{execution.tasks.some((task) => task.status === 'failed') ? ' · 有失败项' : ''}</summary>
-      <ul aria-label="检查项状态">
-        {execution.tasks.map((task) => <li key={task.id}>{task.label} · {statusText(task.status)}</li>)}
-      </ul>
-    </details>
-  )
 }
 
 type Panel = 'support' | 'notice' | 'docs' | 'home' | 'rate' | null
@@ -172,28 +137,6 @@ function Face({ className }: { className?: string }) {
       height={64}
       draggable={false}
     />
-  )
-}
-
-function ThinkDial({ live, progress, connection }: { live: string; progress: AssistantRun | null; connection: string }) {
-  const heartbeatRecent = progress && Date.now() - Date.parse(progress.heartbeat_at) < 12000
-  return (
-    <div className={`assist-dial is-live${progress ? ' has-progress' : ''}`}>
-      <span className="assist-dial-kicker">处理进度</span>
-      <div className="assist-dial-window" aria-live="polite">
-        <div key={live} className="assist-dial-face">
-          {live}
-        </div>
-      </div>
-      {progress && <div className="assist-progress-detail">
-        <ExecutionBadge execution={progress.execution} />
-        <span>已等待 {progress.elapsed_seconds} 秒 · 当前阶段 {progress.phase_elapsed_seconds} 秒</span>
-        <span>{connection || (heartbeatRecent ? '后台仍在响应' : '暂未收到新的后台心跳，正在核对状态')}</span>
-        {progress.phase_elapsed_seconds >= 15 && <span>当前阶段暂未返回新结果。你可以继续使用其他页面，或停止本轮处理。</span>}
-        <details><summary>查看执行记录</summary><ol>{(progress.events ?? []).map((event, i) => <li key={i}>{event.message}</li>)}</ol></details>
-      </div>}
-      {!progress && connection && <div role="status">{connection}</div>}
-    </div>
   )
 }
 
@@ -441,7 +384,7 @@ export default function AssistantDock() {
         break
       }
     }
-    next[idx] = bot
+    next[idx] = { ...bot, activity: bot.activity ?? next[idx]?.activity }
     return next
   }
 
@@ -584,14 +527,22 @@ export default function AssistantDock() {
           if (epoch !== epochRef.current || dirtyRef.current) return
           const terminal = !['queued', 'running'].includes(run.status)
           setRunProgress(terminal ? null : run)
-          if (!terminal) commitThread((prev) => upsertThink(prev, run.message))
+          commitThread((prev) => {
+            const next = terminal ? [...prev] : upsertThink(prev, run.message)
+            let index = next.length - 1
+            while (index >= 0 && (next[index].role !== 'bot' || next[index].text)) index--
+            if (index >= 0) next[index] = { ...next[index], activity: activityLines(run.events ?? []) }
+            return next
+          })
         }, (note) => { if (epoch === epochRef.current) setConnectionNote(note) })
         halt()
         sessionStorage.removeItem(runStorageKey)
         activeRunRef.current = null
         assistLog(tid, 'llm.done')
         if (dirtyRef.current) continue
-        if (outcome.status !== 'done' || !outcome.result) throw new Error(outcome.message)
+        const hasPartial = ['failed', 'timed_out'].includes(outcome.status) && Boolean(outcome.result?.text)
+        if ((outcome.status !== 'done' && !hasPartial) || !outcome.result) throw new Error(outcome.message)
+        if (hasPartial) failed = true
         const data = outcome.result
         commitThread((prev) => {
           const thinkBot = [...prev].reverse().find((m) => m.role === 'bot' && !m.text)
@@ -681,6 +632,7 @@ export default function AssistantDock() {
           text: item.content,
           modelVisible: item.model_visible !== false,
           execution: restored.find((saved) => saved.role === (item.role === 'assistant' ? 'bot' : 'user') && saved.text === item.content)?.execution,
+          activity: restored.find((saved) => saved.role === (item.role === 'assistant' ? 'bot' : 'user') && saved.text === item.content)?.activity,
         }))
         threadRef.current = restoredRemote
         setThread(restoredRemote)
@@ -1269,10 +1221,11 @@ export default function AssistantDock() {
               <div className="assist-thread">
                 {shownThread.map((msg, i) => (
                   <div key={i} className={`assist-turn is-${msg.role}`}>
-                    {msg.role === 'bot' && !msg.text && msg.think?.live ? <ThinkDial live={msg.think.live} progress={runProgress} connection={connectionNote} /> : null}
+                    {msg.role === 'bot' && (!msg.text && msg.think?.live || msg.activity?.length) ?
+                      <AssistantActivity live={!msg.text ? msg.think?.live : undefined} progress={!msg.text ? runProgress : null} connection={connectionNote} saved={msg.activity} /> : null}
                     {msg.text ? (
                       <div className={`assist-bubble is-${msg.role}`}>
-                        {msg.role === 'bot' && <ExecutionBadge execution={msg.execution} />}
+                        {msg.role === 'bot' && <AssistantExecutionBadge execution={msg.execution} />}
                         {msg.role === 'bot' ? <AssistMarkdown text={msg.text} /> : msg.text}
                         {msg.role === 'user' && msg.assistantMode === 'plan' && <small className="assist-turn-mode">计划模式</small>}
                         {msg.role === 'user' && msg.materials?.length ? <div className="assist-sent-materials">{msg.materials.map(item => <span key={item.id}><Icon name="file-text" size={12} />{item.name}</span>)}</div> : null}

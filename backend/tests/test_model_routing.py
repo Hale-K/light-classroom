@@ -45,4 +45,4 @@ async def test_provider_router_fails_over_and_reports_recovery():
     assert result.endpoint is backup
     assert result.used_backup is True
     assert result.trail == ["主模型(network)"]
-    assert progress == [("recovering", "当前模型未响应，正在切换备用模型继续处理")]
+    assert progress == [("recovering", "当前模型连接失败，正在尝试备用模型")]

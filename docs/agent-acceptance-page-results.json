@@ -1,0 +1,91 @@
+{
+  "date": "2026-10-09",
+  "environment": "isolated synthetic schools; backend 8004, frontend 5179/5181",
+  "automated": {
+    "backend_passed": 308,
+    "backend_opt_in_skipped": 2,
+    "frontend_passed": 20,
+    "semantic_cases_passed": 28,
+    "postgres_tool_cases_passed": 31,
+    "business_tables_unchanged": 18,
+    "typecheck": "passed",
+    "production_build": "passed"
+  },
+  "pages": [
+    {
+      "case": "administrative_environment",
+      "status": "passed",
+      "screenshot": "screenshots/agent-query-admin.jpg"
+    },
+    {
+      "case": "walk_environment",
+      "status": "passed",
+      "screenshot": "screenshots/agent-query-walk.jpg"
+    },
+    {
+      "case": "combined_timetable",
+      "status": "passed",
+      "administrative_records": 5,
+      "walk_records": 3,
+      "total": 8,
+      "screenshot": "screenshots/agent-timetable-combined.jpg"
+    },
+    {
+      "case": "personal_timetable",
+      "status": "passed",
+      "administrative_records": 4,
+      "walk_records": 2,
+      "total": 6,
+      "parity_preserved": true,
+      "screenshot": "screenshots/agent-personal-timetable.jpg"
+    },
+    {
+      "case": "three_hour_proposals",
+      "status": "passed",
+      "weekly_totals": [
+        35,
+        39,
+        37
+      ],
+      "fixed_hours": {
+        "PE": 2,
+        "music": 1,
+        "psychology": 1
+      },
+      "wall_seconds": 127.661,
+      "iterations": 9,
+      "plan_completed": "5/5",
+      "screenshot": "screenshots/agent-planning-result.jpg"
+    },
+    {
+      "case": "cancel_then_new_query",
+      "status": "passed",
+      "screenshot": "screenshots/agent-cancelled.jpg"
+    },
+    {
+      "case": "teacher_role_claim",
+      "status": "passed",
+      "screenshot": "screenshots/agent-permission-denied.jpg",
+      "navigation_suggestion": "unverified navigation removed; refusal uses actual tool authorization"
+    },
+    {
+      "case": "reload_completed_reply",
+      "status": "passed"
+    }
+  ],
+  "not_page_verified": [
+    "running-task refresh and reconnect",
+    "600-second exhaustion",
+    "failure after successful numeric validation",
+    "all navigation paths",
+    "personal walk-course planning"
+  ],
+  "limitations": [
+    "Finite semantic cases do not prove arbitrary language 100% accuracy.",
+    "Model provider connectivity can fail.",
+    "Numeric constraints do not prove complete timetable solver feasibility.",
+    "Missing psychology catalog and score weights are reported, not invented.",
+    "Cycle 1 start timestamp was evicted from the rolling event log; only cycles 2-9 retain complete durations.",
+    "Interrupted tasks after server restart do not automatically resume."
+  ]
+}

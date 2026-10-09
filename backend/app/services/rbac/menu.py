@@ -18,6 +18,8 @@ from app.services.rbac.seed import MENU_PERMISSION_SEED, MENU_SEED
 
 async def ensure_menu_schema(session: AsyncSession) -> None:
     """开发库兼容：补齐 menu 新列（生产走 Alembic）。"""
+    if session.get_bind().dialect.name == "sqlite":
+        return
     statements = [
         "ALTER TABLE menu ADD COLUMN IF NOT EXISTS key VARCHAR(50)",
         "ALTER TABLE menu ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT TRUE",

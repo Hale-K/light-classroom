@@ -101,6 +101,14 @@ export const router = createBrowserRouter([
         ],
       },
       {
+        path: '/courseware/studio',
+        element: (
+          <RequireAuth>
+            <CoursewareStudio />
+          </RequireAuth>
+        ),
+      },
+      {
         path: '/',
         element: (
           <RequireAuth>
@@ -120,7 +128,6 @@ export const router = createBrowserRouter([
           { path: 'teacher-students', element: <TeacherStudents /> },
           { path: 'onboarding', element: <OnboardingView /> },
           { path: 'file-center', element: <FileCenterView /> },
-          { path: 'courseware/studio', element: <CoursewareStudio /> },
           { path: 'courseware', element: <CoursewareView /> },
           { path: 'ai-providers', element: <AiProvidersView /> },
           { path: 'knowledge', element: <KnowledgeView /> },

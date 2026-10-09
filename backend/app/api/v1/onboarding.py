@@ -15,7 +15,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.facility import Building, Campus, ResourceAllocationRule, Room, RoomCohortAllocation
-from app.models.org import Class, CourseHourPlan, Grade, Schedule, TeachingAssignment, TenantConfig, User
+from app.models.org import Class, CourseHourPlan, Grade, OrganizationUnit, Schedule, Student, TeachingAssignment, TenantConfig, User
 from app.models.rbac import Role, UserRole
 from app.models.enums import BaseUserRole, UserStatus
 from app.services.org.cohort import cohort_labels_match, expected_cohort_label
@@ -90,6 +90,9 @@ def evaluate_steps(
     *,
     year: str | None,
     term: str,
+    grade_count: int,
+    grade_unit_count: int,
+    student_count: int,
     campus_count: int,
     building_count: int,
     room_count: int,
@@ -146,6 +149,20 @@ def evaluate_steps(
             "path": "/settings",
         },
         {
+            "key": "grades",
+            "title": "建立年级基础数据",
+            "done": grade_count >= 3,
+            "detail": f"已建立 {grade_count} 个年级；校区可后续补充" if grade_count else "先建立高一、高二、高三；此步骤不依赖校区",
+            "path": "/settings?tab=grades",
+        },
+        {
+            "key": "organization",
+            "title": "建立年级部并关联届别",
+            "done": grade_unit_count > 0,
+            "detail": f"已有 {grade_unit_count} 个年级部完成年级与届别关联" if grade_unit_count else "建立至少一个年级部并关联年级、届别；年级中心不是必需节点",
+            "path": "/staff?tab=organization",
+        },
+        {
             "key": "personnel",
             "title": "准备教师人员",
             "done": staff_count > 0,
@@ -154,6 +171,13 @@ def evaluate_steps(
                 if staff_count else "还没有可用于任教的教师，请到人员账号添加教师并启用账号"
             ),
             "path": "/staff",
+        },
+        {
+            "key": "students",
+            "title": "准备学生档案",
+            "done": student_count > 0,
+            "detail": f"已有 {student_count} 名在读学生" if student_count else "还没有学生档案；可先导入或录入，分班前必须完成",
+            "path": "/students",
         },
         {
             "key": "space",
@@ -295,7 +319,11 @@ async def load_onboarding_status(session: AsyncSession, tenant_id: int) -> dict:
     class_rows = (await session.execute(
         select(Class.id, Class.home_room_id, Class.cohort_label, Grade.level)
         .join(Grade, Grade.id == Class.grade_id)
-        .where(Class.tenant_id == tenant_id)
+        .where(
+            Class.tenant_id == tenant_id,
+            # 班级是学期级数据（同届每学期各存一份），准备度只核对当前学期的班
+            *([Class.academic_year == year, Class.term == term] if year else []),
+        )
     )).all()
     current_classes = [
         row for row in class_rows
@@ -312,6 +340,23 @@ async def load_onboarding_status(session: AsyncSession, tenant_id: int) -> dict:
         )
     )).scalar_one() if current_class_ids else 0
     staff_count = (await session.execute(teaching_staff_count_query(tenant_id))).scalar_one()
+    grade_count = (await session.execute(
+        select(func.count()).select_from(Grade).where(Grade.tenant_id == tenant_id)
+    )).scalar_one()
+    grade_unit_count = (await session.execute(
+        select(func.count()).select_from(OrganizationUnit).where(
+            OrganizationUnit.tenant_id == tenant_id,
+            OrganizationUnit.unit_type == "grade_group",
+            OrganizationUnit.status == "active",
+            OrganizationUnit.grade_id.is_not(None),
+            OrganizationUnit.cohort_label.is_not(None),
+        )
+    )).scalar_one()
+    student_count = (await session.execute(
+        select(func.count()).select_from(Student).where(
+            Student.tenant_id == tenant_id, Student.status == "studying",
+        )
+    )).scalar_one()
     campus_count = (await session.execute(
         select(func.count()).select_from(Campus).where(
             Campus.tenant_id == tenant_id, Campus.status == "active",
@@ -436,6 +481,9 @@ async def load_onboarding_status(session: AsyncSession, tenant_id: int) -> dict:
     steps = evaluate_steps(
         year=year or None,
         term=term,
+        grade_count=int(grade_count or 0),
+        grade_unit_count=int(grade_unit_count or 0),
+        student_count=int(student_count or 0),
         campus_count=int(campus_count or 0),
         building_count=int(building_count or 0),
         room_count=int(room_count or 0),

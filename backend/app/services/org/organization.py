@@ -56,6 +56,17 @@ def organization_subtree_ids(
     return result
 
 
+def validate_parent_move(unit_id: int, parent_id: int | None, units: list[dict]) -> None:
+    """Reject self/descendant parenting before an organization cycle is stored."""
+    if parent_id is None:
+        return
+    if parent_id == unit_id:
+        raise ValueError("组织节点不能成为自己的上级")
+    descendants = organization_subtree_ids(unit_id, units) - {unit_id}
+    if parent_id in descendants:
+        raise ValueError("组织节点不能移动到自己的下级组织")
+
+
 def build_organization_tree(
     units: Sequence[Mapping[str, Any]],
     member_counts: Mapping[int, int],

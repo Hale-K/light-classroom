@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -49,6 +50,7 @@ class ChatEndpoint:
     api_key: str
     model: str
     timeout: int
+    max_output_tokens: int = 8192
 
 
 async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[ChatEndpoint]:
@@ -70,6 +72,7 @@ async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[
             api_key=decrypt_secret(row.api_key),
             model=row.chat_model.strip(),
             timeout=row.timeout_seconds if row.timeout_seconds and row.timeout_seconds > 0 else 60,
+            max_output_tokens=row.max_output_tokens,
         )
         for row in rows
         if (row.base_url or "").strip() and (row.chat_model or "").strip()
@@ -82,6 +85,7 @@ async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[
             api_key=settings.llm_api_key.strip(),
             model=settings.llm_model,
             timeout=60,
+            max_output_tokens=settings.llm_max_tokens,
         )
         if not any(
             item.base_url == env_endpoint.base_url and item.model == env_endpoint.model
@@ -93,26 +97,30 @@ async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[
     raise ChatError("请先在「服务商管理」启用一条带对话模型的服务商，或在后端配置 LLM_API_KEY")
 
 
+def _answer_text(text: str) -> str:
+    # Some compatible providers embed a thinking channel in content. Never
+    # expose it, including an unfinished block at the output-token limit.
+    return re.sub(r"<(think|analysis)\b[^>]*>.*?(?:</\1\s*>|$)", "", text,
+                  flags=re.IGNORECASE | re.DOTALL).strip()
+
+
 def _message_text(message: object) -> str:
     if not isinstance(message, dict):
         return ""
     content = message.get("content")
     if isinstance(content, str) and content.strip():
-        return content.strip()
+        return _answer_text(content)
     if isinstance(content, list):
         bits: list[str] = []
         for part in content:
             if isinstance(part, str):
                 bits.append(part)
-            elif isinstance(part, dict):
-                bits.append(str(part.get("text") or ""))
+            elif isinstance(part, dict) and part.get("type") in (None, "text", "output_text"):
+                if isinstance(part.get("text"), str):
+                    bits.append(part["text"])
         joined = "".join(bits).strip()
         if joined:
-            return joined
-    for key in ("reasoning_content", "reasoning"):
-        extra = message.get(key)
-        if isinstance(extra, str) and extra.strip():
-            return extra.strip()
+            return _answer_text(joined)
     return ""
 
 
@@ -207,6 +215,7 @@ async def _post_chat(
     max_tokens: int | None,
     tools: list[dict] | None = None,
     transport: httpx.AsyncTransport | None = None,
+    reasoning_effort: str | None = None,
 ) -> dict:
     """发一轮对话，返回 OpenAI 兼容的 message 字典。
 
@@ -219,11 +228,13 @@ async def _post_chat(
     payload: dict = {
         "model": model,
         "messages": messages,
-        "max_tokens": max_tokens if max_tokens is not None else min(settings.llm_max_tokens, 2048),
+        "max_tokens": max_tokens if max_tokens is not None else settings.llm_max_tokens,
         "temperature": temperature,
     }
     if tools:
         payload["tools"] = tools
+    if reasoning_effort is not None:
+        payload["reasoning_effort"] = reasoning_effort
     started = time.monotonic()
     resp: httpx.Response | None = None
     for attempt in (1, 2):
@@ -236,6 +247,8 @@ async def _post_chat(
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS)
                 continue
             raise ChatError("无法连接模型服务，请检查网络或服务商地址。", "network") from exc
+        except httpx.TimeoutException as exc:
+            raise ChatError("模型响应超时，本次请求未完成，请稍后重试。", "timeout") from exc
         except httpx.HTTPError as exc:
             raise ChatError("模型请求失败，请稍后重试。", "network") from exc
         if resp.status_code in _RETRY_STATUS and attempt == 1:
@@ -265,11 +278,14 @@ async def _post_chat(
         model, int((time.monotonic() - started) * 1000), usage.get("completion_tokens"),
     )
     try:
-        message = data["choices"][0]["message"]
+        choice = data["choices"][0]
+        message = choice["message"]
     except (KeyError, IndexError, TypeError) as exc:
         raise ChatError("模型返回格式无法解析，请重试。", "parse") from exc
     if not isinstance(message, dict):
         raise ChatError("模型返回格式无法解析，请重试。", "parse")
+    if choice.get("finish_reason") == "length":
+        raise ChatError("模型输出达到上限，未完成回答。请重试或调整模型输出额度。", "incomplete_output")
     return message
 
 
@@ -307,6 +323,7 @@ async def stream_chat(
     messages: list[dict],
     temperature: float = 0.4,
     max_tokens: int | None = None,
+    extra_payload: dict | None = None,
 ) -> AsyncIterator[str]:
     """流式逐段产出模型回复。
 
@@ -324,6 +341,8 @@ async def stream_chat(
     }
     if max_tokens is not None:
         payload["max_tokens"] = max_tokens
+    if extra_payload:
+        payload.update(extra_payload)
     started = time.monotonic()
     total = 0
     try:
@@ -349,6 +368,8 @@ async def stream_chat(
                     if isinstance(piece, str) and piece:
                         total += len(piece)
                         yield piece
+    except httpx.TimeoutException as exc:
+        raise ChatError("模型响应超时，本次请求未完成，请稍后重试。", "timeout") from exc
     except httpx.HTTPError as exc:
         raise ChatError("模型请求失败，请稍后重试。", "network") from exc
     logger.info(
@@ -356,7 +377,7 @@ async def stream_chat(
         model, int((time.monotonic() - started) * 1000), total,
     )
     if not total:
-        raise ChatError("模型没有返回文本，请重试。", "empty")
+        raise ChatError("模型没有输出正文（思考可能耗尽了输出预算），请重试或换用输出预算更大的模型", "empty")
 
 
 async def complete_chat_tools(
@@ -369,6 +390,7 @@ async def complete_chat_tools(
     tools: list[dict] | None = None,
     temperature: float = 0.2,
     max_tokens: int | None = None,
+    reasoning_effort: str | None = None,
 ) -> ChatOutcome:
     """带工具表的对话。文本与 tool_calls 都可能为空之外的情形抛 ChatError。"""
     message = await _post_chat(
@@ -380,6 +402,7 @@ async def complete_chat_tools(
         temperature=temperature,
         max_tokens=max_tokens,
         tools=tools,
+        reasoning_effort=reasoning_effort,
     )
     calls = parse_tool_calls(message)
     if calls:

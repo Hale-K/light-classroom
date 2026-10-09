@@ -32,6 +32,12 @@ class GradeIn(BaseModel):
     campus_id: int | None = None
 
 
+class GradeUpdateIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=50)
+    level: int | None = Field(default=None, ge=1, le=3)
+    campus_id: int | None = None
+
+
 class ClassIn(BaseModel):
     grade_id: int
     name: str = Field(min_length=1, max_length=50)
@@ -136,6 +142,39 @@ async def create_grade(body: GradeIn, session: AsyncSession = Depends(get_sessio
     grade_data = body.model_dump()
     grade_data["name"] = name
     grade = Grade(**grade_data, tenant_id=tenant_id)
+    session.add(grade)
+    await session.commit()
+    await session.refresh(grade)
+    return {"code": 0, "message": "ok", "data": grade.model_dump()}
+
+
+@router.patch("/grades/{grade_id}", summary="更新年级基础信息")
+async def update_grade(
+    grade_id: int,
+    body: GradeUpdateIn,
+    session: AsyncSession = Depends(get_session),
+    user=Depends(get_current_user),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    grade = await session.get(Grade, grade_id)
+    if grade is None or grade.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="年级不存在")
+    values = body.model_dump(exclude_unset=True)
+    if "name" in values:
+        values["name"] = normalize_entity_name(values["name"]) or ""
+        duplicate = (await session.execute(select(Grade.id).where(
+            Grade.tenant_id == tenant_id,
+            Grade.name == values["name"],
+            Grade.id != grade_id,
+        ))).scalar()
+        if duplicate:
+            raise HTTPException(status_code=422, detail=f"年级「{values['name']}」已存在")
+    if values.get("campus_id") is not None:
+        campus = await session.get(Campus, values["campus_id"])
+        if campus is None or campus.tenant_id != tenant_id:
+            raise HTTPException(status_code=422, detail="校区不存在或不属于当前学校")
+    for key, value in values.items():
+        setattr(grade, key, value)
     session.add(grade)
     await session.commit()
     await session.refresh(grade)

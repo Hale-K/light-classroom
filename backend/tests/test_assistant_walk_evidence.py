@@ -6,17 +6,19 @@ from sqlalchemy.orm import Session
 
 from app.ai.tools import school
 from app.ai.harness import HarnessRouter
-from app.models.org import Grade, Subject, User
+from app.models.org import Grade, Subject, User, TenantConfig
 from app.models.gaokao import TeachingClass, TeachingClassStudent, TeachingClassSchedule
 
 
 @pytest.fixture
 def evidence_session():
     engine = create_engine('sqlite://')
-    for model in (Grade, Subject, User, TeachingClass, TeachingClassStudent, TeachingClassSchedule):
+    for model in (Grade, Subject, User, TenantConfig, TeachingClass, TeachingClassStudent, TeachingClassSchedule):
         model.__table__.create(engine)
     with Session(engine) as session:
         session.add_all([
+            TenantConfig(tenant_id=1, config_key='timetable_mode', config_value={'mode':'walk_class'}),
+            TenantConfig(tenant_id=2, config_key='timetable_mode', config_value={'mode':'walk_class'}),
             Grade(id=1, tenant_id=1, name='高一', level=10), Grade(id=2, tenant_id=1, name='高二', level=11),
             Subject(id=1, tenant_id=1, name='政治'),
             User(id=1, tenant_id=1, name='甲老师', phone='test1', password_hash='unused'),
@@ -79,7 +81,7 @@ async def test_walk_evidence_requires_grade_instead_of_silently_using_all_school
 def test_diagnostic_tools_are_available_without_write_authority():
     required = {'lookup_walk_classes', 'lookup_generation_log', 'lookup_subject_capacity',
                 'lookup_remaining_capacity', 'lookup_slot_role_capacity'}
-    for name in ('guide', 'diagnosis'):
+    for name in ('query', 'planning'):
         allowed = HarnessRouter().profiles[name].allowed_tools
         assert required <= allowed
         assert 'propose_rules' not in allowed

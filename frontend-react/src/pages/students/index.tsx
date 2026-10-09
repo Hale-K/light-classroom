@@ -13,6 +13,7 @@ import StudentScheduleModal from './StudentScheduleModal'
 import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 import { GENDER_DICT, STUDENT_STATUS_DICT } from '@/types/dict'
 import type { ClassInfo, Grade, OrganizationTreeResult, OrganizationUnit, Student, StudentGradeMembership } from '@/types'
+import { flattenOrganizationUnits } from '@/pages/organization/tree-utils'
 
 type GenderValue = 'male' | 'female'
 type GenderFilter = GenderValue | ''
@@ -233,14 +234,12 @@ export default function StudentsView() {
       })
       setSubjectChoices(choicesByStudent)
       setOrganizationTree(orgTree)
-      // 年级筛选只保留「年级管理中心下已建年级部」的年级(与教师档案口径一致)
-      const gradeUnitNames = (orgTree?.units ?? [])
+      // 组织可以自由嵌套；按年级部的显式 grade_id 识别，不依赖层级或名称。
+      const configuredGradeIds = new Set(flattenOrganizationUnits(orgTree?.units ?? [])
         .filter((unit) => unit.unit_type === 'grade_group' && unit.status === 'active')
-        .map((unit) => unit.name)
-      const visibleGrades = gradeList.filter((grade) => {
-        const key = ['高一', '高二', '高三'].find((k) => grade.name.includes(k))
-        return !key || gradeUnitNames.some((name) => name.includes(key))
-      })
+        .map((unit) => unit.grade_id)
+        .filter((id): id is number => typeof id === 'number'))
+      const visibleGrades = gradeList.filter((grade) => configuredGradeIds.has(grade.id))
       setGrades(visibleGrades.length ? visibleGrades : gradeList)
       setClasses(classList)
       setStudents(studentList)

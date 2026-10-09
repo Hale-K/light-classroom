@@ -12,8 +12,8 @@ async def test_all_enabled_chat_providers_form_an_ordered_failover_chain():
     from app.ai.model.chat import resolve_chat_endpoints
 
     rows = [
-        SimpleNamespace(id=1, name="主模型", provider_type="OPENAI", base_url="http://primary", api_key="a", chat_model="p", timeout_seconds=20),
-        SimpleNamespace(id=2, name="备用模型", provider_type="OLLAMA", base_url="http://backup", api_key="b", chat_model="b", timeout_seconds=30),
+        SimpleNamespace(id=1, name="主模型", provider_type="OPENAI", base_url="http://primary", api_key="a", chat_model="p", timeout_seconds=20, max_output_tokens=16384),
+        SimpleNamespace(id=2, name="备用模型", provider_type="OLLAMA", base_url="http://backup", api_key="b", chat_model="b", timeout_seconds=30, max_output_tokens=8192),
     ]
 
     class Result:
@@ -28,6 +28,7 @@ async def test_all_enabled_chat_providers_form_an_ordered_failover_chain():
             return Result()
 
     endpoints = await resolve_chat_endpoints(Session(), 7)
+    assert [item.max_output_tokens for item in endpoints[:2]] == [16384, 8192]
 
     assert [item.name for item in endpoints[:2]] == ["主模型", "备用模型"]
     assert endpoints[0].key == "7:1"
@@ -74,37 +75,33 @@ def test_request_shaped_errors_do_not_isolate_provider():
 
 
 @pytest.mark.asyncio
-async def test_failover_stops_starting_endpoints_once_budget_is_exhausted(monkeypatch):
-    from app.ai.agent import assistant_agent as teacher
+@pytest.mark.parametrize('failure_class', ['network', 'timeout'])
+async def test_failover_stops_starting_endpoints_once_budget_is_exhausted(failure_class):
+    import asyncio
+    from app.ai.graph.loop import ReactLoop
     from app.ai.model.chat import ChatEndpoint, ChatError
+    from app.ai.resilience import ProviderCircuitBreaker
 
-    teacher.provider_circuits.clear()
     endpoints = [
         ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5),
         ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5),
     ]
-    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
-    clock = {"t": 0.0}
-
-    def fake_monotonic():
-        return clock["t"]
-
-    async def failing_agent(*args, **kwargs):
-        clock["t"] += 160  # 该 endpoint 消耗掉大部分本轮预算
-        raise ChatError("无法连接", "network")
-
-    monkeypatch.setattr(teacher.time, "monotonic", fake_monotonic)
-    agent = AsyncMock(side_effect=failing_agent)
-    monkeypatch.setattr(teacher, "agent_reply", agent)
-
-    with pytest.raises(ChatError) as ei:
-        await assistant.handle_assistant_turn(
-            None, 1,
-            [{"role": "user", "content": "x"}, {"role": "assistant", "content": "y"}, {"role": "user", "content": "查准备度"}],
-        )
-
-    assert ei.value.error_class == "timeout"
-    assert agent.await_count == 1, "预算耗尽后不得再起新 endpoint，整轮被总闸报废"
+    calls = []
+    async def failing_call(**request):
+        calls.append(request['model'])
+        raise ChatError('首选失败', failure_class)
+    async def progress(phase, message):
+        if phase == 'recovering':
+            await asyncio.sleep(1)
+    gateway = gateway_model.ModelGateway(ProviderCircuitBreaker(), tool_caller=failing_call)
+    async def caller(**request):
+        return await gateway.complete_tools_routed(endpoints=endpoints, on_progress=progress, **request)
+    with pytest.raises(ChatError, match='循环') as caught:
+        await ReactLoop(base_url='http://primary', api_key='', model='p', timeout=5,
+                        messages=[], tools=[], caller=caller, executor=AsyncMock(),
+                        cycle_timeout_seconds=.02).run()
+    assert caught.value.error_class == 'timeout'
+    assert calls == ['p'], '循环预算耗尽后不得再启动备用请求'
 
 
 @pytest.mark.asyncio
@@ -152,7 +149,7 @@ async def test_missing_provider_config_raises_instead_of_local_mode(monkeypatch)
 @pytest.mark.asyncio
 async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(monkeypatch):
     from app.ai.agent import assistant_agent as teacher
-    from app.ai.model.chat import ChatEndpoint, ChatError
+    from app.ai.model.chat import ChatEndpoint, ChatError, ChatOutcome
 
     teacher.provider_circuits.clear()
     endpoints = [
@@ -160,33 +157,69 @@ async def test_teacher_agent_switches_to_backup_provider_and_reports_recovery(mo
         ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5),
     ]
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
-    agent = AsyncMock(side_effect=[
+    caller = AsyncMock(side_effect=[
         ChatError("模型服务暂时不可用", "unavailable"),
-        teacher.AssistantTurn(text="备用模型已回答"),
+        ChatOutcome(text="备用模型已回答"),
     ])
-    monkeypatch.setattr(teacher, "agent_reply", agent)
+    monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
     events = []
+    traces = []
 
     async def progress(phase, message):
         events.append((phase, message))
+    async def trace(kind, data):
+        traces.append((kind, data))
 
     result = await assistant.handle_assistant_turn(
         None,
         1,
         [{"role": "user", "content": "帮我检查排课设置"}],
         on_progress=progress,
+        on_trace=trace,
     )
 
     assert result.text == "备用模型已回答"
-    assert len(agent.await_args_list) == 2
+    assert [item.kwargs['model'] for item in caller.await_args_list] == ['p', 'b']
     assert any(phase == "recovering" for phase, _ in events)
-    assert any("备用模型" in note for note in result.think)
+    assert sum(kind == 'turn.agent_started' for kind, _ in traces) == 1
+    assert any(kind == 'provider.selected' and data['used_backup'] for kind, data in traces)
+
+
+@pytest.mark.asyncio
+async def test_backup_connection_failure_does_not_hide_primary_timeout(monkeypatch):
+    """首选模型只是超时，离线备用通道不能把最终原因篡改成连接失败。"""
+    from app.ai.agent import assistant_agent as teacher
+    from app.ai.model.chat import ChatEndpoint, ChatError
+
+    teacher.provider_circuits.clear()
+    endpoints = [
+        ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 75),
+        ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 60),
+    ]
+    monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
+    monkeypatch.setattr(gateway_model, "complete_chat_tools", AsyncMock(side_effect=[
+        ChatError("模型响应超时，本次请求未完成，请稍后重试。", "timeout"),
+        ChatError("无法连接模型服务，请检查网络或服务商地址。", "network"),
+    ]))
+    events = []
+
+    async def progress(phase, message):
+        events.append((phase, message))
+
+    with pytest.raises(ChatError) as caught:
+        await assistant.handle_assistant_turn(
+            None, 1, [{"role": "user", "content": "给我三个完整排课方案"}],
+            on_progress=progress,
+        )
+
+    assert caught.value.error_class == "timeout"
+    assert any("超时" in message and "备用模型" in message for _, message in events)
 
 
 @pytest.mark.asyncio
 async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
     from app.ai.agent import assistant_agent as teacher
-    from app.ai.model.chat import ChatEndpoint, ChatError
+    from app.ai.model.chat import ChatEndpoint, ChatError, ChatOutcome
 
     teacher.provider_circuits.clear()
     endpoints = [
@@ -194,12 +227,12 @@ async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
         ChatEndpoint("1:2", "备用模型", "http://backup", "", "b", 5),
     ]
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=endpoints))
-    agent = AsyncMock(side_effect=[
+    caller = AsyncMock(side_effect=[
         ChatError("不支持工具", "bad_request"),
-        teacher.AssistantTurn(text="备用模型完成了工具查询"),
+        ChatOutcome(text="备用模型完成了工具查询"),
     ])
     text_fallback = AsyncMock(return_value="不应调用")
-    monkeypatch.setattr(teacher, "agent_reply", agent)
+    monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
     monkeypatch.setattr(gateway_model, "complete_chat", text_fallback)
 
     result = await assistant.handle_assistant_turn(
@@ -209,12 +242,12 @@ async def test_backup_provider_precedes_text_only_degradation(monkeypatch):
     )
 
     assert result.text == "备用模型完成了工具查询"
-    assert agent.await_count == 2
+    assert caller.await_count == 2
     assert text_fallback.await_count == 0
 
 
 @pytest.mark.asyncio
-async def test_teacher_agent_uses_local_guide_when_all_providers_fail(monkeypatch):
+async def test_teacher_agent_reports_network_failure_without_unrelated_guide(monkeypatch):
     from app.ai.agent import assistant_agent as teacher
     from app.ai.model.chat import ChatEndpoint, ChatError
 
@@ -231,23 +264,19 @@ async def test_teacher_agent_uses_local_guide_when_all_providers_fail(monkeypatc
     async def progress(phase, message):
         events.append((phase, message))
 
-    result = await assistant.handle_assistant_turn(
-        None,
-        1,
-        [{"role": "user", "content": "排课下一步怎么做"}],
-        page_path="/scheduling?tab=hours",
-        on_progress=progress,
-    )
-
-    assert "本地说明模式" in result.text
-    assert "未执行任何写入" in result.text
-    assert any(phase == "degraded" for phase, _ in events)
+    with pytest.raises(ChatError) as error:
+        await assistant.handle_assistant_turn(
+            None, 1, [{"role": "user", "content": "排课下一步怎么做"}],
+            page_path="/scheduling?tab=hours", on_progress=progress,
+        )
+    assert error.value.error_class == "network"
+    assert not any(phase == "degraded" for phase, _ in events)
 
 
 @pytest.mark.asyncio
 async def test_isolated_provider_is_skipped_without_calling_it(monkeypatch):
     from app.ai.agent import assistant_agent as teacher
-    from app.ai.model.chat import ChatEndpoint
+    from app.ai.model.chat import ChatEndpoint, ChatOutcome
 
     teacher.provider_circuits.clear()
     primary = ChatEndpoint("1:1", "主模型", "http://primary", "", "p", 5)
@@ -258,8 +287,8 @@ async def test_isolated_provider_is_skipped_without_calling_it(monkeypatch):
         "resolve_chat_endpoints",
         AsyncMock(return_value=[primary, backup]),
     )
-    agent = AsyncMock(return_value=teacher.AssistantTurn(text="备用模型已回答"))
-    monkeypatch.setattr(teacher, "agent_reply", agent)
+    caller = AsyncMock(return_value=ChatOutcome(text="备用模型已回答"))
+    monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
     events = []
 
     async def progress(phase, message):
@@ -273,6 +302,6 @@ async def test_isolated_provider_is_skipped_without_calling_it(monkeypatch):
     )
 
     assert result.text == "备用模型已回答"
-    assert agent.await_count == 1
-    assert agent.await_args.kwargs["model"] == "b"
+    assert caller.await_count == 1
+    assert caller.await_args.kwargs["model"] == "b"
     assert any(phase == "isolated" for phase, _ in events)

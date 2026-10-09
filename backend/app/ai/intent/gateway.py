@@ -25,6 +25,11 @@ class AssistantIntent(StrEnum):
     UNKNOWN = "unknown"
 
 
+class ExecutionMode(StrEnum):
+    QUERY = "query"
+    PLANNING = "planning"
+
+
 class AssistantRoute(StrEnum):
     """Execution route selected before a harness is opened."""
 
@@ -70,6 +75,16 @@ class IntentDecision:
     needs_clarification: bool = False
     route: AssistantRoute = AssistantRoute.AGENT
     tool_hints: frozenset[str] = frozenset()
+    execution_mode: ExecutionMode | None = None
+    write_requested: bool = False
+
+    @property
+    def effective_mode(self) -> ExecutionMode:
+        if self.execution_mode is not None:
+            return self.execution_mode
+        return (ExecutionMode.PLANNING if self.kind in {
+            AssistantIntent.READINESS, AssistantIntent.DIAGNOSIS, AssistantIntent.CONFIGURATION,
+        } else ExecutionMode.QUERY)
 
     def trace_data(self) -> dict:
         return {
@@ -79,6 +94,8 @@ class IntentDecision:
             "needs_clarification": self.needs_clarification,
             "route": self.route.value,
             "tool_hints": sorted(self.tool_hints),
+            "execution_mode": self.effective_mode.value,
+            "write_requested": self.write_requested,
         }
 
 
@@ -145,7 +162,61 @@ class IntentGateway:
             return replace(decision, needs_clarification=True, route=AssistantRoute.AGENT)
         if decision.confidence < self._minimum_decision_confidence:
             return replace(decision, needs_clarification=True, route=AssistantRoute.AGENT)
-        return replace(decision, route=self._route_for(decision.kind, decision.route))
+        # A proposal and an actual edit are separate from execution complexity.
+        # Classifier topic labels can never confer tool permissions.
+        return replace(decision, route=AssistantRoute.DIRECT if decision.route is AssistantRoute.DIRECT
+                       and decision.effective_mode is ExecutionMode.QUERY else AssistantRoute.AGENT,
+                       write_requested=self._requests_write(query))
+
+    @staticmethod
+    def _requests_write(text: str) -> bool:
+        if re.search(r"(?:只|仅)(?:做建议|查询|分析|讨论|提供方案)|(?:不|不要)(?:保存|执行|修改(?:数据|配置|规则))|(?:如果|假如).{0,30}(?:影响|会怎样|会怎么样)", text):
+            return False
+        # "个人保存课表" and "已保存课表" name a stored record, not
+        # an imperative to persist it. A later explicit edit remains detectable.
+        text = re.sub(r'(?:个人保存|已保存|保存的)(?=课表)', '现有', text)
+        if re.search(r"(?:怎么|如何|能否|怎样).{0,8}(?:修改|保存|删除|创建)", text):
+            return False
+        if '方案' in text and not re.search(r'(?:保存|应用|执行).{0,8}(?:方案|规则|配置)', text):
+            return False
+        if not re.search(r'查询|查看|有哪些|什么意思|现有|已配置', text) and re.search(
+                r'(?:周[一二三四五六日天]|星期[一二三四五六日天]|\d+节).{0,15}(?:禁排|不要安排)|(?:禁排|不要安排).{0,15}(?:周[一二三四五六日天]|星期[一二三四五六日天])', text):
+            return True
+        return bool(re.search(r"(?:请|帮我|直接|立即|确认)?(?:保存|执行|应用|创建|修改|新增|删除).{0,12}(?:规则|课表|任课|教师|学生|数据|配置)|把.{0,12}(?:规则|课表|任课|配置).{0,8}(?:修改|改成|改为|保存|删除)|规则组.{0,15}(?:不要安排|禁排|连堂)", text))
+
+    @staticmethod
+    def _structural_planning(text: str, turns: list[dict]) -> bool:
+        if IntentGateway._explicit_query(text):
+            return False
+        if re.search(r'(?:不要|不用|无需)(?:规划|制定方案|全面检查).{0,12}只(?:查|解释|告诉)', text):
+            return False
+        if len(text) < 45 and re.search(r'(?:规划|计划)(?:模式|功能).{0,10}(?:是什么|什么意思|怎么用|如何使用)', text):
+            return False
+        if re.search(r"(?:[2-9两二三四五六七八九]|多个|几)(?:个|套|种)?(?:课时|排课|教学)?(?:方案|计划)|(?:规划|制定方案|全面验收|全面检查|系统验收|逐步执行)", text):
+            return True
+        if re.search(r"(?:全校|所有班|全部班|整体).{0,30}(?:汇总|冲突|检查|审计|排课准备)", text):
+            return True
+        if (re.search(r"先.{1,40}(?:再|然后|接着)", text)
+                or (len(text) > 65 and sum(word in text for word in ("同时", "必须", "方案", "分别", "核对", "可选")) >= 2)):
+            return True
+        if re.search(r"(?:第[一二三123]套|第二个方案|第三个方案|按刚才方案|继续执行|继续规划)", text):
+            previous = " ".join(str(item.get('content') or '') for item in turns[:-1][-4:])
+            return bool(re.search(r"方案|计划|规划|步骤", previous))
+        return IntentGateway._requests_write(text)
+
+    @staticmethod
+    def _explicit_query(text: str) -> bool:
+        # One student's saved records and current environment are focused
+        # lookups even with a long field list or a previous planning turn.
+        if (len(text) <= 180 and not IntentGateway._requests_write(text)
+                and not re.search(r'全校|所有班|全部班|冲突|方案|规划|全面|分析|比较|先.{1,40}(?:再|然后)', text)
+                and re.search(r'个人(?:保存)?课表|当前学校.{0,20}(?:课表模式|高考模式)', text)
+                and re.search(r'查|是什么|分别是什么', text)):
+            return True
+        if len(text) < 45 and re.search(r'(?:规划|计划)(?:模式|功能).{0,10}(?:是什么|什么意思|怎么用|如何使用)', text):
+            return True
+        return bool(len(text) < 65 and not re.search(r'全校|所有|全部|汇总|冲突', text)
+            and re.search(r'(?:不要|不用|无需)(?:规划|制定方案|全面检查).{0,12}只(?:查|解释|告诉)', text))
 
     @staticmethod
     def failure_policy(*, retry_count: int, max_retries: int, missing: tuple[str, ...] = ()) -> RouterPolicyDecision:
@@ -196,6 +267,15 @@ class IntentGateway:
                 source="fast_path",
                 route=AssistantRoute.AGENT,
             )
+
+        # Clear structural demands are resolved locally even when the optional
+        # classifier is unavailable. Remaining paraphrases use semantic services.
+        if self._structural_planning(text, turns):
+            return IntentDecision(AssistantIntent.GUIDE, 1.0, 'task_structure',
+                execution_mode=ExecutionMode.PLANNING, write_requested=self._requests_write(text))
+        if self._explicit_query(text):
+            return IntentDecision(AssistantIntent.GUIDE, 1.0, 'explicit_query',
+                execution_mode=ExecutionMode.QUERY)
 
         # Jev or another bounded decision service is optional. Any unavailable
         # or low-confidence result falls through to the existing pgvector path.

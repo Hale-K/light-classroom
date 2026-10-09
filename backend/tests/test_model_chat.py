@@ -139,5 +139,28 @@ async def test_read_timeout_fails_fast_without_retry():
 
     with pytest.raises(ChatError) as ei:
         await _call(httpx.MockTransport(handler))
-    assert ei.value.error_class == "network"
+    assert ei.value.error_class == "timeout"
+    assert "超时" in ei.value.message
     assert len(calls) == 1, "读超时不重试，尽快交给上层按已耗时间决定降级或放弃"
+
+
+@pytest.mark.asyncio
+async def test_truncated_response_is_not_a_final_answer():
+    def handler(request):
+        return httpx.Response(200, json={"choices": [{
+            "finish_reason": "length", "message": {"content": "Let me analyze the request..."},
+        }]})
+    with pytest.raises(ChatError) as error:
+        await _call(httpx.MockTransport(handler))
+    assert error.value.error_class == "incomplete_output"
+
+
+@pytest.mark.asyncio
+async def test_reasoning_only_tool_reply_is_rejected(monkeypatch):
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(chat, "_post_chat", AsyncMock(return_value={
+        "content": "", "reasoning_content": "I'll call lookup_schedule_setup...",
+    }))
+    with pytest.raises(ChatError) as error:
+        await chat.complete_chat_tools(base_url="http://llm.test", api_key="", model="m", timeout=5, messages=_MSGS)
+    assert error.value.error_class == "empty"

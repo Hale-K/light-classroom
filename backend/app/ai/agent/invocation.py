@@ -22,6 +22,7 @@ async def invoke_agent(
     on_trace: TraceCallback | None, runtime: AssistantRuntime,
     on_step: Callable[[int], Awaitable[list[dict]]] | None,
     harness: HarnessProfile, retrieved: str,
+    provider_endpoints: list[ChatEndpoint] | None = None,
 ) -> AssistantTurn:
     # 延迟导入避免入口模块与调用适配器形成循环依赖。
     from app.ai.agent.assistant_agent import agent_reply
@@ -29,9 +30,11 @@ async def invoke_agent(
     return await agent_reply(
         session, tenant_id, turns, base_url=endpoint.base_url,
         api_key=endpoint.api_key, model=endpoint.model, timeout=endpoint.timeout,
+        max_tokens=endpoint.max_output_tokens,
         page_title=page_title, page_path=page_path, can=can, cannot=cannot,
         user_id=user_id, can_manage_rules=can_manage_rules,
         on_progress=on_progress, page_context=page_context,
         memory_summary=memory_summary, on_trace=on_trace, runtime=runtime,
         on_step=on_step, harness=harness, retrieved=retrieved,
+        provider_endpoints=provider_endpoints,
     )

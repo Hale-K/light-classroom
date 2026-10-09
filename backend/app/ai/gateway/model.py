@@ -54,6 +54,28 @@ class ModelGateway:
     async def complete_tools(self, **request: Any) -> ChatOutcome:
         return await self._tool_caller(**request)
 
+    async def complete_tools_routed(
+        self, *, endpoints: list[ChatEndpoint], preferred_provider_key: str | None = None,
+        on_progress: Progress | None = None, on_trace: TraceCallback | None = None,
+        **request: Any,
+    ) -> ChatOutcome:
+        """Fail over only this model request, preserving the caller's evidence."""
+        budget = float(request.get('timeout', 120))
+
+        async def invoke(endpoint: ChatEndpoint, remaining: float) -> ChatOutcome:
+            candidate = {**request, 'base_url': endpoint.base_url, 'api_key': endpoint.api_key,
+                         'model': endpoint.model, 'timeout': remaining,
+                         'max_tokens': endpoint.max_output_tokens}
+            # Reasoning controls are provider/model specific. An option for the
+            # primary model must not make an otherwise healthy backup reject.
+            if endpoint.model != request.get('model'):
+                candidate.pop('reasoning_effort', None)
+            return await self._tool_caller(**candidate)
+
+        return await self._router.route_call(endpoints, budget_seconds=budget, invoke=invoke,
+                                             preferred_provider_key=preferred_provider_key,
+                                             on_progress=on_progress, on_trace=on_trace)
+
     async def route(
         self,
         endpoints: list[ChatEndpoint],

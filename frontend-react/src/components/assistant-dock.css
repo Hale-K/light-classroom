@@ -720,6 +720,7 @@
 
 /* 助手回复 markdown 排版（AssistMarkdown 渲染结果） */
 .assist-md {
+  min-width: 0;
   white-space: normal;
 }
 
@@ -797,10 +798,22 @@
   font-size: 12px;
 }
 
-/* 模型输出的 markdown 表格：紧凑三线感，窄气泡内不横向溢出 */
+/* 保持表格列对齐；窄屏在气泡内部横向滚动。 */
+.assist-md-table-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 2px 0 10px;
+  overscroll-behavior-x: contain;
+}
+
+.assist-md-table-scroll:focus-visible {
+  outline: 2px solid #6366f1;
+  outline-offset: 2px;
+}
+
 .assist-md-table {
   width: 100%;
-  margin: 2px 0 10px;
+  table-layout: fixed;
   border-collapse: collapse;
   font-size: 12.5px;
   line-height: 1.5;
@@ -822,6 +835,36 @@
 
 body[data-theme='tech'] .assist-md-table th {
   background: rgba(255, 255, 255, 0.06);
+}
+
+.assist-md-format-problem {
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, #b7791f 45%, transparent);
+  border-radius: 6px;
+}
+
+.assist-md-format-problem > p,
+.assist-md-number-warning {
+  color: #a16207;
+  font-size: 12px;
+}
+
+.assist-md-number-warning {
+  padding: 8px;
+  border-left: 3px solid #b7791f;
+  background: color-mix(in srgb, #b7791f 7%, transparent);
+}
+
+.assist-md-format-problem pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: inherit;
+}
+
+body[data-theme='tech'] .assist-md-format-problem > p,
+body[data-theme='tech'] .assist-md-number-warning {
+  color: #fbbf24;
 }
 
 /* 暗色主题下的正文层级：加粗提亮、代码块换浅底、序号弱化 */
@@ -1373,6 +1416,8 @@ body[data-theme='tech'] .assist-dock-icon.is-on {
 .assist-execution summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
 .assist-execution span { color: #435c82; }
 .assist-execution ul { display: grid; gap: 3px; margin: 2px 0 0; padding-left: 17px; }
+.assist-execution-goal { margin: 5px 0; font-size: 12px; }
+.assist-execution-result { display: block; color: #53634e; line-height: 1.5; }
 .assist-execution-tree { display: grid; gap: 5px; }
 .assist-execution-node { position: relative; display: flex; align-items: center; gap: 7px; min-width: 0; }
 .assist-execution-node strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -1391,3 +1436,16 @@ body[data-theme='tech'] .assist-dock-icon.is-on {
 .assist-execution-tools { margin-left: auto; color: #687fa8; font-size: 10px; white-space: nowrap; }
 .assist-progress-detail ol { padding-left: 20px; margin: 6px 0; }
 .assist-progress-detail summary { cursor: pointer; }
+
+/* Conversation-first progress: real milestones, no dashboard or reasoning tree. */
+.assist-activity { padding: 8px 4px 12px; color: var(--text-primary, #253346); font-size: 14px; line-height: 1.75; overflow-wrap: anywhere; }
+.assist-activity-intro { margin: 0 0 16px; }
+.assist-activity-lines { display: grid; gap: 12px; list-style: none; padding: 0; margin: 0 0 16px; }
+.assist-activity-lines li { display: flex; align-items: baseline; gap: 8px; }
+.assist-activity-lines li.is-tool { color: var(--text-secondary, #738094); font-size: 13px; }
+.assist-activity-lines svg { flex-shrink: 0; align-self: center; }
+.assist-activity-status { display: flex; align-items: center; gap: 8px; color: var(--text-secondary, #738094); font-size: 13px; }
+.assist-activity-status i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; animation: assist-activity-pulse 1.5s ease-in-out infinite; }
+.assist-activity-wait { margin: 8px 0 0; color: var(--text-secondary, #738094); font-size: 12px; }
+@keyframes assist-activity-pulse { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .assist-activity-status i { animation: none; } }

@@ -1,0 +1,313 @@
+{
+  "evidence_level": "real_database_tool_gateway",
+  "uses_live_model": false,
+  "uses_browser": false,
+  "cases": [
+    {
+      "id": "A01",
+      "summary": "School mode, academic year and term come from server settings",
+      "tool": "lookup_school_context",
+      "status": "passed",
+      "code": "OK",
+      "counts": {}
+    },
+    {
+      "id": "W01",
+      "summary": "School mode, academic year and term come from server settings",
+      "tool": "lookup_school_context",
+      "status": "passed",
+      "code": "OK",
+      "counts": {}
+    },
+    {
+      "id": "A03",
+      "summary": "Three assignments; configured hours and odd/even plans stay distinct",
+      "tool": "lookup_teaching_assignments",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 3
+      }
+    },
+    {
+      "id": "A05",
+      "summary": "Administrative mode ignores three retained walk lessons",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 5
+      }
+    },
+    {
+      "id": "A06",
+      "summary": "Historical personal timetable uses the old term membership",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 1
+      }
+    },
+    {
+      "id": "W06H",
+      "summary": "Historical personal timetable uses the old term membership",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 1
+      }
+    },
+    {
+      "id": "A08",
+      "summary": "Six students; confirmed/draft/locked distinct and three missing choices",
+      "tool": "lookup_student_choices",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 6,
+        "missing_choice_count": 3
+      }
+    },
+    {
+      "id": "W02",
+      "summary": "Six students; confirmed/draft/locked distinct and three missing choices",
+      "tool": "lookup_student_choices",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 6,
+        "missing_choice_count": 3
+      }
+    },
+    {
+      "id": "W02D",
+      "summary": "Duplicate physics enrollment and unassigned draft are visible",
+      "tool": "lookup_student_choices",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 6,
+        "missing_choice_count": 3
+      }
+    },
+    {
+      "id": "W03",
+      "summary": "Timetable lesson-type and individual counts match saved fixture",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 6
+      }
+    },
+    {
+      "id": "W04A",
+      "summary": "Timetable lesson-type and individual counts match saved fixture",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 5
+      }
+    },
+    {
+      "id": "W04W",
+      "summary": "Timetable lesson-type and individual counts match saved fixture",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 3
+      }
+    },
+    {
+      "id": "W04C",
+      "summary": "Timetable lesson-type and individual counts match saved fixture",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 8
+      }
+    },
+    {
+      "id": "A07",
+      "summary": "Cross-grade competitors remain; parity and candidate-room boundaries hold",
+      "tool": "lookup_schedule_conflicts",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 4
+      }
+    },
+    {
+      "id": "W05",
+      "summary": "Cross-grade competitors remain; parity and candidate-room boundaries hold",
+      "tool": "lookup_schedule_conflicts",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 6
+      }
+    },
+    {
+      "id": "A10",
+      "summary": "Administrative mode rejects explicit walk queries",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "MODE_MISMATCH",
+      "counts": {}
+    },
+    {
+      "id": "G02G",
+      "summary": "Cross-school or ambiguous/missing objects are not guessed",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "MISSING_SCOPE",
+      "counts": {}
+    },
+    {
+      "id": "G02C",
+      "summary": "Cross-school or ambiguous/missing objects are not guessed",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "MISSING_SCOPE",
+      "counts": {}
+    },
+    {
+      "id": "A09S",
+      "summary": "Cross-school or ambiguous/missing objects are not guessed",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "MISSING_SCOPE",
+      "counts": {}
+    },
+    {
+      "id": "A09T",
+      "summary": "Cross-school or ambiguous/missing objects are not guessed",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "MISSING_SCOPE",
+      "counts": {}
+    },
+    {
+      "id": "A09N",
+      "summary": "Cross-school or ambiguous/missing objects are not guessed",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "MISSING_SCOPE",
+      "counts": {}
+    },
+    {
+      "id": "G01S",
+      "summary": "Ordinary teacher cannot read school-wide sensitive evidence",
+      "tool": "lookup_student_choices",
+      "status": "passed",
+      "code": "FORBIDDEN",
+      "counts": {}
+    },
+    {
+      "id": "G01T",
+      "summary": "Ordinary teacher cannot read school-wide sensitive evidence",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "FORBIDDEN",
+      "counts": {}
+    },
+    {
+      "id": "G01P",
+      "summary": "Ordinary teacher cannot read school-wide sensitive evidence",
+      "tool": "lookup_planning_basis",
+      "status": "passed",
+      "code": "FORBIDDEN",
+      "counts": {}
+    },
+    {
+      "id": "W06A",
+      "summary": "First page returns two of eight lessons with continuation offset",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 8
+      }
+    },
+    {
+      "id": "W06B",
+      "summary": "Next two lessons do not duplicate the first page",
+      "tool": "lookup_timetable",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "total": 8
+      }
+    },
+    {
+      "id": "P01A",
+      "summary": "Real planning capacity is 40 and score weights remain unverified",
+      "tool": "lookup_planning_basis",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "class_count": 2
+      }
+    },
+    {
+      "id": "P01W",
+      "summary": "Real planning capacity is 40 and score weights remain unverified",
+      "tool": "lookup_planning_basis",
+      "status": "passed",
+      "code": "OK",
+      "counts": {
+        "class_count": 2
+      }
+    },
+    {
+      "id": "P02",
+      "summary": "35-period arithmetic and fixed hours pass; absent psychology blocks implementation",
+      "tool": "validate_hour_scenarios",
+      "status": "passed",
+      "code": "OK",
+      "counts": {}
+    },
+    {
+      "id": "P03",
+      "summary": "45-period scenario fails current 40-period capacity",
+      "tool": "validate_hour_scenarios",
+      "status": "passed",
+      "code": "OK",
+      "counts": {}
+    },
+    {
+      "id": "G03R",
+      "status": "passed",
+      "summary": "All business-table counts and content hashes match before and after tool calls"
+    }
+  ],
+  "business_snapshot_unchanged": true,
+  "business_table_counts": {
+    "tenant": 2,
+    "tenantconfig": 4,
+    "grade": 4,
+    "class": 8,
+    "subject": 24,
+    "student": 12,
+    "studentgrademembership": 12,
+    "studentclassmembership": 12,
+    "teachingassignment": 8,
+    "coursehourplan": 10,
+    "schedule": 14,
+    "studentsubjectchoice": 6,
+    "teachingclass": 6,
+    "teachingclassstudent": 6,
+    "teachingclassschedule": 6,
+    "gaokaoscheme": 2,
+    "scheduling_grid_plan": 4,
+    "scheduling_grid_day": 28
+  },
+  "select_only_statement_count": 288,
+  "passed_count": 31,
+  "failed_count": 0
+}

@@ -364,13 +364,14 @@ async def target_student_count(
         OrganizationUnit.cohort_label == cohort_label,
         OrganizationUnit.status == "active",
     ))).scalars().all())
-    levels = {level for unit in grade_units for level, label in ((1, "高一"), (2, "高二"), (3, "高三")) if label in unit.name}
-    if not levels:
+    # 人数范围来自年级部的显式 grade_id；组织名称只用于展示，允许学校自由命名。
+    bound_grade_ids = {unit.grade_id for unit in grade_units if unit.grade_id is not None}
+    if not bound_grade_ids:
         return None
     grade_ids = list((await session.execute(select(Grade.id).where(
         Grade.tenant_id == tenant_id,
         Grade.campus_id == campus_id,
-        Grade.level.in_(levels),
+        Grade.id.in_(bound_grade_ids),
     ))).scalars().all())
     if not grade_ids:
         return None

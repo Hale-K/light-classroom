@@ -17,23 +17,30 @@ from app.db.session import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 _tasks: set[asyncio.Task] = set()
-# 草稿流程至少两轮模型调用（可能再澄清一次），慢服务商下 100 秒不够；单步上限 90 秒也在此闸内。
-RUN_TIMEOUT = 180
+# The outer watchdog includes routing, environment discovery, tools and output.
+# Each complete execution cycle additionally has its own absolute 120s budget.
+RUN_TIMEOUT = 600
 STALE_SECONDS = 30
+TERMINAL_PERSIST_TIMEOUT = 5
 
 
-def execution_view(events: list[dict], *, status: str) -> dict:
+def execution_view(events: list[dict], *, status: str, plan: dict | None = None) -> dict:
     """从内部轨迹投影安全的执行摘要，不公开上下文、工具结果或错误详情。"""
-    mode = "pending"
+    mode = "query"
     kind = None
+    goal = None
     tasks: dict[str, dict] = {}
+    # The bounded trace can roll over during a long task. The durable plan is
+    # the source of truth even if its creation event has left the event window.
+    if plan:
+        events = [*events, {'type': 'assistant.planning.updated', 'data': {'plan': plan}}]
     for event in events:
         event_type = event.get("type")
         data = event.get("data") or {}
         if event_type == "assistant.harness.selected":
-            mode = "direct" if data.get("name") == "direct" else "agent"
+            mode = "planning" if data.get("name") in {'planning', 'plan'} else "query"
         elif event_type == "assistant.turn.agent_started":
-            mode = "agent"
+            pass
         elif event_type == "assistant.intent.classified" and data.get("kind") in {"readiness", "diagnosis"}:
             kind = data["kind"]
         elif event_type in {
@@ -42,7 +49,7 @@ def execution_view(events: list[dict], *, status: str) -> dict:
             "assistant.supervisor.task_failed",
             "assistant.supervisor.task_retry",
         }:
-            mode = "supervisor"
+            mode = "planning"
             task_id = data.get("task_id")
             if task_id not in {"prerequisites", "schedule_setup", "teacher_assignments", "rules", "generation_status"}:
                 continue
@@ -65,18 +72,31 @@ def execution_view(events: list[dict], *, status: str) -> dict:
             elif event_type.endswith("task_failed"):
                 task["status"] = "failed"
         elif event_type == "assistant.supervisor.completed":
-            mode = "supervisor"
+            mode = "planning"
             if data.get("kind") in {"readiness", "diagnosis"}:
                 kind = data["kind"]
-    if mode == "pending" and status == "done":
-        mode = "direct"
-    return {
+        elif event_type == 'assistant.planning.updated':
+            mode = 'planning'
+            plan = data.get('plan') or {}
+            goal = str(plan.get('goal') or '')[:300]
+            for item in (plan.get('steps') or [])[:20]:
+                if not isinstance(item, dict) or not item.get('id'):
+                    continue
+                task_id = str(item['id'])[:60]
+                task_status = str(item.get('status') or 'pending')
+                tasks[task_id] = {'id': task_id, 'label': str(item.get('label') or task_id)[:80],
+                                 'status': task_status if task_status in {'pending', 'running', 'completed', 'failed', 'blocked'} else 'pending',
+                                 'summary': str(item.get('summary') or '')[:300]}
+    view = {
         "mode": mode,
         # 目前 Supervisor 顺序执行固定只读工具，没有独立模型子 Agent。
         "multi_agent": False,
-        "kind": kind if mode == "supervisor" else None,
-        "tasks": list(tasks.values()) if mode == "supervisor" else [],
+        "kind": kind if mode == "planning" else None,
+        "tasks": list(tasks.values()) if mode == "planning" else [],
     }
+    if goal:
+        view['goal'] = goal
+    return view
 
 
 def run_view(run: AiRun) -> dict:
@@ -86,7 +106,7 @@ def run_view(run: AiRun) -> dict:
         # 原始轨迹可能含模型上下文和查询结果，只保留给受控诊断通道；老师界面只收进度投影。
         "events": [event for event in run.events if event.get("visibility") != "internal"], "result": run.result,
         "checkpoint": run.checkpoint or {},
-        "execution": execution_view(run.events or [], status=run.status),
+        "execution": execution_view(run.events or [], status=run.status, plan=(run.checkpoint or {}).get('plan')),
         "elapsed_seconds": max(0, int(((now if run.status == 'running' else run.updated_at) - run.created_at).total_seconds())),
         "phase_elapsed_seconds": max(0, int((now - run.phase_started_at).total_seconds())),
         "heartbeat_at": run.updated_at.isoformat() + "Z",
@@ -197,8 +217,9 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
 
     events: list[dict] = []
     checkpoint: dict = {
-        "version": 1, "stage": "received", "current_task": None,
+        "version": 2, "stage": "received", "current_task": None,
         "completed_tasks": [], "failed_tasks": [], "retry_count": 0,
+        "plan": None, "iteration": 0,
     }
 
     def inbox_messages(messages):
@@ -267,9 +288,32 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
         if not await persist(phase=phase, message=message[:300], phase_started_at=now, events=events[-100:]):
             raise asyncio.CancelledError()
 
+    async def persist_terminal(**values) -> bool:
+        """Status cleanup is bounded even if the database is unavailable."""
+        try:
+            async with asyncio.timeout(TERMINAL_PERSIST_TIMEOUT):
+                return await persist(**values)
+        except Exception:
+            logger.exception('assistant terminal status persistence failed id=%s', run_id)
+            return False
+
     async def trace(kind: str, data: dict) -> None:
         events.append(trace_event(kind, data))
-        if kind == "supervisor.task_started":
+        if kind == 'planning.updated':
+            checkpoint['stage'] = 'planning'
+            checkpoint['plan'] = data.get('plan')
+            plan_steps = (data.get('plan') or {}).get('steps') or []
+            checkpoint['completed_tasks'] = [item['id'] for item in plan_steps if item.get('status') == 'completed']
+            checkpoint['failed_tasks'] = [item['id'] for item in plan_steps if item.get('status') == 'failed']
+            checkpoint['current_task'] = next((item['id'] for item in plan_steps if item.get('status') == 'running'), None)
+        elif kind == 'loop.started':
+            checkpoint['iteration'] = data.get('step', 0)
+            checkpoint['cycle_status'] = 'running'
+        elif kind == 'loop.completed':
+            checkpoint['cycle_status'] = 'completed'
+        elif kind == 'loop.timed_out':
+            checkpoint['cycle_status'] = 'timed_out'
+        elif kind == "supervisor.task_started":
             checkpoint["stage"] = "supervisor"
             checkpoint["current_task"] = data.get("task_id")
         elif kind == "supervisor.task_succeeded":
@@ -292,7 +336,9 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
             raise asyncio.CancelledError()
 
     try:
-        async with sessions() as session:
+        # One absolute job watchdog starts before identity/permission queries
+        # and initial trace persistence, not only before the first model call.
+        async with asyncio.timeout(RUN_TIMEOUT), sessions() as session:
             user = (await session.execute(select(User).where(User.id == user_id, User.tenant_id == tenant_id, User.status == "active"))).scalars().first()
             if user is None:
                 raise ChatError("账号已失效，请重新登录")
@@ -338,13 +384,25 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
             run.updated_at = datetime.utcnow()
             await session.commit()  # The final answer and proposal become visible together.
     except asyncio.CancelledError:
-        await persist(status="cancelled", message="本轮已停止，未执行规则写入。")
+        checkpoint['stage'] = 'cancelled'
+        checkpoint['cycle_status'] = 'cancelled'
+        await persist_terminal(status="cancelled", checkpoint=checkpoint, message="本轮已停止，未执行规则写入。")
     except TimeoutError:
-        await persist(status="timed_out", message=f"本轮等待超过{RUN_TIMEOUT}秒，已停止请求。请重试或拆分要求，未执行规则写入。")
+        checkpoint['stage'] = 'timed_out'
+        checkpoint['cycle_status'] = 'timed_out'
+        await persist_terminal(status="timed_out", checkpoint=checkpoint, message=f"本轮等待超过{RUN_TIMEOUT}秒，已停止请求；已完成步骤保留，未执行规则写入。")
     except Exception as exc:
         logger.exception("assistant run failed id=%s class=%s", run_id, getattr(exc, "error_class", "-"))
         message = exc.message if isinstance(exc, ChatError) else "处理失败，请重试；未执行规则写入。"
-        await persist(status="failed", message=message[:300])
+        status = 'timed_out' if isinstance(exc, ChatError) and exc.error_class == 'timeout' else 'failed'
+        checkpoint['stage'] = status
+        checkpoint['cycle_status'] = status
+        partial_plan = getattr(exc, 'partial_task_plan', None)
+        if partial_plan:
+            checkpoint['plan'] = partial_plan
+            checkpoint['current_task'] = None
+        partial_result = getattr(exc, 'partial_result', None)
+        await persist_terminal(status=status, checkpoint=checkpoint, message=message[:300], result=partial_result)
 
 
 def spawn_run(run_id, tenant_id, user_id, payload):

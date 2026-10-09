@@ -1,0 +1,93 @@
+{
+  "evidence_level": "synthetic_postgresql_persisted_loop_timestamps",
+  "generated_at": "2026-10-09T03:15:10.249893+00:00",
+  "read_only": true,
+  "includes_prompts_or_results": false,
+  "runs": [
+    {
+      "run_id": "a814b7f8c01647e1ab3a32997a9bc1a5",
+      "tenant_id": 1,
+      "status": "done",
+      "created_at": "2026-10-09T03:07:44.676633+00:00",
+      "ended_or_observed_at": "2026-10-09T03:09:52.337350+00:00",
+      "total_wall_seconds": 127.661,
+      "within_600_seconds_wall_time": true,
+      "wall_time_note": "DB creation to final persistence; includes initialization and cleanup.",
+      "checkpoint_iteration": 9,
+      "cycle_status": "completed",
+      "all_iteration_numbers_retained": true,
+      "retention_note": "AiRun stores at most 100 events; missing events cannot prove an earlier cycle duration.",
+      "cycles": [
+        {
+          "iteration": 1,
+          "status": "start_event_not_retained",
+          "duration_seconds": null
+        },
+        {
+          "iteration": 2,
+          "status": "completed",
+          "duration_seconds": 7.717,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 3,
+          "status": "completed",
+          "duration_seconds": 24.103,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 4,
+          "status": "completed",
+          "duration_seconds": 16.714,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 5,
+          "status": "completed",
+          "duration_seconds": 7.002,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 6,
+          "status": "completed",
+          "duration_seconds": 5.925,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 7,
+          "status": "completed",
+          "duration_seconds": 23.136,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 8,
+          "status": "completed",
+          "duration_seconds": 19.539,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": false
+        },
+        {
+          "iteration": 9,
+          "status": "completed",
+          "duration_seconds": 16.326,
+          "budget_seconds": 120,
+          "within_120_seconds": true,
+          "finished_answer": true
+        }
+      ]
+    }
+  ]
+}

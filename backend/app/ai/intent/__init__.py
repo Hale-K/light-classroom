@@ -3,6 +3,7 @@
 from app.ai.intent.gateway import (
     AssistantIntent,
     AssistantRoute,
+    ExecutionMode,
     FailureAction,
     IntentDecision,
     IntentGateway,
@@ -16,6 +17,7 @@ from app.ai.intent.jev import JevDecisionClassifier
 __all__ = [
     "AssistantIntent",
     "AssistantRoute",
+    "ExecutionMode",
     "FailureAction",
     "IntentDecision",
     "IntentGateway",

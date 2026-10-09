@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.ai.intent.gateway import AssistantIntent, AssistantRoute, IntentDecision
+from app.ai.intent.gateway import AssistantIntent, AssistantRoute, ExecutionMode, IntentDecision
 from app.ai.model.store import AiProvider
 from app.core.secret_store import decrypt_secret
 
@@ -92,13 +92,10 @@ class JevDecisionClassifier:
             "questions": {
                 "intent": {
                     "type": "choice",
-                    "instructions": "以最新用户消息为准，历史只用于理解指代。模糊求助或指代不清时选择 unknown 并澄清，不自动检查全校。单项数据查询选择 guide 和对应工具；明确检查整体排课准备选择 readiness，明确要求分析失败原因选择 diagnosis。不要因历史准备清单改变当前问题的意图。询问当前页面有什么内容、功能或作用，以及要求阅读分析已上传的附件资料，都属于 guide，不算模糊。",
+                    "instructions": "只选择 query 或 planning。以最新消息为准，历史用于理解省略和承接。普通问答、解释、单项查询选择 query；需要多步骤取证、全量汇总诊断、多方案比较、规划或执行选择 planning。只查询也可能复杂，问候前缀不覆盖后面的任务。行政班和走班是业务环境，不是语义模式。设置三套课时方案是规划建议，不表示修改数据库。指代不清时降低置信度，由助手先澄清。",
                     "criteria": {
-                        "guide": "普通问答、使用说明、简单寒暄，查询教师任课、课时、规则、任务状态等单项学校数据，或询问当前页面有什么内容、功能和作用",
-                        "readiness": "明确要求检查整体排课前置条件是否准备完成，不包含单项数据查询",
-                        "diagnosis": "诊断排课问题、课表冲突、资源不足或异常原因",
-                        "configuration": "创建或修改排课规则、人员、空间、课表等业务配置",
-                        "unknown": "无法可靠归类或需要用户补充信息",
+                        "query": "普通问答/查询：解释功能、寒暄、单项学校数据和分页；如何修改规则属于说明",
+                        "planning": "复杂规划/执行：多套方案、多步骤分析、全面审计、复杂排课诊断或实际修改请求；第二套方案的调整承接规划",
                     },
                 },
                 "tool": {
@@ -138,10 +135,17 @@ class JevDecisionClassifier:
             tool_choice = str(tool_answer.get("choice") or "all").strip().lower()
             tool_hints = JEV_TOOL_HINTS.get(tool_choice, frozenset())
             try:
-                kind = AssistantIntent(choice)
+                mode = ExecutionMode(choice)
+                kind = AssistantIntent.GUIDE
             except ValueError:
-                logger.warning("assistant.router decision invalid provider=jev choice=%s", choice[:40])
-                return None
+                # Accept cached responses from the old classifier during rollout;
+                # topic labels are normalized to the same two execution modes.
+                try:
+                    kind = AssistantIntent(choice)
+                    mode = IntentDecision(kind, confidence, 'jev').effective_mode
+                except ValueError:
+                    logger.warning("assistant.router decision invalid provider=jev choice=%s", choice[:40])
+                    return None
             if kind is AssistantIntent.UNKNOWN:
                 return IntentDecision(kind, confidence, "jev", needs_clarification=True, tool_hints=tool_hints)
             logger.info(
@@ -166,6 +170,7 @@ class JevDecisionClassifier:
                 "jev",
                 route=route,
                 tool_hints=tool_hints,
+                execution_mode=mode,
             )
         except (httpx.HTTPError, ValueError, TypeError, KeyError) as exc:
             logger.warning("assistant.router decision unavailable provider=jev error=%s", type(exc).__name__)

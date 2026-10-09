@@ -4,7 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -28,6 +28,7 @@ class ProviderIn(BaseModel):
     video_model: str | None = None
     audio_model: str | None = None
     timeout_seconds: int = 120
+    max_output_tokens: int | None = Field(default=None, ge=1, le=262144)
     is_default: bool = False
     status: int = 1
     sort: int = 0
@@ -53,6 +54,7 @@ def _to_out(row: AiProvider) -> dict:
         "video_model": row.video_model,
         "audio_model": row.audio_model,
         "timeout_seconds": row.timeout_seconds,
+        "max_output_tokens": row.max_output_tokens,
         "is_default": row.is_default,
         "status": row.status,
         "sort": row.sort,
@@ -120,6 +122,7 @@ async def create_provider(
         video_model=body.video_model,
         audio_model=body.audio_model,
         timeout_seconds=body.timeout_seconds,
+        max_output_tokens=body.max_output_tokens if body.max_output_tokens is not None else 8192,
         is_default=body.is_default,
         status=1 if body.status else 0,
         sort=body.sort,
@@ -155,6 +158,8 @@ async def update_provider(
     row.video_model = body.video_model
     row.audio_model = body.audio_model
     row.timeout_seconds = body.timeout_seconds
+    if body.max_output_tokens is not None:
+        row.max_output_tokens = body.max_output_tokens
     row.status = 1 if body.status else 0
     row.sort = body.sort
     row.remark = body.remark

@@ -18,6 +18,12 @@ class ModelGatewayService(Protocol):
 
     async def complete_tools(self, **request: Any) -> ChatOutcome: ...
 
+    async def complete_tools_routed(
+        self, *, endpoints: list[ChatEndpoint], preferred_provider_key: str | None = None,
+        on_progress: Progress | None = None, on_trace: TraceCallback | None = None,
+        **request: Any,
+    ) -> ChatOutcome: ...
+
     async def route(
         self,
         endpoints: list[ChatEndpoint],

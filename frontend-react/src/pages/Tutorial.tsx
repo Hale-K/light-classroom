@@ -84,7 +84,7 @@ export default function TutorialPage() {
             />
             <Title level={4}>2.1 创建组织架构</Title>
             <Paragraph>
-              在「人员账号」中点击「新建组织」，先建立「年级管理中心」，再创建年级部和学科教研组。年级部需要绑定系统中的对应年级，学科组需要关联对应科目。
+              在「人员账号」中点击「新建组织」，可直接创建年级部和学科教研组。年级中心属于可选管理层级；年级部需要绑定对应年级与届别，学科组需要关联对应科目。
             </Paragraph>
             <Image
               src="/tutorial/personnel-organization.png"

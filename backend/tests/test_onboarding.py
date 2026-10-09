@@ -9,6 +9,7 @@ from app.models.rbac import Role, UserRole
 def _steps(**overrides):
     kwargs = dict(
         year="2026-2027", term="1",
+        grade_count=3, grade_unit_count=3, student_count=450,
         campus_count=2, building_count=4, room_count=60,
         allocation_rule_count=3, allocated_room_count=30,
         resource_assigned_class_count=10,
@@ -24,7 +25,7 @@ def _steps(**overrides):
 
 def test_ready_school_has_all_steps_done():
     steps = _steps()
-    assert len(steps) == 10
+    assert len(steps) == 13
     assert all(s["done"] for s in steps)
     assert "当前学期已有 100 个排课条目" in steps[-1]["detail"]
 
@@ -73,13 +74,16 @@ def test_standard_preparation_check_stops_when_personnel_missing():
 
 
 def test_new_school_first_steps_incomplete_with_guidance():
-    steps = _steps(year=None, staff_count=0, campus_count=0, building_count=0, room_count=0,
+    steps = _steps(year=None, grade_count=0, grade_unit_count=0, student_count=0, staff_count=0, campus_count=0, building_count=0, room_count=0,
                    allocation_rule_count=0, allocated_room_count=0, resource_assigned_class_count=0,
                    grid_configured=False, class_total=0, teacher_count=0,
                    rule_group_count=0, enabled_rules=0, version_count=0, schedule_count=0)
     assert not any(s["done"] for s in steps)
     by_key = {step["key"]: step for step in steps}
     assert "还没有设置当前学年学期" in by_key["year"]["detail"]
+    assert "先建立高一、高二、高三" in by_key["grades"]["detail"]
+    assert "年级中心不是必需节点" in by_key["organization"]["detail"]
+    assert "还没有学生档案" in by_key["students"]["detail"]
     assert "先创建校区" in by_key["space"]["detail"]
     assert "先设置当前学年学期" in by_key["allocation"]["detail"]
     assert "先设置当前学年学期" in by_key["class_planning"]["detail"]

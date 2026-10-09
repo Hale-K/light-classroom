@@ -1,5 +1,6 @@
 """工具循环：模型给 tool_calls 就执行喂回，末步强制收口成文本。"""
 import asyncio
+import json
 
 import pytest
 
@@ -7,6 +8,26 @@ from app.ai.graph.loop import ReactLoop
 from app.ai.model.chat import ChatError, ChatOutcome, ToolCallOut
 
 _TOOLS = [{"type": "function", "function": {"name": "lookup_teachers", "parameters": {}}}]
+
+
+def test_paged_evidence_preserves_complete_json_for_model():
+    seen = []
+    payload = json.dumps({'data': {'items': ['课程明细' * 200] * 10,
+                                  'has_more': True, 'next_offset': 10}})
+
+    async def executor(name, arguments):
+        return payload
+
+    caller = _caller_factory([
+        ChatOutcome(tool_calls=[ToolCallOut(id='evidence', name='lookup_timetable', arguments='{}')]),
+        ChatOutcome(text='已查询，另有下一页。'),
+    ], seen)
+    asyncio.run(ReactLoop(base_url='http://x', api_key='k', model='m', timeout=10,
+                         messages=[], tools=[{'type': 'function', 'function': {
+                             'name': 'lookup_timetable', 'parameters': {}}}],
+                         executor=executor, caller=caller).run())
+    result = next(m for m in seen[1]['messages'] if m['role'] == 'tool')
+    assert json.loads(result['content']) == json.loads(payload)
 
 
 def _caller_factory(responses: list[ChatOutcome], seen: list[dict]):
@@ -264,5 +285,93 @@ def test_final_step_hallucinated_calls_with_empty_text_raise_empty():
 
     ei = asyncio.run(main())
     assert ei.value.error_class == "empty"
+
+
+def test_chinese_conversation_english_reasoning_leak_retries_once():
+    """中文会话收到纯英文长文：视为推理泄漏，强制中文重答一次。"""
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([
+            ChatOutcome(text="Let me understand the user's request first. They are on the slots page and want to "
+                             "arrange subjects per class. I should check the current setup, then design a plan."),
+            ChatOutcome(text="按每周 54 节课位：建议语文 7、数学 7、英语 7，剩余分给理科。"),
+        ], seen)
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "语数外物化生政史怎么配课时？"}],
+            tools=_TOOLS, executor=executor, caller=caller,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert "语文" in outcome.text
+    assert len(seen) == 2
+    assert "不要展示分析推理过程" in seen[1]["messages"][-1]["content"]
+
+
+def test_normal_chinese_answer_does_not_retry():
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([ChatOutcome(text="语文建议每周 7 节。")], seen)
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "语文配多少节合适？"}],
+            tools=_TOOLS, executor=executor, caller=caller,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert "语文" in outcome.text
+    assert len(seen) == 1
+
+
+def test_english_query_expects_english_answer_without_retry():
+    async def main():
+        seen: list[dict] = []
+        caller = _caller_factory([ChatOutcome(text="Sure, tell me the grade and term you want to check.")], seen)
+
+        async def executor(name, arguments):
+            raise AssertionError("不应执行工具")
+
+        outcome = await run_loop(
+            base_url="http://x", api_key="k", model="m", timeout=10,
+            messages=[{"role": "user", "content": "How many classes are configured?"}],
+            tools=_TOOLS, executor=executor, caller=caller,
+        )
+        return outcome, seen
+
+    outcome, seen = asyncio.run(main())
+    assert outcome.text.startswith("Sure")
+    assert len(seen) == 1
+
+
 async def run_loop(**kwargs):
     return await ReactLoop(**kwargs).run()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('repair', ['fails', 'still_analysis'])
+async def test_mixed_language_analysis_never_returns_when_repair_fails(repair):
+    leak = 'Let me understand 高一年级 and 课位结构. ' + 'I should query the setup before answering. ' * 20
+    calls = 0
+    async def caller(**kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1 or repair == 'still_analysis':
+            return ChatOutcome(text=leak)
+        raise ChatError('连接失败', 'network')
+    async def executor(*args):
+        raise AssertionError('Text about calling a tool is not an actual tool call')
+    with pytest.raises(ChatError):
+        await run_loop(base_url='http://x', api_key='', model='m', timeout=5,
+                       messages=[{'role': 'user', 'content': '查看高一课时'}],
+                       tools=_TOOLS, caller=caller, executor=executor)
+    assert calls == 2

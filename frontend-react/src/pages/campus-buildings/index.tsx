@@ -1042,7 +1042,7 @@ export default function CampusBuildingsView({ embedded = false, focus = 'resourc
                 style={{ width: '100%' }}
                 value={planGradeGroupId ?? undefined}
                 onChange={(v) => void selectPlanningGradeGroup(v)}
-                placeholder="先选择年级管理中心中的年级部"
+                placeholder="先选择已关联届别的年级部"
                 showSearch
                 optionFilterProp="label"
                 options={gradeGroups.map((group) => ({ label: group.name, value: group.id }))}

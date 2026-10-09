@@ -8,7 +8,7 @@ from app.ai.gateway.tool import ToolGateway
 from app.ai.harness import HarnessRouter
 from app.ai.intent import AssistantIntent, AssistantRoute, FailureAction, IntentDecision, IntentGateway, ReviewAction
 from app.ai.runtime import AssistantRuntime, ServiceRegistry
-from app.ai.model.chat import ChatEndpoint, ChatOutcome
+from app.ai.model.chat import ChatEndpoint, ChatOutcome, ToolCallOut
 
 
 def test_router_maps_structured_intent_to_registered_harness():
@@ -16,9 +16,9 @@ def test_router_maps_structured_intent_to_registered_harness():
 
     for kind in AssistantIntent:
         decision = IntentDecision(kind=kind, confidence=1, source="test")
-        expected = "configuration" if kind is AssistantIntent.CONFIGURATION else "guide"
+        expected = "planning" if kind in {AssistantIntent.CONFIGURATION, AssistantIntent.READINESS, AssistantIntent.DIAGNOSIS} else "query"
         assert router.select(decision).name == expected
-    assert set(router.profiles) == {"direct", "guide", "readiness", "diagnosis", "configuration"}
+    assert set(router.profiles) == {"query", "planning"}
 
 
 def test_router_selects_direct_harness_for_fast_path():
@@ -28,7 +28,8 @@ def test_router_selects_direct_harness_for_fast_path():
         route=AssistantRoute.DIRECT,
     )
     profile = router.select(decision)
-    assert profile.name == "direct"
+    assert profile.name == "query"
+    assert profile.strategy == "direct"
     assert profile.max_steps == 1
     assert profile.allowed_tools == frozenset()
 
@@ -42,7 +43,7 @@ def test_router_jev_tool_hint_does_not_lock_readonly_queries():
         tool_hints=frozenset({"lookup_teachers"}),
     )
     profile = router.select(decision)
-    assert profile.allowed_tools == router.profiles["guide"].allowed_tools
+    assert profile.allowed_tools == router.profiles["query"].allowed_tools
     assert 'propose_rules' not in profile.allowed_tools
 
     unknown = IntentDecision(
@@ -51,7 +52,7 @@ def test_router_jev_tool_hint_does_not_lock_readonly_queries():
         source="jev",
         tool_hints=frozenset({"delete_everything"}),
     )
-    assert router.select(unknown).allowed_tools == router.profiles["guide"].allowed_tools
+    assert router.select(unknown).allowed_tools == router.profiles["query"].allowed_tools
 
 
 def test_router_policy_retries_then_creates_followup_or_waits_for_user():
@@ -146,7 +147,7 @@ def test_tool_scope_cannot_exceed_harness_allowlist():
         user_id=2,
         can_manage_rules=True,
         page_context=None,
-        allowed_tools=HarnessRouter().profiles["readiness"].allowed_tools,
+        allowed_tools=frozenset({'lookup_schedule_setup'}),
     )
 
     names = {item["function"]["name"] for item in scope.definitions}
@@ -198,9 +199,9 @@ async def test_selected_harness_is_traced_and_passed_to_agent(monkeypatch):
     assert events[0][0] == "intent.classified"
     assert events[0][1]["kind"] == "readiness"
     assert events[1][0] == "harness.selected"
-    assert events[1][1]["name"] == "guide"
+    assert events[1][1]["name"] == "planning"
     invoke.assert_awaited_once()
-    assert invoke.await_args.kwargs['harness'].name == 'guide'
+    assert invoke.await_args.kwargs['harness'].name == 'planning'
     assert not any(name.startswith('supervisor.') for name, _ in events)
 
 
@@ -210,6 +211,12 @@ async def test_agent_applies_harness_prompt_and_tool_budget(monkeypatch):
 
     async def complete(**request):
         calls.append(request)
+        if len(calls) == 1:
+            return ChatOutcome(tool_calls=[ToolCallOut('plan', 'plan_task',
+                '{"goal":"诊断任务","steps":[{"id":"scope","label":"核对诊断范围"}]}')])
+        if len(calls) == 2:
+            return ChatOutcome(tool_calls=[ToolCallOut('scope', 'update_plan_task',
+                '{"task_id":"scope","status":"completed","summary":"本用例核对已选择规划执行约束，未调用实际业务查询"}')])
         return ChatOutcome(text="诊断完成")
 
     monkeypatch.setattr(gateway_model, "complete_chat_tools", complete)
@@ -221,7 +228,7 @@ async def test_agent_applies_harness_prompt_and_tool_budget(monkeypatch):
         api_key="",
         model="test",
         timeout=120,
-        harness=HarnessRouter().profiles["diagnosis"],
+        harness=HarnessRouter().profiles["planning"],
     )
 
     assert result.text == "诊断完成"
@@ -229,4 +236,4 @@ async def test_agent_applies_harness_prompt_and_tool_budget(monkeypatch):
     assert "lookup_generation_status" in names
     assert "propose_rules" not in names
     assert "本轮服务端执行约束" in calls[0]["messages"][0]["content"]
-    assert calls[0]["timeout"] == 75
+    assert calls[0]["timeout"] <= 120

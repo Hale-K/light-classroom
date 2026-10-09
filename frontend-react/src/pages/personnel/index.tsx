@@ -24,6 +24,7 @@ interface PersonEditForm {
   position_code?: StaffAppointment['position_code']
 }
 interface UnitForm { name: string; unit_type: OrganizationUnitType; parent_id?: number; academic_year?: string; cohort_label?: string; grade_id?: number; subject_id?: number }
+interface QuickGradeForm { name: string; level: number }
 const TYPE_OPTIONS = [
   { label: '职能部门', value: 'department' }, { label: '年级部', value: 'grade_group' },
   { label: '学科组', value: 'subject_group' }, { label: '行政班', value: 'admin_class' },
@@ -55,11 +56,13 @@ export default function PersonnelView() {
   const [personEditOpen, setPersonEditOpen] = useState(false)
   const [accountKind, setAccountKind] = useState<'staff' | 'teacher'>('staff')
   const [unitOpen, setUnitOpen] = useState(false)
+  const [quickGradeOpen, setQuickGradeOpen] = useState(false)
   const [editingPerson, setEditingPerson] = useState<StaffAccount>()
   const [editingUnit, setEditingUnit] = useState<OrganizationUnit>()
   const [accountForm] = Form.useForm<AccountForm>()
   const [personEditForm] = Form.useForm<PersonEditForm>()
   const [unitForm] = Form.useForm<UnitForm>()
+  const [quickGradeForm] = Form.useForm<QuickGradeForm>()
 
   const load = async () => {
     setLoading(true)
@@ -96,6 +99,17 @@ export default function PersonnelView() {
     return toNodes(org?.units || [])
   }, [org])
   const units = useMemo(() => flattenOrganizationUnits(org?.units || []), [org])
+  const unavailableParentIds = useMemo(() => {
+    if (!editingUnit) return new Set<number>()
+    const result = new Set<number>([editingUnit.id])
+    const visit = (items: OrganizationUnit[]) => items.forEach((item) => {
+      if (result.has(item.parent_id || -1)) result.add(item.id)
+      if (item.children?.length) visit(item.children)
+    })
+    let previousSize = -1
+    while (previousSize !== result.size) { previousSize = result.size; visit(org?.units || []) }
+    return result
+  }, [editingUnit, org])
   const selectedUnit = typeof selectedKey === 'number' ? units.find((item) => item.id === selectedKey) : undefined
   const yearOptions = useMemo(
     () => academicYearOptions([
@@ -134,6 +148,22 @@ export default function PersonnelView() {
     setStatus(undefined)
     setAppliedStatus(undefined)
     setPage(1)
+  }
+
+  const createQuickGrade = async () => {
+    const values = await quickGradeForm.validateFields().catch(() => null)
+    if (!values) return
+    setSaving(true)
+    try {
+      const grade = await orgApi.createGrade({ ...values, campus_id: null })
+      setSchoolGrades((current) => [...current, grade].sort((a, b) => (a.level || 0) - (b.level || 0)))
+      unitForm.setFieldValue('grade_id', grade.id)
+      quickGradeForm.resetFields()
+      setQuickGradeOpen(false)
+      message.success('年级已建立并自动选中，校区可以稍后关联')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '年级创建失败')
+    } finally { setSaving(false) }
   }
 
   const openCreateAccount = (kind: 'staff' | 'teacher') => {
@@ -421,7 +451,7 @@ export default function PersonnelView() {
           ) : null}
         </Form.Item>
         <Form.Item name="parent_id" label="上级组织">
-          <Select allowClear options={units.filter((item) => item.id !== editingUnit?.id).map((unit) => ({ label: unit.name, value: unit.id }))} />
+          <Select allowClear options={units.filter((item) => !unavailableParentIds.has(item.id)).map((unit) => ({ label: unit.name, value: unit.id }))} />
         </Form.Item>
         <div className="zh-form-grid">
           <Form.Item name="academic_year" label="所属学年"><Select allowClear placeholder="选择学年；长期组织留空" options={yearOptions} /></Form.Item>
@@ -430,10 +460,25 @@ export default function PersonnelView() {
         <Form.Item noStyle shouldUpdate={(prev, next) => prev.unit_type !== next.unit_type}>
           {({ getFieldValue }) => getFieldValue('unit_type') === 'grade_group' ? (
             <Form.Item name="grade_id" label="对应年级" rules={[{ required: true, message: '请选择对应年级' }]}>
-              <Select placeholder="选择高一年级 / 高二年级 / 高三年级" options={schoolGrades.map((grade) => ({ label: grade.name, value: grade.id }))} />
+              <Select
+                placeholder="选择高一年级 / 高二年级 / 高三年级"
+                options={schoolGrades.map((grade) => ({ label: grade.name, value: grade.id }))}
+                notFoundContent={<Button type="link" onClick={() => setQuickGradeOpen(true)}>当前没有年级，直接补建</Button>}
+              />
             </Form.Item>
           ) : null}
         </Form.Item>
+      </Form>
+    </Modal>
+    <Modal title="补建年级" open={quickGradeOpen} onCancel={() => setQuickGradeOpen(false)} onOk={() => void createQuickGrade()} confirmLoading={saving} okText="建立并选中" cancelText="取消" destroyOnHidden>
+      <Form form={quickGradeForm} layout="vertical" initialValues={{ level: 1 }}>
+        <Form.Item name="level" label="年级层级" rules={[{ required: true }]}>
+          <Select options={[1, 2, 3].map((level) => ({ value: level, label: ['高一', '高二', '高三'][level - 1] }))} />
+        </Form.Item>
+        <Form.Item name="name" label="年级名称" rules={[{ required: true, message: '请输入年级名称' }]}>
+          <Input placeholder="例如：高一年级" />
+        </Form.Item>
+        <div className="zh-field-hint">这里先建立年级基础数据，不要求已有校区；校区可在系统设置的年级数据中补充。</div>
       </Form>
     </Modal>
   </div>

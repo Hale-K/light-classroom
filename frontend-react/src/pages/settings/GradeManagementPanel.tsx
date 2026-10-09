@@ -1,20 +1,23 @@
 import { useEffect, useMemo, useState } from 'react'
-import { App, Button, Form, Input, Modal, Select, Table, Tag } from 'antd'
+import { Alert, App, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { useNavigate } from 'react-router-dom'
 import { facilityApi, orgApi } from '@/api'
 import type { Campus, Grade } from '@/types'
 
 const levelNames: Record<number, string> = { 1: '高一年级', 2: '高二年级', 3: '高三年级' }
 
-type GradeFormValues = { name: string; level: number; campus_id: number }
+type GradeFormValues = { name: string; level: number; campus_id?: number }
 
 export default function GradeManagementPanel() {
   const { message } = App.useApp()
+  const navigate = useNavigate()
   const [grades, setGrades] = useState<Grade[]>([])
   const [campuses, setCampuses] = useState<Campus[]>([])
   const [campusId, setCampusId] = useState<number | undefined>()
   const [loading, setLoading] = useState(false)
   const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<Grade | null>(null)
   const [form] = Form.useForm<GradeFormValues>()
 
   const load = async () => {
@@ -63,13 +66,27 @@ export default function GradeManagementPanel() {
       key: 'status',
       render: () => <Tag color="green">已建立</Tag>,
     },
+    {
+      title: '操作',
+      key: 'actions',
+      align: 'right',
+      render: (_, grade) => (
+        <Button type="link" size="small" onClick={() => {
+          setEditing(grade)
+          form.setFieldsValue({ name: grade.name, level: grade.level, campus_id: grade.campus_id ?? undefined })
+          setOpen(true)
+        }}>编辑</Button>
+      ),
+    },
   ]
 
   const submit = async (values: GradeFormValues) => {
     try {
-      await orgApi.createGrade(values)
-      message.success('年级已保存')
+      if (editing) await orgApi.updateGrade(editing.id, { ...values, campus_id: values.campus_id ?? null })
+      else await orgApi.createGrade({ ...values, campus_id: values.campus_id ?? null })
+      message.success(editing ? '年级信息已更新' : '年级已保存，校区可以稍后关联')
       setOpen(false)
+      setEditing(null)
       form.resetFields()
       await load()
     } catch (error) {
@@ -79,6 +96,7 @@ export default function GradeManagementPanel() {
 
   const closeModal = () => {
     setOpen(false)
+    setEditing(null)
     form.resetFields()
   }
 
@@ -89,14 +107,22 @@ export default function GradeManagementPanel() {
       <div className="stg-grade-panel__header">
         <div>
           <h2>年级基础数据</h2>
-          <p>按校区维护高一、高二、高三，年级部只关联这里的年级。</p>
+          <p>先建立高一、高二、高三；校区可以现在选择，也可以在空间准备好后补充。</p>
         </div>
         <div className="stg-grade-panel__actions">
           <Select allowClear value={campusId} placeholder="全部校区" style={{ width: 180 }} onChange={setCampusId} options={campusOptions} />
           <Button onClick={() => void load()} loading={loading}>刷新</Button>
-          <Button type="primary" onClick={() => setOpen(true)} disabled={!campuses.length}>新建年级</Button>
+          <Button type="primary" onClick={() => { setEditing(null); form.resetFields(); setOpen(true) }}>新建年级</Button>
         </div>
       </div>
+      {!campuses.length && (
+        <Alert
+          type="info"
+          showIcon
+          message="当前还没有校区，仍可先建立年级"
+          description={<Space>年级会显示为“未关联校区”。创建校区后回到这里编辑关联即可。<Button type="link" onClick={() => navigate('/campus-buildings?tab=resources')}>去创建校区</Button></Space>}
+        />
+      )}
       <Table<Grade>
         rowKey="id"
         size="middle"
@@ -104,12 +130,12 @@ export default function GradeManagementPanel() {
         columns={columns}
         dataSource={filteredGrades}
         pagination={{ pageSize: 10, showSizeChanger: false }}
-        locale={{ emptyText: campuses.length ? '暂无年级数据，请新建年级' : '请先在空间资源中创建校区' }}
+        locale={{ emptyText: '暂无年级数据，可以直接新建年级' }}
       />
-      <Modal title="新建年级" open={open} centered onCancel={closeModal} onOk={() => form.submit()} okText="保存" cancelText="取消">
+      <Modal title={editing ? '编辑年级' : '新建年级'} open={open} centered onCancel={closeModal} onOk={() => form.submit()} okText="保存" cancelText="取消">
         <Form form={form} layout="vertical" onFinish={submit} initialValues={{ level: 1 }}>
-          <Form.Item name="campus_id" label="所属校区" rules={[{ required: true, message: '请选择校区' }]}>
-            <Select placeholder="请选择校区" options={campusOptions} />
+          <Form.Item name="campus_id" label="所属校区" extra="可选。没有校区时先保存年级，后续再编辑关联。">
+            <Select allowClear placeholder="暂不关联校区" options={campusOptions} />
           </Form.Item>
           <Form.Item name="level" label="年级层级" rules={[{ required: true, message: '请选择年级层级' }]}>
             <Select options={[1, 2, 3].map((level) => ({ label: levelNames[level], value: level }))} />

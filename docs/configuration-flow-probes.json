@@ -1,0 +1,10 @@
+{
+  "storage": "disposable in-memory SQLite; no school database accessed",
+  "endpoint_adapter": "sync SQL session wrapped for endpoint coroutine calls",
+  "descendant_parent_move_rejected": true,
+  "cycle_nodes_hidden_from_current_tree": false,
+  "grade_group_without_cohort_accepted": true,
+  "custom_named_group_grade_id": 10,
+  "actual_students_in_bound_grade": 1,
+  "allocation_student_count_for_custom_group_name": 1
+}

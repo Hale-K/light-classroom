@@ -71,14 +71,15 @@ export default function AllocationRuleDrawer({
     // 规则的适用范围跟随系统当前学年学期，避免在不同页面上下文间误存错期次。
     form.setFieldsValue({ academic_year: currentAcademicYear, term: currentTerm })
     void Promise.all([authApi.academicYears(), organizationApi.tree()]).then(([settings, tree]) => {
-      const units = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'grade_group' && item.status === 'active' && item.cohort_label)
-      setGradeUnits(units)
+      const allGradeUnits = flattenOrganizationUnits(tree.units).filter((item) => item.unit_type === 'grade_group' && item.status === 'active')
+      const units = allGradeUnits.filter((item) => item.cohort_label)
+      setGradeUnits(allGradeUnits)
       setGradeUnitOptions(units
         .sort((left, right) => (right.cohort_label || '').localeCompare(left.cohort_label || '') || left.name.localeCompare(right.name, 'zh-CN'))
         .map((item) => ({ value: item.id, label: `${item.cohort_label} · ${item.name}` })))
       setAcademicYearOptions(Array.from(new Set(settings.years.flatMap((item) => Object.values(item.grade_years)))).sort().map((value) => ({ value, label: `${value}学年` })))
       if (settings.current_entry_year !== null) {
-        const currentGradeUnit = units.find((item) => item.cohort_label === `${settings.current_entry_year}届`)
+        const currentGradeUnit = units.find((item) => String(item.cohort_label).replace('届', '') === String(settings.current_entry_year))
         if (currentGradeUnit) form.setFieldValue('target_grade_unit_id', currentGradeUnit.id)
         const current = settings.years.find((item) => item.entry_year === settings.current_entry_year)
         const firstYear = current ? Object.values(current.grade_years)[0] : undefined
@@ -98,7 +99,7 @@ export default function AllocationRuleDrawer({
     return Object.fromEntries(Object.entries({
       ...rest,
       cohort_label: targetUnit.cohort_label,
-      academic_year: targetUnit.academic_year || values.academic_year,
+      academic_year: values.academic_year,
     }).filter(([, value]) => value !== undefined && value !== ''))
   }
   const preview = async () => {
@@ -185,7 +186,7 @@ export default function AllocationRuleDrawer({
     <Form
       form={form}
       layout="vertical"
-      initialValues={{ term: currentTerm, academic_year: currentAcademicYear, allocation_mode: 'shared' }}
+      initialValues={{ term: currentTerm, academic_year: currentAcademicYear, allocation_mode: 'exclusive' }}
       requiredMark
     >
       <div className="facility-form-grid">
@@ -205,7 +206,7 @@ export default function AllocationRuleDrawer({
                 type="link"
                 size="small"
                 style={{ padding: 0 }}
-                onClick={() => { onClose(); navigate('/organization') }}
+                onClick={() => { onClose(); navigate('/staff?tab=organization') }}
               >去设置</Button>
             </span>
           )}
@@ -214,14 +215,14 @@ export default function AllocationRuleDrawer({
             showSearch
             optionFilterProp="label"
             options={gradeUnitOptions}
-            placeholder={gradeUnitOptions.length === 0 ? '暂无年级部，点击下方"去设置"' : '选择年级管理中心下的年级部'}
+            placeholder={gradeUnitOptions.length === 0 ? '暂无已配置届别的年级部' : '选择年级部'}
             notFoundContent={
               <div style={{ padding: 8, textAlign: 'center' }}>
                 暂无年级部
                 <Button
                   type="link"
                   size="small"
-                  onClick={() => { onClose(); navigate('/organization') }}
+                  onClick={() => { onClose(); navigate('/staff?tab=organization') }}
                 >去设置</Button>
               </div>
             }

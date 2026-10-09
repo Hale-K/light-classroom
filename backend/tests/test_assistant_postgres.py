@@ -89,9 +89,9 @@ async def test_background_run_persists_progress_and_does_not_complete_after_canc
         await on_progress('tool', '正在核对课时与任教')
         entered.set()
         await release.wait()
-        return teacher.AssistantTurn(text='测试查询结果')
+        return assistant_agent.AssistantTurn(text='测试查询结果')
     monkeypatch.setattr(deps, 'get_user_permission_codes', permissions)
-    monkeypatch.setattr(teacher, 'handle_assistant_turn', answer)
+    monkeypatch.setattr(assistant_agent, 'handle_assistant_turn', answer)
     try:
         async with admin.begin() as conn:
             await conn.execute(text(f'CREATE SCHEMA "{schema}"'))
@@ -102,7 +102,8 @@ async def test_background_run_persists_progress_and_does_not_complete_after_canc
             await session.commit()
         payload = {'messages': [{'role': 'user', 'content': '检查排课'}]}
         for cancel in (False, True):
-            entered.clear(); release.clear()
+            entered.clear()
+            release.clear()
             rid = uuid4().hex
             async with sessions() as session:
                 await create_run(session, rid, 1, 2, payload)

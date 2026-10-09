@@ -33,7 +33,7 @@ def test_public_run_view_exposes_supervisor_status_without_private_trace():
 
     assert view["events"] == []
     assert view["execution"] == {
-        "mode": "supervisor",
+        "mode": "planning",
         "multi_agent": False,
         "kind": "readiness",
         "tasks": [{

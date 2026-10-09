@@ -72,7 +72,13 @@ async def test_configuration_request_in_plan_mode_returns_advice_not_draft(monke
         if len(calls) == 1:
             # A model can still hallucinate an unadvertised tool; the gateway must deny it.
             return ChatOutcome(tool_calls=[ToolCallOut('bad', 'propose_rules', '{}')])
-        assert '拒绝' in request['messages'][-1]['content']
+        if len(calls) == 2:
+            assert '拒绝' in request['messages'][-1]['content']
+            return ChatOutcome(tool_calls=[ToolCallOut('plan', 'plan_task',
+                '{"goal":"只读规则建议","steps":[{"id":"rules","label":"核对规则现状"}]}')])
+        if len(calls) == 3:
+            return ChatOutcome(tool_calls=[ToolCallOut('blocked', 'update_plan_task',
+                '{"task_id":"rules","status":"blocked","summary":"当前测试环境缺少本校规则数据；只能给未执行建议"}')])
         return ChatOutcome(text='建议周三不排数学；退出计划模式后再确认配置。')
     monkeypatch.setattr(gateway_model, 'complete_chat_tools', complete)
     services = ServiceRegistry()

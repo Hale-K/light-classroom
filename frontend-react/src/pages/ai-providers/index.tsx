@@ -106,6 +106,7 @@ export default function AiProvidersView() {
             video_model: row.video_model ?? undefined,
             audio_model: row.audio_model ?? undefined,
             timeout_seconds: row.timeout_seconds,
+            max_output_tokens: row.max_output_tokens ?? 8192,
             is_default: row.is_default,
             status: row.status,
             sort: row.sort,
@@ -116,6 +117,7 @@ export default function AiProvidersView() {
             provider_type: preset.value,
             base_url: preset.defaultBaseUrl,
             timeout_seconds: 120,
+            max_output_tokens: 8192,
             is_default: false,
             status: 1,
             sort: 0,
@@ -381,9 +383,19 @@ export default function AiProvidersView() {
                 key: c.key,
                 label: c.label,
                 children: (
+                  <>
                   <Form.Item name={c.field} label={c.label} extra="加载模型后从下拉选择，也可手填">
                     <Select showSearch allowClear placeholder="选择或输入" options={modelOptions[c.key] ?? []} />
                   </Form.Item>
+                  {c.key === 'CHAT' && (
+                    <Form.Item name="max_output_tokens" label="最大输出 Token" rules={[
+                      { required: true, message: '请输入最大输出 Token' },
+                      { type: 'integer', min: 1, max: 262144, message: '请输入 1–262144 的整数' },
+                    ]}>
+                      <InputNumber min={1} max={262144} precision={0} style={{ width: '100%' }} />
+                    </Form.Item>
+                  )}
+                  </>
                 ),
               })),
             ]}

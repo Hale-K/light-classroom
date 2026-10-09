@@ -77,8 +77,9 @@ export async function generateCoursewareStream(
       const raw = line.slice(5).trim()
       if (!raw) continue
       try {
-        const payload = JSON.parse(raw) as { type?: string; chars?: number; message?: string; item?: CoursewareInfo; name?: string }
+        const payload = JSON.parse(raw) as { type?: string; chars?: number; message?: string; item?: CoursewareInfo; name?: string; model?: string }
         if (payload.type === 'progress' && typeof payload.chars === 'number') handlers.onProgress?.(payload.chars)
+        else if (payload.type === 'start' && payload.model) handlers.onModel?.(payload.model)
         else if (payload.type === 'model' && payload.name) handlers.onModel?.(payload.name)
         else if (payload.type === 'done' && payload.item) result = payload.item
         else if (payload.type === 'error' && payload.message) errorMessage = payload.message

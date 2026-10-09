@@ -3,7 +3,7 @@ from unittest.mock import AsyncMock
 import pytest
 
 from app.ai.agent import assistant_agent
-from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
+from app.ai.intent import AssistantIntent, ExecutionMode, IntentDecision, IntentGateway
 from app.ai.intent.vector import PostgresIntentClassifier
 from app.ai.runtime import AssistantRuntime, ServiceRegistry
 from app.ai.supervisor.contracts import (
@@ -180,10 +180,11 @@ async def test_focused_read_query_does_not_start_comprehensive_checks(kind):
     from app.ai.intent import AssistantRoute
     from app.ai.harness import HarnessRouter
     classifier = AsyncMock(return_value=IntentDecision(kind, .95, 'test',
-        tool_hints=frozenset({'lookup_teachers'})))
+        tool_hints=frozenset({'lookup_teachers'}), execution_mode=ExecutionMode.QUERY))
     decision = await IntentGateway(classifier).classify(None, '政治老师的任课情况')
     assert decision.route is AssistantRoute.AGENT
-    assert HarnessRouter().select(decision).allowed_tools == HarnessRouter().profiles['guide'].allowed_tools
+    assert decision.effective_mode is ExecutionMode.QUERY
+    assert HarnessRouter().select(decision).allowed_tools == HarnessRouter().profiles['query'].allowed_tools
     assert decision.kind is kind
 
 
@@ -235,13 +236,19 @@ async def test_decision_requesting_clarification_is_not_overridden_by_vector():
 
 
 @pytest.mark.asyncio
-async def test_configuration_with_one_tool_still_requires_review():
+async def test_configuration_with_one_tool_stays_planning_and_requires_confirmed_write():
     from app.ai.intent import AssistantRoute
+    from app.ai.harness import HarnessRouter
     classifier = AsyncMock(return_value=IntentDecision(AssistantIntent.CONFIGURATION, .95, 'test',
         tool_hints=frozenset({'lookup_rules'})))
     decision = await IntentGateway(classifier).classify(None, '修改教师禁排规则')
-    assert decision.kind is AssistantIntent.CONFIGURATION
-    assert decision.route is AssistantRoute.HUMAN_REVIEW
+    assert decision.effective_mode is ExecutionMode.PLANNING
+    assert decision.write_requested is True
+    assert decision.route is AssistantRoute.AGENT
+    profile = HarnessRouter().select(decision)
+    assert profile.name == 'planning'
+    assert 'propose_rules' in profile.allowed_tools
+    assert '实际写入仍需独立确认' in profile.instructions
 
 
 @pytest.mark.asyncio

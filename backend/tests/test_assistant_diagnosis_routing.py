@@ -38,4 +38,4 @@ async def test_diagnosis_intent_uses_agent_without_fixed_supervisor(monkeypatch)
 
     assert result.text == "已收集排课失败证据"
     model_reply.assert_awaited_once()
-    assert model_reply.await_args.kwargs['harness'].name == 'guide'
+    assert model_reply.await_args.kwargs['harness'].name == 'planning'

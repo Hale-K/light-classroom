@@ -6,6 +6,7 @@ import EmptyState from '@/components/EmptyState'
 import Icon from '@/components/Icon'
 import './school-settings-form.css'
 import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
+import { useSearchParams } from 'react-router-dom'
 
 type GaokaoMode = '3+1+2' | '3+3' | 'traditional'
 type TimetableMode = 'administrative' | 'walk_class'
@@ -58,7 +59,9 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
   const [currentEntryYear, setCurrentEntryYear] = useState<number>()
   const [currentAcademicYear, setCurrentAcademicYear] = useState<string>()
   const [currentTerm, setCurrentTerm] = useState<'1' | '2'>('1')
-  const [activeTab, setActiveTab] = useState<'basic' | 'cohorts' | 'grades'>('basic')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const requestedTab = searchParams.get('tab')
+  const [activeTab, setActiveTab] = useState<'basic' | 'cohorts' | 'grades'>(requestedTab === 'cohorts' || requestedTab === 'grades' ? requestedTab : 'basic')
 
   // 新建届别弹窗
   const [cohortModalOpen, setCohortModalOpen] = useState(false)
@@ -432,7 +435,11 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
       <Tabs
         className="ssf-tabs"
         activeKey={activeTab}
-        onChange={(k: string) => setActiveTab(k as 'basic' | 'cohorts' | 'grades')}
+        onChange={(k: string) => {
+          const next = k as 'basic' | 'cohorts' | 'grades'
+          setActiveTab(next)
+          setSearchParams(next === 'basic' ? {} : { tab: next }, { replace: true })
+        }}
         items={[
           {
             key: 'basic',

@@ -24,6 +24,7 @@ class AiProvider(TimestampMixin, TenantMixin, SQLModel, table=True):
     video_model: str | None = Field(default=None, max_length=120)
     audio_model: str | None = Field(default=None, max_length=120)
     timeout_seconds: int = Field(default=120)
+    max_output_tokens: int = Field(default=8192, sa_column_kwargs={"server_default": "8192"})
     is_default: bool = Field(default=False, index=True)
     status: int = Field(default=1, index=True, description="1 启用 0 停用")
     sort: int = Field(default=0)

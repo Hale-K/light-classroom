@@ -24,6 +24,8 @@ export const orgApi = {
   },
   createGrade: (data: { name: string; level: number; campus_id?: number | null }) =>
     unwrap<Grade>(http.post('/org/grades', data)),
+  updateGrade: (id: number, data: { name?: string; level?: number; campus_id?: number | null }) =>
+    unwrap<Grade>(http.patch(`/org/grades/${id}`, data)),
   classes: (params?: { grade_id?: number; academic_year?: string; term?: string }) =>
     unwrap<ClassInfo[]>(http.get('/org/classes', { params })),
   assignHeadTeacher: (classId: number, data: { teacher_id: number; academic_year: string; term: string }) =>

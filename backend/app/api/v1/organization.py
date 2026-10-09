@@ -8,7 +8,7 @@ from app.api.deps import get_current_tenant, get_current_user
 from app.db.session import get_session
 from app.models.enums import BaseUserRole
 from app.models.org import Grade, OrganizationUnit, StaffAppointment, StudentGradeMembership, Subject, Tenant, TenantConfig, User
-from app.services.org.organization import build_organization_tree, current_organization_units, organization_subtree_ids
+from app.services.org.organization import build_organization_tree, current_organization_units, organization_subtree_ids, validate_parent_move
 from app.services.org.cohort import normalize_cohort_label
 
 router = APIRouter(prefix="/organization", tags=["组织机构"])
@@ -255,8 +255,13 @@ async def update_unit(
             raise HTTPException(status_code=422, detail="对应年级不存在")
     if "subject_id" in values and values["subject_id"] is not None:
         await _tenant_subject(session, tenant_id, values["subject_id"])
-    if values.get("parent_id") == unit_id:
-        raise HTTPException(status_code=422, detail="组织节点不能成为自己的上级")
+    tenant_units = list((await session.execute(
+        select(OrganizationUnit).where(OrganizationUnit.tenant_id == tenant_id)
+    )).scalars().all())
+    try:
+        validate_parent_move(unit_id, values.get("parent_id"), [item.model_dump() for item in tenant_units])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     if values.get("parent_id") is not None:
         parent = await _tenant_unit(session, tenant_id, values["parent_id"])
         if parent.id not in await _current_organization_unit_ids(session, tenant_id):

@@ -1,8 +1,7 @@
-"""教务 Agent。对应 Spring AI Alibaba Agent Framework 的 ReactAgent / RoutingAgent（单任务）。"""
+"""Two-mode school assistant with one evidence context per task."""
 from __future__ import annotations
 
 import logging
-import time
 from collections.abc import Awaitable, Callable
 from typing import cast
 
@@ -11,36 +10,25 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.ai.agent.agent_loop import run_agent_loop
 from app.ai.agent.invocation import invoke_agent
 from app.ai.agent.models import AssistantTurn
-from app.ai.agent.fallback import text_only_fallback
-from app.ai.agent.context import blocked_destructive_request, last_user_message, trim_turns
+from app.ai.agent.context import blocked_destructive_request, last_user_message
 from app.ai.conversations import project_messages, project_summary
 from app.ai.consultation import consultation_reply
 from app.ai.gateway import ModelGatewayService, ToolGatewayService
-from app.ai.guide import degraded_reply as _local_degraded_reply
 from app.ai.guide import fast_reply as _local_fast_reply
 from app.ai.guide import rule_jumps
 from app.ai.harness import HarnessProfile, HarnessRouterService
 from app.ai.harness.router import apply_assistant_mode
 from app.ai.intent import IntentGatewayService
-from app.ai.model.chat import ChatError
+from app.ai.model.chat import ChatEndpoint, ChatError
 from app.ai.resilience import provider_circuits
 from app.ai.runs.events import TraceCallback
 from app.ai.runs.progress import Progress, report_progress
 from app.ai.runtime import AssistantRuntime
-from app.ai.runs.service import RUN_TIMEOUT
 
 logger = logging.getLogger(__name__)
 
 
 
-# 工具循环已消耗超过该秒数才失败时，不再走降级路径（降级还要两轮模型调用，必然撞总闸）。
-_FALLBACK_MAX_SPENT = 20
-# 降级两轮调用的单轮上限：RUN_TIMEOUT(180) − 前序最多 _FALLBACK_MAX_SPENT(20) 对半再留余量，
-# 保证降级路径整体不撞总闸被拦腰砍断。
-# 快速失败后可尝试"只读说明"降级的错误类别（同服务商还活着，只是工具调用不可用）。
-_TEXT_ONLY_FALLBACK_ERRORS = {"bad_request", "parse", "empty", "context_overflow", "unavailable"}
-# 服务明显活着、只是本轮请求没能完成的类别：保留精确报错抛出，不吞进"服务不可用"的本地文案。
-_PRECISE_FAILURE_CLASSES = {"bad_request", "parse", "empty", "context_overflow", "exhausted"}
 # 意图确实无法归类时的本地澄清话术；不预设用户在报错，避免答非所问的观感。
 CLARIFY_REPLY = "你具体想处理什么问题？可以说明要查的数据或想做的操作，也可以附上相关文件，我再帮你核对。"
 async def agent_reply(
@@ -52,6 +40,7 @@ async def agent_reply(
     api_key: str,
     model: str,
     timeout: int,
+    max_tokens: int = 8192,
     page_title: str | None = None,
     page_path: str | None = None,
     user_id: int | None = None,
@@ -66,6 +55,7 @@ async def agent_reply(
     on_step: Callable[[int], Awaitable[list[dict]]] | None = None,
     harness: HarnessProfile | None = None,
     retrieved: str = "",
+    provider_endpoints: list[ChatEndpoint] | None = None,
 ) -> AssistantTurn:
     """模型查本校数据或生成一份待确认草稿；草稿成功后直接返回可信卡片。"""
 
@@ -96,36 +86,26 @@ async def agent_reply(
         allowed_tools=harness.allowed_tools,
         on_trace=on_trace,
     )
+    configure_request = getattr(tool_scope, 'configure_request', None)
+    if callable(configure_request):
+        configure_request(last_user_message(turns))
 
-    try:
-        outcome = await run_agent_loop(
+    outcome = await run_agent_loop(
             turns, memory_summary, base_url=base_url, api_key=api_key,
             model=model, timeout=timeout, on_progress=on_progress,
+            max_tokens=max_tokens,
             on_trace=on_trace, on_step=on_step, model_gateway=model_gateway,
             tool_scope=tool_scope, harness=harness, page_title=page_title,
             page_path=page_path, can=can, cannot=cannot,
             page_context=page_context, retrieved=retrieved,
-        )
-    except ChatError as exc:
-        if exc.error_class != "context_overflow":
-            raise
-        # 上下文超长：压掉早期历史和长摘要重试一次，仍超长才放行给降级路径。
-        trimmed = project_messages(trim_turns(turns), limit=6, token_budget=1800)
-        logger.warning("assistant.agent overflow retry turns=%d->%d", len(turns), len(trimmed))
-        await report_progress(on_progress, "model", "对话较长，正在压缩上下文重试")
-        outcome = await run_agent_loop(
-            trimmed, memory_summary[:1500], base_url=base_url, api_key=api_key,
-            model=model, timeout=timeout, on_progress=on_progress,
-            on_trace=on_trace, on_step=on_step, model_gateway=model_gateway,
-            tool_scope=tool_scope, harness=harness, page_title=page_title,
-            page_path=page_path, can=can, cannot=cannot,
-            page_context=page_context, retrieved=retrieved,
-        )
+            provider_endpoints=provider_endpoints,
+    )
     logger.info("assistant.agent tools=%s", ",".join(s.tool for s in outcome.steps) or "-")
     plan = tool_scope.plan
     last_user = last_user_message(turns)
     guide = runtime.service("ui_guide") if runtime else None
-    jumps = [] if plan else (guide.rule_jumps(last_user, outcome.text, page_path) if guide else rule_jumps(last_user, outcome.text, page_path))
+    jumps = [] if plan or (harness.name == 'planning' and 'propose_rules' not in harness.allowed_tools) else (
+        guide.rule_jumps(last_user, outcome.text, page_path) if guide else rule_jumps(last_user, outcome.text, page_path))
     step_lines = [f"{step.tool}：{step.detail}" for step in outcome.steps]
     return AssistantTurn(
         text="规则草稿已准备，请核对下方内容后确认。" if plan else outcome.text,
@@ -210,7 +190,7 @@ async def handle_assistant_turn(
     harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     harness = apply_assistant_mode(harness, page_context)
     await runtime.emit("harness.selected", harness.trace_data())
-    if harness.name == "direct" and not has_materials:
+    if harness.strategy == "direct" and not has_materials:
         fast = _local_fast_reply(query)
         if fast is not None:
             await runtime.progress("completed", "已快速完成本地计算")
@@ -239,67 +219,16 @@ async def handle_assistant_turn(
     # 慢服务商把 180 秒总闸撞爆，整轮报废成 timed_out。
     await runtime.emit("turn.agent_started", {"agent": "assistant"})
 
-    routed = await model_gateway.route(
-        endpoints,
-        total_budget_seconds=min(RUN_TIMEOUT, harness.turn_timeout_seconds),
-        invoke=lambda endpoint: invoke_agent(
-            endpoint, session=session, tenant_id=tenant_id, turns=turns,
+    # One task owns one evidence context. Failover happens inside each model
+    # invocation, never by restarting this agent and repeating completed tools.
+    if not endpoints:
+        raise ChatError('没有可用的模型服务，请检查服务商配置。', 'config')
+    return await invoke_agent(
+            endpoints[0], session=session, tenant_id=tenant_id, turns=turns,
             page_title=page_title, page_path=page_path, user_id=user_id,
             can_manage_rules=can_manage_rules, can=can, cannot=cannot,
             on_progress=on_progress, page_context=page_context,
             memory_summary=memory_summary, on_trace=on_trace, runtime=runtime,
             on_step=on_step, harness=harness, retrieved=retrieved,
-        ),
-        on_progress=on_progress,
-        on_trace=on_trace,
-        message_id=message_id,
-        clock=time.monotonic,
-    )
-    if routed.value is not None:
-        turn = routed.value
-        if routed.used_backup and routed.endpoint is not None:
-            turn.think.append(f"故障恢复：已切换至备用模型「{routed.endpoint.name}」")
-        return turn
-
-    last_error = routed.last_error
-    trail = routed.trail
-    if last_error is not None and (
-        routed.spent_seconds <= _FALLBACK_MAX_SPENT
-        and last_error.error_class in _TEXT_ONLY_FALLBACK_ERRORS
-        and routed.endpoint is None
-        and endpoints
-    ):
-        # 只读说明只在快速失败时尝试，防止两轮额外模型调用耗尽任务总预算。
-        try:
-            if on_trace:
-                await on_trace("provider.degraded", {"provider": endpoints[-1].name, "mode": "text_only", "error_class": last_error.error_class})
-            turn = await text_only_fallback(
-                endpoints[-1], max(10, int((RUN_TIMEOUT - routed.spent_seconds) // 2)),
-                query=query, turns=turns, page_title=page_title, page_path=page_path,
-                can=can, cannot=cannot, page_context=page_context,
-                memory_summary=memory_summary, on_progress=on_progress,
-                model_gateway=model_gateway,
-            )
-            provider_circuits.record_success(endpoints[-1].key)
-            return turn
-        except ChatError as fallback_error:
-            last_error = fallback_error
-            trail.append(f"{endpoints[-1].name}只读说明仍失败({fallback_error.error_class})")
-
-    if routed.budget_exhausted:
-        raise ChatError("本轮处理时间已用尽，请稍后重试或把要求拆成几条；未执行规则写入", "timeout")
-    if last_error is not None and last_error.error_class in _PRECISE_FAILURE_CLASSES:
-        # 服务其实活着，只是本轮请求没完成：保留精确报错，"服务不可用"文案反而误导。
-        raise last_error
-    logger.warning(
-        "assistant.agent degraded id=%s class=%s",
-        message_id or "-",
-        last_error.error_class if last_error else "isolated",
-    )
-    await report_progress(on_progress, "degraded", "所有模型通道暂不可用，已切换到本地教务说明模式")
-    note = "；".join(trail) if trail else "模型通道不可用"
-    return AssistantTurn(
-        text=_local_degraded_reply(query, page_path),
-        think=[f"故障降级：{note}；本轮未执行任何写操作"],
-        model_visible=False,
+            provider_endpoints=endpoints,
     )

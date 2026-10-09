@@ -65,7 +65,7 @@ async def test_stream_keeps_queued_run_open_and_releases_read_transaction(monkey
         if "event: run.status" in text:
             payload = json.loads(text.split("data: ", 1)[1])
             statuses.append(payload.get("status"))
-            assert payload["execution"]["mode"] in {"pending", "direct"}
+            assert payload["execution"]["mode"] == 'query'
 
     assert statuses == ["queued", "done"]
     assert session.rollbacks == 2

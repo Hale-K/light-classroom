@@ -14,6 +14,7 @@ export type AiProvider = {
   video_model?: string | null
   audio_model?: string | null
   timeout_seconds: number
+  max_output_tokens: number
   is_default: boolean
   status: number
   sort: number
@@ -33,6 +34,7 @@ export type AiProviderForm = {
   video_model?: string | null
   audio_model?: string | null
   timeout_seconds?: number
+  max_output_tokens?: number
   is_default?: boolean
   status?: number
   sort?: number
@@ -62,13 +64,15 @@ export type AssistantPlan = {
 }
 
 export type AssistantExecution = {
-  mode: 'pending' | 'direct' | 'agent' | 'supervisor'
+  mode: 'pending' | 'query' | 'planning'
   multi_agent: boolean
   kind: 'readiness' | 'diagnosis' | null
+  goal?: string
   tasks: {
     id: string
     label: string
-    status: 'running' | 'succeeded' | 'failed'
+    status: 'pending' | 'running' | 'succeeded' | 'completed' | 'failed' | 'blocked' | 'skipped' | 'cancelled' | 'timed_out'
+    summary?: string
     attempt?: number
     retry_count?: number
     allowed_tools?: string[]

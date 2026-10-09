@@ -9,7 +9,7 @@ from dataclasses import dataclass, replace
 from types import MappingProxyType
 from typing import Protocol
 
-from app.ai.intent import AssistantIntent, AssistantRoute, IntentDecision
+from app.ai.intent import AssistantRoute, ExecutionMode, IntentDecision
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,9 +40,9 @@ class HarnessRouterService(Protocol):
     def select(self, decision: IntentDecision) -> HarnessProfile: ...
 
 
-GUIDE_HARNESS = HarnessProfile(
-    name="guide",
-    label="页面说明",
+QUERY_HARNESS = HarnessProfile(
+    name="query",
+    label="普通问答/查询",
     strategy="direct_or_react",
     instructions=(
         "先理解用户当前的问题：能直接回答就直接回答，范围不明确先追问，"
@@ -51,22 +51,31 @@ GUIDE_HARNESS = HarnessProfile(
         "明确区分事实、推断和未核实项；证据不足时不要声称已完成全面检查。"
         "排课问题按问题选择日志、容量或走班数据工具，不默认检查全校。"
         "走班人数与固定任课用 lookup_walk_classes，缺年级先澄清；禁止凭经验编造根因。"
+        "学生选科与入班查 lookup_student_choices；行政和走班任课查 lookup_teaching_assignments；"
+        "合并或个人课表查 lookup_timetable；资源碰撞查 lookup_schedule_conflicts。"
+        "按查询结果的缺失数据说明校验边界；完整列表按 has_more 继续分页。"
+        "学校模式先查 lookup_school_context；行政模式只查行政课，走班模式区分行政课和走班课，两者可合并。"
         "不要创建规则草稿。"
     ),
     allowed_tools=frozenset({
+        "format_markdown",
+        'lookup_school_context',
         "lookup_playbook", "lookup_schedule_setup", "lookup_teachers", "lookup_rules",
         "lookup_generation_status",
         "lookup_generation_log", "lookup_subject_capacity", "lookup_remaining_capacity",
         "lookup_slot_role_capacity", "lookup_walk_classes",
+        "lookup_student_choices", "lookup_teaching_assignments",
+        "lookup_timetable", "lookup_schedule_conflicts",
+        "lookup_planning_basis", "validate_hour_scenarios",
     }),
-    max_steps=3,
-    step_timeout_seconds=60,
-    turn_timeout_seconds=90,
+    max_steps=4,
+    step_timeout_seconds=120,
+    turn_timeout_seconds=240,
 )
 
 DIRECT_HARNESS = HarnessProfile(
-    name="direct",
-    label="快速回答",
+    name="query",
+    label="普通问答/查询",
     strategy="direct",
     instructions="直接回答当前问题，不读取学校数据，不调用工具，不创建任何草稿。",
     allowed_tools=frozenset(),
@@ -75,74 +84,41 @@ DIRECT_HARNESS = HarnessProfile(
     turn_timeout_seconds=45,
 )
 
-PLAN_HARNESS = replace(
-    GUIDE_HARNESS,
-    name='plan', label='计划模式',
+PLANNING_HARNESS = replace(
+    QUERY_HARNESS,
+    name='planning', label='复杂规划/执行', strategy='planned_react',
+    max_steps=20, step_timeout_seconds=120, turn_timeout_seconds=600,
+    allowed_tools=QUERY_HARNESS.allowed_tools | {'plan_task', 'update_plan_task'},
     instructions=(
-        '本轮为计划模式：只分析、查询和提出方案，不创建规则草稿、不执行页面操作或数据修改。'
-        '先说明结论，再给必要的步骤和待确认项；简单问题直接回答，模糊问题先追问。'
-        '不要把建议说成已完成；用户要求保存或执行时说明需退出计划模式并明确确认。'
-        + GUIDE_HARNESS.instructions
+        '复杂任务先调用plan_task列出简明业务步骤，步骤名不写工具名。完成取证或验算后立即用update_plan_task更新该步骤状态和证据摘要。'
+        '同次模型回复可批量调用多个状态更新；交付前补齐早先完成步骤，汇总步骤准备好正式内容后标完成，再单独调用format_markdown。'
+        '依次核对环境范围、取得必要证据、形成候选结果、程序校验、完整汇总；按问题调整步骤，不执行无关固定检查。'
+        '多方案课时规划先lookup_planning_basis核对该年级学期实际课位及单双周；'
+        '生成最多三案后调用validate_hour_scenarios验算合计、必排容量及固定科目。校验不通过先修正再交付。'
+        '全部查询按has_more翻页；不要把前几条当全部。'
+        '高考分值未配置时说明缺失；可先按明确标注的教育均衡假设提出建议，不能假称比例已核实。'
+        '缺数据标blocked并集中询问；不得把未完成或失败步骤标completed。'
+        '每次循环最多120秒，整任务600秒；已有证据直接复用，完成即停止。'
+        + QUERY_HARNESS.instructions
     ),
 )
+
+# Compatibility imports for integrations; interactive routing registers only two profiles.
+GUIDE_HARNESS = QUERY_HARNESS
+PLAN_HARNESS = replace(PLANNING_HARNESS, instructions=(
+    '本轮为只读计划模式：只查询、分析和建议，不创建规则草稿、不修改任何业务数据。'
+    + PLANNING_HARNESS.instructions))
 
 
 def apply_assistant_mode(profile: HarnessProfile, page_context: dict | None) -> HarnessProfile:
-    return PLAN_HARNESS if (page_context or {}).get('assistant_mode') == 'plan' else profile
+    if (page_context or {}).get('assistant_mode') != 'plan':
+        return profile
+    return replace(profile, allowed_tools=profile.allowed_tools - {'propose_rules'},
+        instructions='本轮为只读计划模式：禁止草稿与数据修改。' + profile.instructions)
 
-READINESS_HARNESS = HarnessProfile(
-    name="readiness",
-    label="排课准备检查",
-    strategy="checklist_react",
-    instructions=(
-        "先核对学年学期、课时课位、任教关系和规则，再按已满足、缺失、下一步输出清单。"
-        "所有结论必须来自工具结果；本任务禁止创建规则草稿。"
-    ),
-    allowed_tools=frozenset({
-        "lookup_schedule_setup", "lookup_teachers", "lookup_rules", "lookup_playbook",
-    }),
-    max_steps=5,
-    step_timeout_seconds=75,
-    turn_timeout_seconds=150,
-)
-
-DIAGNOSIS_HARNESS = HarnessProfile(
-    name="diagnosis",
-    label="排课故障诊断",
-    strategy="evidence_first_react",
-    instructions=(
-        "先读取排课任务状态，再核对准备数据和规则。明确区分观测事实与推断，"
-        "给出可验证的恢复步骤。班数、人数、走班任课问题查询 lookup_walk_classes；"
-        "容量和求解日志按需查询，不要把准备完整或容量足够当成求解成功。"
-        "本任务禁止创建规则草稿。"
-    ),
-    allowed_tools=frozenset({
-        "lookup_generation_status", "lookup_schedule_setup", "lookup_teachers",
-        "lookup_rules", "lookup_playbook",
-        "lookup_generation_log", "lookup_subject_capacity", "lookup_remaining_capacity",
-        "lookup_slot_role_capacity", "lookup_walk_classes",
-    }),
-    max_steps=6,
-    step_timeout_seconds=75,
-    turn_timeout_seconds=180,
-)
-
-CONFIGURATION_HARNESS = HarnessProfile(
-    name="configuration",
-    label="规则配置草稿",
-    strategy="proposal_react",
-    instructions=(
-        "先查询现状并澄清范围，再生成一份可核对的规则草稿。只能调用草稿能力，"
-        "不能声称已经保存；实际写入必须等待老师在独立确认接口中确认。"
-    ),
-    allowed_tools=frozenset({
-        "lookup_schedule_setup", "lookup_teachers", "lookup_rules", "lookup_playbook",
-        "propose_rules",
-    }),
-    max_steps=5,
-    step_timeout_seconds=75,
-    turn_timeout_seconds=150,
-)
+READINESS_HARNESS = PLANNING_HARNESS
+DIAGNOSIS_HARNESS = PLANNING_HARNESS
+CONFIGURATION_HARNESS = PLANNING_HARNESS
 
 
 class HarnessRouter:
@@ -151,30 +127,18 @@ class HarnessRouter:
     profiles = MappingProxyType({
         profile.name: profile
         for profile in (
-            GUIDE_HARNESS, READINESS_HARNESS, DIAGNOSIS_HARNESS, CONFIGURATION_HARNESS,
-            DIRECT_HARNESS,
+            QUERY_HARNESS, PLANNING_HARNESS,
         )
     })
 
-    _intent_profiles = MappingProxyType({
-        AssistantIntent.GUIDE: GUIDE_HARNESS,
-        AssistantIntent.READINESS: READINESS_HARNESS,
-        AssistantIntent.DIAGNOSIS: DIAGNOSIS_HARNESS,
-        AssistantIntent.CONFIGURATION: CONFIGURATION_HARNESS,
-        AssistantIntent.UNKNOWN: GUIDE_HARNESS,
-    })
-
     def select(self, decision: IntentDecision) -> HarnessProfile:
-        if decision.route is AssistantRoute.DIRECT:
+        if decision.route is AssistantRoute.DIRECT and decision.effective_mode is ExecutionMode.QUERY:
             return DIRECT_HARNESS
-        # Interactive read-only topics share one bounded evidence loop. Hints
-        # must not prevent the model from choosing the next query after observing
-        # a result. Only server-owned tools can appear in the capability set.
-        if decision.kind is not AssistantIntent.CONFIGURATION:
-            return GUIDE_HARNESS
-        profile = self._intent_profiles[decision.kind]
-        if decision.tool_hints and decision.route not in {AssistantRoute.SUPERVISOR, AssistantRoute.WORKFLOW}:
-            allowed = profile.allowed_tools.intersection(decision.tool_hints)
-            if allowed:
-                return replace(profile, allowed_tools=frozenset(allowed))
+        profile = PLANNING_HARNESS if decision.effective_mode is ExecutionMode.PLANNING else QUERY_HARNESS
+        if decision.write_requested:
+            # This grants only proposal visibility. ToolScope separately checks
+            # real authority, and persistence requires the confirmation endpoint.
+            return replace(profile, allowed_tools=profile.allowed_tools | {'propose_rules'},
+                instructions=profile.instructions.replace('不要创建规则草稿。', '')
+                + '用户明确要求配置规则时可生成待确认草稿；实际写入仍需独立确认。')
         return profile

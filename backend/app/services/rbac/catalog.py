@@ -25,6 +25,10 @@ async def ensure_permission_schema(session: AsyncSession) -> None:
     if _schema_checked:
         return
     _schema_checked = True
+    if session.get_bind().dialect.name == "sqlite":
+        # Fresh local/test SQLite schemas are created from current metadata.
+        # SQLite does not support PostgreSQL's ADD COLUMN IF NOT EXISTS syntax.
+        return
     try:
         await session.execute(
             text("ALTER TABLE permission ADD COLUMN IF NOT EXISTS sort INTEGER NOT NULL DEFAULT 0")

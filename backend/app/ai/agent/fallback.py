@@ -29,13 +29,13 @@ async def text_only_fallback(endpoint: ChatEndpoint, budget: int, *, query: str,
     try:
         text = await model_gateway.complete(base_url=endpoint.base_url,
             api_key=endpoint.api_key, model=endpoint.model, timeout=timeout,
-            messages=messages(turns))
+            messages=messages(turns), max_tokens=endpoint.max_output_tokens)
     except ChatError as exc:
         if exc.error_class != "context_overflow":
             raise
         text = await model_gateway.complete(base_url=endpoint.base_url,
             api_key=endpoint.api_key, model=endpoint.model, timeout=timeout,
-            messages=messages(turns[-6:]))
+            messages=messages(turns[-6:]), max_tokens=endpoint.max_output_tokens)
     return AssistantTurn(
         text="当前模型工具调用不可用，本轮仅提供说明，未生成可执行草稿。\n" + text,
         think=[f"优雅降级：{endpoint.name} 已切换到只读说明模式"],

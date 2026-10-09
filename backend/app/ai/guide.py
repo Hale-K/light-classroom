@@ -50,24 +50,8 @@ class AssistantUiGuide:
 
     @staticmethod
     def degraded_reply(query: str, page_path: str | None) -> str:
-        """模型全不可用时，按当前业务页给出无副作用的操作建议。"""
-        joined = f"{query} {page_path or ''}"
-        if "排课" in joined or "/scheduling" in joined:
-            guidance = "请依次核对学年学期、课位结构、班级课时、任教关系和排课规则；数据齐全后再生成课表。"
-        elif "学生" in joined or "/students" in joined:
-            guidance = "请先维护学生档案，再完成行政班分配；批量处理前可先下载模板核对字段。"
-        elif "教师" in joined or "/teachers" in joined:
-            guidance = "请先核对教师账号和教师档案，再到任教关系中确认教师、班级与科目的对应。"
-        elif "空间" in joined or "校区" in joined or "/facilities" in joined:
-            guidance = "请先建立校区、楼宇、楼层和场室，再配置资源分配规则与班级划分。"
-        elif "设置" in joined or "/settings" in joined:
-            guidance = "请先核对当前学年、学期、层次和年级，再继续配置人员、空间与班级。"
-        else:
-            guidance = "你可以继续维护学生、教师、空间资源和排课基础数据；涉及保存或执行的操作请等待模型服务恢复。"
-        return (
-            "模型服务暂时不可用，助手已进入本地说明模式。"
-            f"{guidance}\n\n本轮未执行任何写入，已保留当前页面和对话，你可以稍后直接重试。"
-        )
+        """没有有效模型结果时，报告失败，不把业务说明冒充回答。"""
+        return "模型服务暂时不可用，本次请求未完成。请稍后重试，或请管理员检查服务商状态。"
 
 
 rule_jumps = AssistantUiGuide.rule_jumps

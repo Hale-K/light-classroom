@@ -80,71 +80,67 @@ async def test_model_has_no_execute_tool_and_unprivileged_proposal_is_denied(mon
 
 
 @pytest.mark.asyncio
-async def test_context_overflow_trims_history_and_retries(monkeypatch):
+async def test_context_overflow_keeps_error_without_reexecuting_verified_tools(monkeypatch):
     from app.ai.model.chat import ChatError
+    from app.ai.gateway import tool as gateway_tool
     seen = []
+    overflow = ChatError("对话内容超出模型上下文长度。", "context_overflow")
+    lookup = AsyncMock(return_value='{"ok":true,"facts":["本校规则已核对"]}')
+    monkeypatch.setattr(gateway_tool, 'execute_school_tool', lookup)
 
     async def caller(**kwargs):
         seen.append(kwargs)
         if len(seen) == 1:
-            raise ChatError("对话内容超出模型上下文长度。", "context_overflow")
-        return ChatOutcome(text="已按最近上下文回答")
+            return ChatOutcome(tool_calls=[ToolCallOut('rules', 'lookup_rules', '{}')])
+        assert '本校规则已核对' in kwargs['messages'][-1]['content']
+        raise overflow
 
     monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
     turns = [{"role": "user", "content": f"第{i}问"} for i in range(10)]
-    result = await assistant.agent_reply(None, 1, turns, base_url="http://test", api_key="", model="test", timeout=5)
-    assert result.text == "已按最近上下文回答"
+    with pytest.raises(ChatError) as caught:
+        await assistant.agent_reply(None, 1, turns, base_url="http://test", api_key="", model="test", timeout=5)
+    assert caught.value is overflow
+    lookup.assert_awaited_once()
     assert len(seen) == 2
-    assert len(seen[1]["messages"]) < len(seen[0]["messages"])
-    assert seen[1]["messages"][-1]["content"] == "第9问"
+    assert any(message.get('content') == '第9问' for message in seen[1]['messages'])
 
 
 @pytest.mark.asyncio
-async def test_fallback_calls_are_budget_capped(monkeypatch):
+async def test_unavailable_tool_model_bubbles_without_text_fallback(monkeypatch):
     from app.ai.model.chat import ChatError
-    from app.ai.agent import fallback
+    teacher.provider_circuits.clear()
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "test", 200)]))
 
-    async def caller(**kwargs):
-        raise ChatError("模型服务暂时不可用，请稍后重试。", "unavailable")
-
+    failure = ChatError("模型服务暂时不可用，请稍后重试。", "unavailable")
+    caller = AsyncMock(side_effect=failure)
+    text_fallback = AsyncMock(return_value="不应交付的无证据说明")
     monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
-    monkeypatch.setattr(fallback, "retrieve_skill", AsyncMock(return_value=""))
-    timeouts = []
-
-    async def fake_complete(**kwargs):
-        timeouts.append(kwargs["timeout"])
-        return "先到排课页配置课位结构"
-
-    monkeypatch.setattr(gateway_model, "complete_chat", fake_complete)
+    monkeypatch.setattr(gateway_model, "complete_chat", text_fallback)
     turns = [
         {"role": "user", "content": "开始"},
         {"role": "assistant", "content": "好的"},
         {"role": "user", "content": "帮我把数学排在周五下午"},
     ]
-    result = await assistant.handle_assistant_turn(None, 1, turns)
-    assert result.text.startswith("当前模型工具调用不可用")
-    assert timeouts and all(t <= 75 for t in timeouts), "降级两轮必须压进 RUN_TIMEOUT 剩余预算"
+    with pytest.raises(ChatError) as caught:
+        await assistant.handle_assistant_turn(None, 1, turns)
+    assert caught.value is failure
+    caller.assert_awaited_once()
+    text_fallback.assert_not_awaited()
 
 
 @pytest.mark.asyncio
-async def test_fallback_context_overflow_retries_trimmed(monkeypatch):
+async def test_empty_model_reply_stays_precise_without_text_only_retry(monkeypatch):
     from app.ai.model.chat import ChatError
-    from app.ai.agent import fallback
+    teacher.provider_circuits.clear()
     monkeypatch.setattr(gateway_model, "resolve_chat_endpoints", AsyncMock(return_value=[ChatEndpoint("1:test", "测试模型", "http://test", "", "test", 60)]))
-    monkeypatch.setattr(gateway_model, "complete_chat_tools", AsyncMock(side_effect=ChatError("模型没有返回文本，请重试。", "empty")))
-    monkeypatch.setattr(fallback, "retrieve_skill", AsyncMock(return_value=""))
-    calls = []
-
-    async def fake_complete(**kwargs):
-        calls.append(kwargs)
-        if len(calls) == 1:
-            raise ChatError("对话内容超出模型上下文长度。", "context_overflow")
-        return "压缩后的说明"
-
-    monkeypatch.setattr(gateway_model, "complete_chat", fake_complete)
+    failure = ChatError("模型没有返回文本，请重试。", "empty")
+    caller = AsyncMock(side_effect=failure)
+    text_fallback = AsyncMock(return_value="不应交付的压缩说明")
+    monkeypatch.setattr(gateway_model, "complete_chat_tools", caller)
+    monkeypatch.setattr(gateway_model, "complete_chat", text_fallback)
     turns = [{"role": "user", "content": f"第{i}问"} for i in range(9)]
-    result = await assistant.handle_assistant_turn(None, 1, turns)
-    assert "压缩后的说明" in result.text
-    assert len(calls) == 2
-    assert len(calls[1]["messages"]) < len(calls[0]["messages"])
+    with pytest.raises(ChatError) as caught:
+        await assistant.handle_assistant_turn(None, 1, turns)
+    assert caught.value is failure
+    caller.assert_awaited_once()
+    text_fallback.assert_not_awaited()

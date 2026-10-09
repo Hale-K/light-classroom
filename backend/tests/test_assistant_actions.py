@@ -76,7 +76,6 @@ def database(monkeypatch):
     from sqlalchemy import create_engine
     from sqlalchemy.orm import Session
     from sqlmodel import SQLModel
-    from app.ai import actions
     from app.api.v1 import scheduling
     from app.models.org import Subject, TenantConfig, User
     from app.models.audit import AuditLog
@@ -235,7 +234,6 @@ async def test_gateway_tool_to_confirm_endpoint_complete_flow(database, monkeypa
     from unittest.mock import AsyncMock
     import json
     from app.api.v1 import assistant
-    from app.ai.agent import assistant_agent
     from app.ai.gateway import model as gateway_model
     from app.ai.intent import AssistantIntent, IntentDecision, IntentGateway
     from app.ai.model.chat import ChatOutcome, ToolCallOut
@@ -252,7 +250,7 @@ async def test_gateway_tool_to_confirm_endpoint_complete_flow(database, monkeypa
         "classify",
         AsyncMock(
             return_value=IntentDecision(
-                AssistantIntent.CONFIGURATION, 0.91, "pgvector"
+                AssistantIntent.CONFIGURATION, 0.91, "pgvector", write_requested=True
             )
         ),
     )

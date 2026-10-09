@@ -6,6 +6,19 @@ from typing import Awaitable, Callable
 Progress = Callable[[str, str], Awaitable[None]]
 
 TOOL_LABELS = {
+    'plan_task': '正在拆解任务并建立执行计划',
+    'update_plan_task': '正在更新任务计划和完成证据',
+    'lookup_school_context': '正在核对学校课表模式和高考模式',
+    "lookup_student_choices": "正在查询学生选科和入班",
+    "lookup_teaching_assignments": "正在核对行政班与走班任课明细",
+    "lookup_timetable": "正在查询已保存课表",
+    "lookup_schedule_conflicts": "正在核对教师、学生和教室时段冲突",
+    "lookup_remaining_capacity": "正在查询剩余课位容量",
+    "lookup_subject_capacity": "正在查询学科课时容量",
+    "lookup_slot_role_capacity": "正在查询不同课位的可排容量",
+    "lookup_walk_classes": "正在查询走班人数和任课关系",
+    "lookup_generation_log": "正在查询排课任务日志",
+    "format_markdown": "正在整理回答格式",
     "lookup_generation_status": "正在核对课表生成任务的最新状态",
     "lookup_rules": "正在查询本校规则组",
     "lookup_teachers": "正在查询本校教师任教",
