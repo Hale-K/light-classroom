@@ -47,6 +47,7 @@ output/
 # Local desktop packaging and runtime data
 desktop/build*/
 desktop/out*/
+desktop/artifacts/
 backend/*.db
 backend/*.db-*
 backend/storage_local/

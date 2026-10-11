@@ -15,14 +15,17 @@ import time
 from pathlib import Path
 
 
-def app_data_dir(demo: bool = False) -> Path:
+def app_data_dir(demo: bool = False, mode: str = "normal") -> Path:
     if sys.platform == "win32":
         base = Path(os.environ.get("APPDATA", Path.home() / "AppData" / "Roaming"))
     elif sys.platform == "darwin":
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    data = base / ("LightClassroomDemo" if demo else "LightClassroom")
+    folder = {"online": "LightClassroomOnline", "offline": "LightClassroomOffline"}.get(mode, "LightClassroom")
+    if demo:
+        folder = "LightClassroomOfflineDemo" if mode == "offline" else "LightClassroomDemo"
+    data = base / folder
     (data / "uploads").mkdir(parents=True, exist_ok=True)
     return data
 
@@ -72,7 +75,7 @@ def free_port() -> int:
 
 def prepare_env(data_dir: Path, port: int) -> None:
     """在任何 app 模块导入之前固定桌面环境变量。"""
-    os.environ.setdefault("DATABASE_URL", f"sqlite+aiosqlite:///{(data_dir / 'light-classroom.db').as_posix()}")
+    os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{(data_dir / 'light-classroom.db').as_posix()}"
     os.environ.setdefault("REDIS_URL", "redis://127.0.0.1:1/0")  # 不可达 → 任务队列回退进程内实现
     os.environ.setdefault("MINIO_ENDPOINT", "127.0.0.1:1")       # 桌面版 v1：课件云端存储不可用，仅本地功能
     # JWT 密钥首次启动生成并持久化，保证重启后已登录会话不失效
@@ -182,9 +185,38 @@ class _DesktopBridge:
             return f"下载失败：{exc}"
 
 
+def package_options(root: Path, args: list[str]) -> tuple[str, bool, str]:
+    """Read build-time mode without importing or starting the backend."""
+    config_file = root / "desktop-package.json"
+    config = json.loads(config_file.read_text(encoding="utf-8-sig")) if config_file.is_file() else {}
+    mode = config.get("mode", "normal")
+    for flag, value in (("--online", "online"), ("--offline", "offline"), ("--local", "normal")):
+        if flag in args:
+            mode = value
+    if mode not in {"online", "demo", "normal", "offline"}:
+        raise ValueError("未知客户端运行模式")
+    demo = mode == "demo" or "--demo" in args or (mode == "offline" and config.get("demo", False))
+    return mode, demo, str(config.get("server_url") or "")
+
+
+def validate_server_url(target: str) -> str:
+    from urllib.parse import urlsplit
+
+    parsed = urlsplit(target)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("联网版需要有效的 http/https 服务器地址，不能包含账号或密码")
+    if parsed.query or parsed.fragment:
+        raise ValueError("服务器地址不能包含查询参数或片段")
+    return target.rstrip("/")
+
+
 def main() -> None:
-    demo = "--demo" in sys.argv
-    data_dir = app_data_dir(demo=demo)
+    if getattr(sys, "frozen", False):
+        backend_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
+    else:
+        backend_root = Path(__file__).resolve().parent.parent / "backend"
+    mode, demo, default_server = package_options(backend_root, sys.argv)
+    data_dir = app_data_dir(demo=demo, mode=mode)
 
     # 桌面包无控制台：stdout/stderr 落到数据目录日志（UTF-8），便于排障；必须最先设置
     log_file = data_dir / "launcher.log"
@@ -195,9 +227,14 @@ def main() -> None:
     # 窗口直接加载网页端；教师/超管/学生三端在登录页内切换（同一路由组）。
     # 文件不存在则走本机模式。
     server_file = data_dir / "server.url"
-    if not demo and server_file.exists():
-        target = server_file.read_text(encoding="utf-8").strip()
+    legacy_online = (mode == "normal" and "--local" not in sys.argv and not demo
+                     and not (backend_root / "desktop-package.json").is_file() and server_file.exists())
+    if mode == "online" or legacy_online:
+        target = server_file.read_text(encoding="utf-8").strip() if server_file.exists() else default_server
+        if mode == "online" and not target:
+            raise ValueError("联网版缺少服务器地址，请重新打包时指定 -ServerUrl")
         if target:
+            target = validate_server_url(target)
             print(f"[desktop] 服务器模式: {target}")
             import webview
             bridge = _DesktopBridge(base_url=target)
@@ -207,11 +244,6 @@ def main() -> None:
             webview.start()
             return
 
-    # backend 根目录：源码运行 = 仓库 backend/；打包 = _MEIPASS/app
-    if getattr(sys, "frozen", False):
-        backend_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
-    else:
-        backend_root = Path(__file__).resolve().parent.parent / "backend"
     if demo:
         install_demo_seed(data_dir, backend_root / "demo")
     port = free_port()

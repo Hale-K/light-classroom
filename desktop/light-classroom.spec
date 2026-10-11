@@ -13,6 +13,12 @@ FRONTEND_DIST = Path(os.environ.get("LIGHT_FRONTEND_DIST_DIR", str(REPO / "front
 BACKEND = REPO / "backend"
 
 datas = []
+package_config = os.environ.get("LIGHT_DESKTOP_PACKAGE_CONFIG")
+if package_config:
+    config_path = Path(package_config).resolve()
+    if not config_path.is_file() or config_path.name != "desktop-package.json":
+        raise ValueError("LIGHT_DESKTOP_PACKAGE_CONFIG 缺少有效的 desktop-package.json")
+    datas.append((str(config_path), "."))
 # 演示数据只在显式指定时打包；包含学校快照的目录保存在 ignored output/。
 demo_seed = os.environ.get("LIGHT_DEMO_SEED_DIR")
 if demo_seed:

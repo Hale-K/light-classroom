@@ -1,3 +1,5 @@
+; 历史安装配置，归档仅供参考。当前入口是 desktop/build.ps1。
+#error Deprecated installer. Use desktop/build.ps1 and desktop/installer/windows.iss.
 ; 轻课堂 Windows 一键安装包（Inno Setup 6）
 ; 构建：先 PyInstaller 出 dist\LightClassroom，再执行
 ;   ISCC.exe desktop\installer.iss

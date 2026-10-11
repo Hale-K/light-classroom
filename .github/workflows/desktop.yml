@@ -40,6 +40,7 @@ jobs:
           pip install -r ../desktop/requirements-build.txt
 
       - name: PyInstaller 打包
+        if: runner.os == 'macOS'
         run: |
           pyinstaller desktop/light-classroom.spec --noconfirm --distpath desktop/dist --workpath desktop/build
 
@@ -47,12 +48,14 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           choco install innosetup -y --no-progress
-          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" desktop/installer.iss
+          ./desktop/build.ps1 -Mode normal -PythonPath (Get-Command python.exe).Source -SkipFrontendBuild
 
       - name: 打包 Windows 压缩包
         if: runner.os == 'Windows'
         shell: pwsh
-        run: Compress-Archive -Path desktop/dist/LightClassroom -DestinationPath desktop/LightClassroom-${{ matrix.os }}.zip
+        run: |
+          $package = Get-Content output/windows-installer/latest-normal.json -Raw | ConvertFrom-Json
+          Compress-Archive -Path (Join-Path $package.bundle 'LightClassroom') -DestinationPath desktop/LightClassroom-${{ matrix.os }}.zip
 
       - name: 打包 macOS 压缩包
         if: runner.os == 'macOS'
@@ -64,7 +67,7 @@ jobs:
           name: LightClassroom-${{ matrix.os }}
           path: |
             desktop/LightClassroom-*.zip
-            desktop/installer/*.exe
+            output/windows-installer/LightClassroom-Setup*.exe
 
       - name: 发布到 Release（desktop-v* 标签触发）
         if: startsWith(github.ref, 'refs/tags/desktop-v')
@@ -72,4 +75,4 @@ jobs:
         with:
           files: |
             desktop/LightClassroom-*.zip
-            desktop/installer/*.exe
+            output/windows-installer/LightClassroom-Setup*.exe

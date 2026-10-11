@@ -1,5 +1,6 @@
 # 桌面端构建依赖（CI 与本地一致；版本跟随 backend/pyproject.toml 的核心集合）
 fastapi
+prometheus-fastapi-instrumentator
 uvicorn[standard]
 sqlmodel
 sqlalchemy
