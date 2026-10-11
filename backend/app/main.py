@@ -144,6 +144,8 @@ app.include_router(ai_provider.router, prefix="/api/v1")
 app.include_router(assistant.router, prefix="/api/v1")
 from app.api.v1.page_agent import router as page_agent_router
 app.include_router(page_agent_router, prefix="/api/v1")
+from app.api.v1.page_excel import router as page_excel_router
+app.include_router(page_excel_router, prefix="/api/v1")
 app.include_router(knowledge.router, prefix="/api/v1")
 app.include_router(onboarding.router, prefix="/api/v1")
 app.include_router(courseware.router, prefix="/api/v1")

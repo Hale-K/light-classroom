@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { App, Button, Form, Input, Modal, Radio, Select, Switch, Table, Tooltip } from 'antd'
@@ -78,6 +79,7 @@ const styles: Record<string, CSSProperties> = {
 }
 
 export default function AdminSchools() {
+  const locale = useLocale()
   const { message } = App.useApp()
   const schools = useAdminStore((s) => s.schools)
   const loadSchools = useAdminStore((s) => s.loadSchools)
@@ -115,7 +117,7 @@ export default function AdminSchools() {
     try {
       await loadSchools()
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '学校列表加载失败')
+      message.error(error instanceof Error ? error.message : t("学校列表加载失败"))
     } finally {
       setLoading(false)
     }
@@ -136,11 +138,11 @@ export default function AdminSchools() {
         (item.province || '').toLowerCase().includes(query)
       )
     })
-  }, [schools, appliedKeyword])
+  }, [schools, appliedKeyword, locale])
 
   const pagedSchools = useMemo(
     () => filteredSchools.slice((page - 1) * pageSize, page * pageSize),
-    [filteredSchools, page, pageSize],
+    [filteredSchools, page, pageSize, locale],
   )
 
   const handleSearch = () => {
@@ -165,9 +167,9 @@ export default function AdminSchools() {
     try {
       await createSchool(values)
       setCreateOpen(false)
-      message.success('学校已创建')
+      message.success(t("学校已创建"))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '创建学校失败')
+      message.error(error instanceof Error ? error.message : t("创建学校失败"))
     } finally {
       setCreating(false)
     }
@@ -195,9 +197,9 @@ export default function AdminSchools() {
         admin_phone: values.admin_phone?.trim() || undefined,
       })
       setEditOpen(false)
-      message.success('学校信息已更新')
+      message.success(t("学校信息已更新"))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '保存失败')
+      message.error(error instanceof Error ? error.message : t("保存失败"))
     } finally {
       setSavingEdit(false)
     }
@@ -216,9 +218,9 @@ export default function AdminSchools() {
     try {
       await resetPassword(resetId, values.password)
       setResetOpen(false)
-      message.success('密码已重置')
+      message.success(t("密码已重置"))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '重置失败')
+      message.error(error instanceof Error ? error.message : t("重置失败"))
     } finally {
       setSavingReset(false)
     }
@@ -227,48 +229,48 @@ export default function AdminSchools() {
   const onToggleFrozen = async (row: AdminSchool, checked: boolean) => {
     try {
       await toggleAdminStatus(row.id)
-      message.success(checked ? `已冻结「${row.name}」管理员账号` : `已解冻「${row.name}」管理员账号`)
+      message.success(checked ? t("已冻结「{{p0}}」管理员账号", { p0: row.name }) : t("已解冻「{{p0}}」管理员账号", { p0: row.name }))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '操作失败')
+      message.error(error instanceof Error ? error.message : t("操作失败"))
       await fetchSchools()
     }
   }
 
   const columns: ColumnsType<AdminSchool> = [
-    { title: '学校名称', dataIndex: 'name', key: 'name', minWidth: 200 },
-    { title: '学校代码', dataIndex: 'code', key: 'code', width: 150 },
-    { title: '省份', dataIndex: 'province', key: 'province', width: 100 },
+    { title: t("学校名称"), dataIndex: 'name', key: 'name', minWidth: 200 },
+    { title: t("学校代码"), dataIndex: 'code', key: 'code', width: 150 },
+    { title: t("省份"), dataIndex: 'province', key: 'province', width: 100 },
     {
-      title: '高考模式',
+      title: t("高考模式"),
       dataIndex: 'gaokao_mode',
       key: 'gaokao_mode',
       width: 140,
       render: (value) => <DictTag dict={GAOKAO_MODE_DICT} value={value} />,
     },
-    { title: '类型', dataIndex: 'type', key: 'type', width: 130 },
+    { title: t("类型"), dataIndex: 'type', key: 'type', width: 130 },
     {
-      title: '管理员电话',
+      title: t("管理员电话"),
       dataIndex: 'admin_phone',
       key: 'admin_phone',
       minWidth: 150,
       render: (value) => value || '—',
     },
     {
-      title: '创建时间',
+      title: t("创建时间"),
       dataIndex: 'created_at',
       key: 'created_at',
       minWidth: 170,
       render: (value) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—'),
     },
     {
-      title: '最后登录',
+      title: t("最后登录"),
       dataIndex: 'last_login_at',
       key: 'last_login_at',
       minWidth: 170,
       render: (value) => (value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '—'),
     },
     {
-      title: '操作',
+      title: t("操作"),
       key: 'actions',
       width: 200,
       fixed: 'right',
@@ -276,18 +278,17 @@ export default function AdminSchools() {
         const hasPrincipal = !!row.admin_phone
         return (
           <>
-            <Tooltip title={hasPrincipal ? (row.frozen ? '点击解冻' : '点击冻结管理员账号') : '该校暂未创建校长账号'}>
+            <Tooltip title={hasPrincipal ? (row.frozen ? t("点击解冻") : t("点击冻结管理员账号")) : t("该校暂未创建校长账号")}>
               <Switch
                 checked={!!row.frozen}
                 onChange={(checked) => void onToggleFrozen(row, checked)}
-                checkedChildren="冻结"
-                unCheckedChildren="正常"
+                checkedChildren={t("冻结")}
+                unCheckedChildren={t("正常")}
                 disabled={!hasPrincipal}
               />
             </Tooltip>
             <Button type="link" size="small" style={{ paddingInline: 6 }} onClick={() => openEdit(row)}>
-              编辑
-            </Button>
+              {t("编辑")}</Button>
             <Button
               type="link"
               size="small"
@@ -295,8 +296,7 @@ export default function AdminSchools() {
               disabled={!hasPrincipal}
               onClick={() => openReset(row)}
             >
-              重置密码
-            </Button>
+              {t("重置密码")}</Button>
           </>
         )
       },
@@ -319,49 +319,46 @@ export default function AdminSchools() {
             >
               TENANT DIRECTORY
             </span>
-            <span>学校管理</span>
+            <span>{t("学校管理")}</span>
           </span>
         }
         extra={
           <Button type="primary" onClick={openCreate}>
-            新增学校
-          </Button>
+            {t("新增学校")}</Button>
         }
       />
-      <p style={styles.pageDesc}>创建和维护接入轻课堂的学校工作区。</p>
+      <p style={styles.pageDesc}>{t("创建和维护接入轻课堂的学校工作区。")}</p>
 
       <div style={styles.summary}>
-        <span style={styles.summaryLabel}>当前学校总数</span>
+        <span style={styles.summaryLabel}>{t("当前学校总数")}</span>
         <strong style={styles.summaryValue}>{schools.length}</strong>
-        <span style={styles.summaryNote}>已接入平台的学校工作区</span>
+        <span style={styles.summaryNote}>{t("已接入平台的学校工作区")}</span>
       </div>
 
       <TableCard
-        title="学校目录"
+        title={t("学校目录")}
         extra={
           <Button type="link" size="small" onClick={fetchSchools}>
-            刷新
-          </Button>
+            {t("刷新")}</Button>
         }
       >
         <div style={styles.filterWrap}>
           <FilterCard>
             <div className="zh-filter-row">
               <label className="zh-filter-field">
-                <span>学校</span>
+                <span>{t("学校")}</span>
                 <Input
                   value={keyword}
                   onChange={(e) => setKeyword(e.target.value)}
                   allowClear
-                  placeholder="名称 / 代码 / 省份"
+                  placeholder={t("名称 / 代码 / 省份")}
                   style={{ width: 240 }}
                 />
               </label>
               <Button type="primary" onClick={handleSearch}>
-                查询
-              </Button>
-              <Button onClick={resetFilters}>重置</Button>
-              <span className="zh-filter-count">当前 {filteredSchools.length} 所</span>
+                {t("查询")}</Button>
+              <Button onClick={resetFilters}>{t("重置")}</Button>
+              <span className="zh-filter-count">{t("当前")}{filteredSchools.length} {t("所")}</span>
             </div>
           </FilterCard>
         </div>
@@ -379,15 +376,15 @@ export default function AdminSchools() {
               setPageSize(s)
             },
             showSizeChanger: true,
-            showTotal: (total) => `共 ${total} 所`,
+            showTotal: (total) => t("共 {{p0}} 所", { p0: total }),
           }}
           scroll={{ x: 1280 }}
           locale={{
             emptyText: (
               <EmptyState
                 icon="users"
-                title="暂无学校"
-                desc="点击右上角「新增学校」创建第一个学校工作区"
+                title={t("暂无学校")}
+                desc={t("点击右上角「新增学校」创建第一个学校工作区")}
                 height={240}
               />
             ),
@@ -396,26 +393,26 @@ export default function AdminSchools() {
       </TableCard>
 
       <Modal
-        title="新增学校"
+        title={t("新增学校")}
         open={createOpen}
         onCancel={() => setCreateOpen(false)}
         onOk={() => createForm.submit()}
         confirmLoading={creating}
-        okText="创建学校"
-        cancelText="取消"
+        okText={t("创建学校")}
+        cancelText={t("取消")}
         width={460}
       >
         <Form<CreateSchoolForm> form={createForm} layout="vertical" requiredMark={false} onFinish={onCreate}>
-          <Form.Item name="name" label="学校名称" rules={[{ required: true, message: '请输入学校名称' }]}>
-            <Input placeholder="例如：衡川实验中学" />
+          <Form.Item name="name" label={t("学校名称")} rules={[{ required: true, message: t("请输入学校名称") }]}>
+            <Input placeholder={t("例如：衡川实验中学")} />
           </Form.Item>
-          <Form.Item name="code" label="学校代码" rules={[{ required: true, message: '请输入学校代码' }]}>
-            <Input placeholder="例如：hengchuan" />
+          <Form.Item name="code" label={t("学校代码")} rules={[{ required: true, message: t("请输入学校代码") }]}>
+            <Input placeholder={t("例如：hengchuan")} />
           </Form.Item>
-          <Form.Item name="province" label="学校所在省份" rules={[{ required: true, message: '请选择省份' }]}>
-            <Select showSearch placeholder="请选择省份" options={provinceOptions} />
+          <Form.Item name="province" label={t("学校所在省份")} rules={[{ required: true, message: t("请选择省份") }]}>
+            <Select showSearch placeholder={t("请选择省份")} options={provinceOptions} />
           </Form.Item>
-          <Form.Item name="gaokao_mode" label="默认高考模式" rules={[{ required: true, message: '请选择高考模式' }]}>
+          <Form.Item name="gaokao_mode" label={t("默认高考模式")} rules={[{ required: true, message: t("请选择高考模式") }]}>
             <Radio.Group optionType="button" buttonStyle="outline">
               {gaokaoModeOptions.map((o) => (
                 <Radio.Button key={o.value} value={o.value}>
@@ -424,81 +421,80 @@ export default function AdminSchools() {
               ))}
             </Radio.Group>
           </Form.Item>
-          <div style={styles.codeHint}>新建届别方案时继承该模式，之后可按入学年份单独调整。</div>
-          <Form.Item name="admin_name" label="管理员姓名" rules={[{ required: true, message: '请输入管理员姓名' }]}>
-            <Input placeholder="校长姓名" />
+          <div style={styles.codeHint}>{t("新建届别方案时继承该模式，之后可按入学年份单独调整。")}</div>
+          <Form.Item name="admin_name" label={t("管理员姓名")} rules={[{ required: true, message: t("请输入管理员姓名") }]}>
+            <Input placeholder={t("校长姓名")} />
           </Form.Item>
-          <Form.Item name="admin_phone" label="管理员电话">
-            <Input placeholder="校长登录手机号" />
+          <Form.Item name="admin_phone" label={t("管理员电话")}>
+            <Input placeholder={t("校长登录手机号")} />
           </Form.Item>
           <Form.Item
             name="admin_password"
-            label="初始密码"
+            label={t("初始密码")}
             rules={[
-              { required: true, message: '请输入初始密码' },
-              { min: 6, message: '至少 6 位' },
+              { required: true, message: t("请输入初始密码") },
+              { min: 6, message: t("至少 6 位") },
             ]}
           >
-            <Input.Password placeholder="至少 6 位" />
+            <Input.Password placeholder={t("至少 6 位")} />
           </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title="编辑学校"
+        title={t("编辑学校")}
         open={editOpen}
         onCancel={() => setEditOpen(false)}
         onOk={() => editForm.submit()}
         confirmLoading={savingEdit}
-        okText="保存"
-        cancelText="取消"
+        okText={t("保存")}
+        cancelText={t("取消")}
         width={420}
       >
         <Form<EditSchoolForm> form={editForm} layout="vertical" requiredMark={false} onFinish={onSaveEdit}>
-          <Form.Item name="name" label="学校名称" rules={[{ required: true, message: '请输入学校名称' }]}>
-            <Input placeholder="请输入学校名称" />
+          <Form.Item name="name" label={t("学校名称")} rules={[{ required: true, message: t("请输入学校名称") }]}>
+            <Input placeholder={t("请输入学校名称")} />
           </Form.Item>
-          <Form.Item name="province" label="学校所在省份" rules={[{ required: true, message: '请选择省份' }]}>
+          <Form.Item name="province" label={t("学校所在省份")} rules={[{ required: true, message: t("请选择省份") }]}>
             <Select showSearch options={provinceOptions} />
           </Form.Item>
-          <Form.Item name="gaokao_mode" label="默认高考模式" rules={[{ required: true, message: '请选择高考模式' }]}>
+          <Form.Item name="gaokao_mode" label={t("默认高考模式")} rules={[{ required: true, message: t("请选择高考模式") }]}>
             <Select options={gaokaoModeOptions} />
           </Form.Item>
-          <div style={styles.codeHint}>修改后影响新建届别；已存在的届别方案保持原模式，可单独修改。</div>
-          <Form.Item name="admin_phone" label="管理员手机号">
-            <Input placeholder="校长登录账号" />
+          <div style={styles.codeHint}>{t("修改后影响新建届别；已存在的届别方案保持原模式，可单独修改。")}</div>
+          <Form.Item name="admin_phone" label={t("管理员手机号")}>
+            <Input placeholder={t("校长登录账号")} />
           </Form.Item>
-          <div style={styles.codeHint}>仅变更校长登录手机号；超管身份与密码保持不变</div>
-          <Form.Item label="学校代码">
-            <Input value={editingCode} disabled placeholder="学校代码不可修改" />
+          <div style={styles.codeHint}>{t("仅变更校长登录手机号；超管身份与密码保持不变")}</div>
+          <Form.Item label={t("学校代码")}>
+            <Input value={editingCode} disabled placeholder={t("学校代码不可修改")} />
           </Form.Item>
-          <div style={styles.codeHint}>学校代码作为系统标识，创建后不可修改</div>
+          <div style={styles.codeHint}>{t("学校代码作为系统标识，创建后不可修改")}</div>
         </Form>
       </Modal>
 
       <Modal
-        title="重置密码"
+        title={t("重置密码")}
         open={resetOpen}
         onCancel={() => setResetOpen(false)}
         onOk={() => resetForm.submit()}
         confirmLoading={savingReset}
-        okText="确认重置"
-        cancelText="取消"
+        okText={t("确认重置")}
+        cancelText={t("取消")}
         width={400}
       >
         <Form<ResetForm> form={resetForm} layout="vertical" requiredMark={false} onFinish={onReset}>
           <div style={styles.resetTarget}>
-            为「{resetName}」{resetPhone ? `（校长 ${resetPhone}）` : ''} 设置新登录密码
-          </div>
+            {t("为「")}{resetName}」{resetPhone ? t("（校长 {{p0}}）", { p0: resetPhone }) : ''} {t("设置新登录密码")}</div>
           <Form.Item
             name="password"
-            label="新密码"
+            label={t("新密码")}
             rules={[
-              { required: true, message: '请输入新密码' },
-              { min: 6, message: '至少 6 位' },
+              { required: true, message: t("请输入新密码") },
+              { min: 6, message: t("至少 6 位") },
             ]}
           >
-            <Input.Password placeholder="至少 6 位" />
+            <Input.Password placeholder={t("至少 6 位")} />
           </Form.Item>
         </Form>
       </Modal>

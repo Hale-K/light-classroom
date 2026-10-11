@@ -36,10 +36,11 @@ class ChatError(Exception):
     """模型调用失败。message 面向用户（不含服务商原始报文），
     error_class 供恢复与降级决策、日志分类使用。"""
 
-    def __init__(self, message: str, error_class: str = "unknown"):
+    def __init__(self, message: str, error_class: str = "unknown", *, details: dict | None = None):
         super().__init__(message)
         self.message = message
         self.error_class = error_class
+        self.details = dict(details or {})
 
 
 @dataclass(frozen=True)
@@ -50,7 +51,7 @@ class ChatEndpoint:
     api_key: str
     model: str
     timeout: int
-    max_output_tokens: int = 8192
+    max_output_tokens: int = 16384
 
 
 async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[ChatEndpoint]:
@@ -77,7 +78,9 @@ async def resolve_chat_endpoints(session: AsyncSession, tenant_id: int) -> list[
         for row in rows
         if (row.base_url or "").strip() and (row.chat_model or "").strip()
     ]
-    if (settings.llm_base_url or "").strip() and (settings.llm_api_key or "").strip():
+    # 管理页面已配置服务商时，只使用这些显式启用的通道。
+    # 环境配置仅用于尚未配置服务商的部署，不能隐式追加本地备用模型。
+    if not rows and (settings.llm_base_url or "").strip() and (settings.llm_api_key or "").strip():
         env_endpoint = ChatEndpoint(
             key=f"{tenant_id}:env",
             name="系统备用模型",
@@ -185,12 +188,19 @@ _RETRY_STATUS = {500, 502, 503, 504}
 _RETRY_BACKOFF_SECONDS = 1.0
 
 
-def _status_error(status: int, body: str) -> ChatError:
-    """把服务商 HTTP 错误映射成面向用户的脱敏文案；原始报文只进日志。"""
+def _status_error(status: int, body: str, headers=None) -> ChatError:
+    """Return safe diagnostics; raw provider bodies never enter logs or UI."""
+    if status == 429:
+        from app.ai.model.limits import limit_details, limit_message
+        details = limit_details(body, headers)
+        return ChatError(limit_message(details), 'quota' if details['limit_reason'] == 'quota' else 'rate_limit', details=details)
     if status == 400 and any(mark in body.lower() for mark in _CONTEXT_OVERFLOW_MARKS):
         return ChatError("对话内容超出模型上下文长度。", "context_overflow")
+    if status == 400 and any(mark in body.lower() for mark in (
+            'max_tokens', 'max_completion_tokens', 'max_output_tokens')):
+        return ChatError('所选模型拒绝了输出 Token 参数，请在服务商管理中核对该模型支持的输出额度。', 'config')
     mapped = {
-        400: ("模型服务拒绝了本次请求，请换一种问法重试。", "bad_request"),
+        400: ("模型服务拒绝了请求参数，请检查模型接口兼容性；本轮未完成。", "bad_request"),
         401: ("模型服务商鉴权失败，请管理员检查服务商配置。", "auth"),
         402: ("模型服务额度不足，请管理员检查服务商账户。", "quota"),
         403: ("模型服务商拒绝访问，请管理员检查服务商配置。", "auth"),
@@ -258,14 +268,16 @@ async def _post_chat(
         break
     assert resp is not None
     if resp.status_code < 200 or resp.status_code >= 300:
-        body = resp.text[:400]
+        body = resp.text[:16000]
+        error = _status_error(resp.status_code, body, resp.headers)
         logger.warning(
-            "assistant.llm http_fail status=%s model=%s body_chars=%s",
+            "assistant.llm http_fail status=%s model=%s body_chars=%s details=%s",
             resp.status_code,
             model,
             len(body),
+            error.details,
         )
-        raise _status_error(resp.status_code, body)
+        raise error
     try:
         data = resp.json()
     except ValueError as exc:
@@ -351,9 +363,10 @@ async def stream_chat(
         ) as client:
             async with client.stream("POST", _chat_url(base_url), headers=headers, json=payload) as resp:
                 if resp.status_code < 200 or resp.status_code >= 300:
-                    body = (await resp.aread()).decode("utf-8", "ignore")[:400]
-                    logger.warning("assistant.llm stream http_fail status=%s body=%s", resp.status_code, body)
-                    raise _status_error(resp.status_code, body)
+                    body = (await resp.aread()).decode("utf-8", "ignore")[:16000]
+                    error = _status_error(resp.status_code, body, resp.headers)
+                    logger.warning("assistant.llm stream http_fail status=%s body_chars=%s details=%s", resp.status_code, len(body), error.details)
+                    raise error
                 async for line in resp.aiter_lines():
                     if not line.startswith("data:"):
                         continue

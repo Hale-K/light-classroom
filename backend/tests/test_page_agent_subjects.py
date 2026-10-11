@@ -213,3 +213,39 @@ async def test_explicit_name_and_followup_skip_model(monkeypatch):
         session, user, 3))['data']
     assert second['status'] == 'ready'
     assert second['draft']['evening_study_allowed'] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize('user_request, text, truncated, status, course_type, evening', [
+    ('按附件新增科目', '科目名称：心理\n课程类型：活动课\n晚自习资格：允许', False, 'ready', 'activity', True),
+    ('按附件新增科目，改为学科课，不允许晚自习', '科目名称：心理\n课程类型：活动课\n晚自习资格：允许', False, 'ready', 'subject', False),
+    ('按附件新增科目', '科目名称：心理', False, 'needs_input', None, None),
+    ('按附件新增科目', '科目名称：心理\n课程类型：活动课\n晚自习资格：允许', True, 'needs_input', 'activity', True),
+])
+async def test_prepare_subject_from_attachment(monkeypatch, user_request, text, truncated, status, course_type, evening):
+    async def endpoints(*args):
+        return [SimpleNamespace(base_url='http://fixture/v1', api_key='secret', model='fixture', timeout=1)]
+
+    async def complete(**kwargs):
+        assert '科目名称：心理' in kwargs['messages'][-1]['content']
+        return ChatOutcome(tool_calls=[ToolCallOut('1', 'subject_form',
+            '{"name":"心理","course_type":"activity","evening_study_allowed":true}')])
+
+    monkeypatch.setattr(page_agent, 'resolve_chat_endpoints', endpoints)
+    monkeypatch.setattr(page_agent, 'complete_chat_tools', complete)
+    result = await page_agent.prepare_subject(page_agent.PrepareIn(
+        content=user_request, reference_materials=[{'name': '课程.txt', 'text': text, 'truncated': truncated}]),
+        SubjectSession([]), SimpleNamespace(id=7, tenant_id=3, role='director'), 3)
+    assert result['data']['status'] == status
+    assert result['data']['draft']['course_type'] == course_type
+    assert result['data']['draft']['evening_study_allowed'] is evening
+    if status != 'ready':
+        assert 'task_token' not in result['data']
+
+
+def test_page_material_context_is_bounded():
+    from pydantic import ValidationError
+    with pytest.raises(ValidationError):
+        page_agent.PrepareIn(content='新增科目', reference_materials=[{'name': 'x', 'text': 'x' * 12001}])
+    with pytest.raises(ValidationError):
+        page_agent.PrepareIn(content='新增科目', reference_materials=[{'name': 'x', 'text': 'x' * 9000}] * 3)

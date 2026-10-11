@@ -338,6 +338,8 @@ export interface TeacherScopeRule {
 }
 
 export interface SchedulingResources {
+  /** 仅用于解释历史规则对象失效，不能作为排课候选教师。 */
+  disabled_teachers?: { id: number; name: string }[]
   teachers: TeacherInfo[];
   subjects: SubjectInfo[];
   classes: ClassInfo[];
@@ -655,10 +657,36 @@ export interface ExamRoomEntry {
 export interface ExamSchedulingConfig {
   exam_id: number;
   grade_ids: number[];
+  subject_ids?: number[];
+  candidate_mode?: 'grade' | 'choices';
+  schedule_mode?: 'custom' | 'school';
   start_date?: string | null;
   excluded_dates: string[];
   sessions: Array<{ start_time: string; end_time: string }>;
   invigilators_per_room: number;
+  rules?: ExamRules;
+  environment?: { academic_year: string; term: string; timetable_mode: 'administrative' | 'walk_class' | null; source: string; recommended_candidate_mode: 'grade' | 'choices'; message: string };
+}
+
+export interface ExamRules {
+  reference_mode?: 'auto' | 'manual';
+  room_mode?: 'school' | 'gaokao';
+  room_seat_limit?: 25 | 30;
+  student_daily_limit: number;
+  min_break_minutes: number;
+  teacher_daily_limit: number;
+  avoid_own_subject: boolean;
+  same_subject_same_time: boolean;
+  allow_subject_batches?: boolean;
+  subject_time_slots?: Record<string, string>;
+}
+
+export interface ExamOverview {
+  schedules: Array<ExamScheduleEntry & { exam_name: string; preview?: boolean }>;
+  rooms: Array<ExamRoomAssignment & { exam_id: number; exam_name: string }>;
+  venues: Array<{ name: string; capacity: number; status?: string }>;
+  teachers: Array<{ id: number; name: string; leave_start?: string | null; leave_end?: string | null; unavailable_slots?: string[] }>;
+  rules: ExamRules;
 }
 
 export interface ExamInvigilatorEntry {
@@ -689,6 +717,8 @@ export interface ExamVenuePlan {
 
 export interface ExamRoomAssignment {
   id: number;
+  exam_schedule_id: number;
+  invigilator_ids: number[];
   grade_id: number;
   subject_id: number;
   exam_date: string;
@@ -719,6 +749,9 @@ export interface ExamPlan {
 
 export interface ExamCandidateAssignment {
   id: number;
+  student_id: number;
+  exam_schedule_id: number;
+  exam_room_assignment_id: number;
   grade_id: number;
   subject_id: number;
   exam_date: string;
@@ -733,11 +766,35 @@ export interface ExamCandidateAssignment {
   grade_name: string;
 }
 
+export interface ExamCheckReport {
+  ok: boolean;
+  issues: Array<{ code: string; message: string; suggestion: string; room_assignment_id?: number }>;
+}
+
+export interface AdmissionTicket {
+  student_id: number;
+  student_name: string;
+  student_no?: string | null;
+  candidate_no: string;
+  class_name: string;
+  grade_name: string;
+  sessions: Array<{ subject_name: string; exam_date: string; start_time: string; end_time: string; room_name: string; seat_no: number }>;
+}
+
+export interface AdmissionTicketPage {
+  exam_name: string;
+  school_name: string;
+  revision: string;
+  class_options?: Array<{ id: number; name: string; grade_id: number }>;
+  items: AdmissionTicket[];
+  pagination: { page: number; page_size: number; total: number; total_pages: number };
+}
+
 /** 考试状态 */
 export const EXAM_STATUS = {
   PREPARING: "preparing",
   ONGOING: "ongoing",
-  ENDED: "ended",
+  ENDED: "finished",
   ARCHIVED: "archived",
 } as const;
 export type ExamStatus = (typeof EXAM_STATUS)[keyof typeof EXAM_STATUS];
@@ -746,6 +803,7 @@ export const EXAM_STATUS_LABEL: Record<string, string> = {
   preparing: "筹备中",
   ongoing: "进行中",
   ended: "已结束",
+  finished: "已结束",
   archived: "已归档",
 };
 

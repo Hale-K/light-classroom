@@ -37,6 +37,7 @@ export const ROUTE_META: Record<string, RouteMeta> = {
   // —— 教导主任+（含校长、管理员） ——
   '/scheduling': { title: '排课管理', roles: ['academic_director', 'school_admin', 'director'] },
   '/subjects': { title: '科目管理', roles: ['academic_director', 'school_admin', 'director'] },
+  '/assistant-excel': { title: 'Excel配置助手', roles: ['academic_director', 'school_admin', 'director'] },
   '/campus-buildings': { title: '空间资源', roles: ['academic_director', 'school_admin', 'director'] },
   '/gaokao': { title: '学生选课', roles: ['head_teacher', 'academic_director', 'school_admin', 'director'] },
   '/staff': { title: '人员账号', roles: ['academic_director', 'school_admin', 'director'] },

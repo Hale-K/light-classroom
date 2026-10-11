@@ -10,8 +10,10 @@ from app.api.deps import get_current_student, get_current_tenant, require_manage
 from app.api.v1.gaokao import _selected_subject_ids
 from app.core.security import create_access_token, get_password_hash, verify_password
 from app.db.session import AsyncSessionLocal, get_session
-from app.models.gaokao import GaokaoScheme, StudentCredential, StudentSubjectChoice
-from app.models.org import Grade, Student, Subject, Tenant, TenantConfig
+from app.models.gaokao import GaokaoScheme, StudentCredential, StudentSubjectChoice, TeachingClass
+from app.models.enums import UserStatus
+from app.services.academic.teacher_pick import class_selection_members
+from app.models.org import Class, Grade, Student, Subject, Tenant, TenantConfig, User
 from app.services.org.cohort import current_academic_year
 
 router = APIRouter(prefix="/student-auth", tags=["学生端"])
@@ -98,6 +100,8 @@ class StudentChoiceIn(BaseModel):
     selected_subject_ids: list[int] = Field(default_factory=list, max_length=7)
     stream: str | None = Field(default=None, max_length=20)
     status: str = Field(default="confirmed", pattern=r"^(draft|confirmed)$")
+    teacher_preferences: dict[str, int] = Field(default_factory=dict)
+    teaching_class_preferences: dict[str, int] = Field(default_factory=dict)
 
 
 @router.post("/login", summary="学生登录")
@@ -200,6 +204,57 @@ async def context(
     }}
 
 
+async def _grade_subject_teachers(
+    session: AsyncSession, tenant_id: int, grade_id: int | None,
+    academic_year: str, term: str,
+) -> dict[str, list[dict]]:
+    """学生所在年级、当前学期的各科目任教老师（供选老师模式选择）。"""
+    from app.models.org import TeachingAssignment
+
+    class_ids = select(Class.id).where(
+        Class.tenant_id == tenant_id,
+        Class.academic_year == academic_year,
+        Class.term == term,
+        *( [Class.grade_id == grade_id] if grade_id is not None else [] ),
+    )
+    rows = (await session.execute(
+        select(TeachingAssignment.subject_id, User.id, User.name).distinct()
+        .join(User, User.id == TeachingAssignment.teacher_id)
+        .where(
+            TeachingAssignment.tenant_id == tenant_id,
+            TeachingAssignment.academic_year == academic_year,
+            TeachingAssignment.term == term,
+            TeachingAssignment.subject_id.is_not(None),
+            TeachingAssignment.teacher_id.is_not(None),
+            TeachingAssignment.class_id.in_(class_ids),
+        ).order_by(User.name)
+    )).all()
+    teachers: dict[str, list[dict]] = {}
+    for subject_id, teacher_id, name in rows:
+        teachers.setdefault(str(subject_id), []).append({"id": teacher_id, "name": name})
+    return teachers
+
+
+async def _teacher_class_options(session, student, academic_year, term):
+    if student.grade_id is None:
+        return []
+    rows = (await session.execute(select(TeachingClass, User.name).join(
+        User, User.id == TeachingClass.teacher_id,
+    ).where(
+        TeachingClass.tenant_id == student.tenant_id,
+        TeachingClass.grade_id == student.grade_id,
+        TeachingClass.academic_year == academic_year, TeachingClass.term == term,
+        User.tenant_id == student.tenant_id, User.status == UserStatus.active,
+        User.frozen == False,  # noqa: E712
+    ).order_by(TeachingClass.subject_id, User.name, TeachingClass.sequence))).all()
+    members = await class_selection_members(session, student.tenant_id, academic_year, term, [c.id for c, _ in rows])
+    return [{"id": c.id, "name": c.name, "subject_id": c.subject_id,
+             "teacher_id": c.teacher_id, "teacher_name": name, "capacity": c.capacity,
+             "selected_count": len(members[c.id]), "remaining": max(0, c.capacity - len(members[c.id])),
+             "is_full": len(members[c.id]) >= c.capacity,
+             "selected_by_me": student.id in members[c.id]} for c, name in rows]
+
+
 @router.get("/choice", summary="查询当前学生选科")
 async def get_choice(
     academic_year: str,
@@ -233,10 +288,17 @@ async def choice_options(
         StudentSubjectChoice.academic_year == academic_year,
         StudentSubjectChoice.effective_term == term,
     ))).scalar_one_or_none()
+    allow_teacher_pick = bool(scheme and (scheme.strategy_config or {}).get("allow_teacher_pick") is True)
+    teachers_by_subject = (
+        await _grade_subject_teachers(session, student.tenant_id, student.grade_id, academic_year, term)
+    ) if allow_teacher_pick else {}
     return {"code": 0, "message": "ok", "data": {
         "scheme": scheme.model_dump() if scheme else None,
         "subjects": [{"id": item.id, "name": item.name} for item in subjects],
         "choice": choice.model_dump() if choice else None,
+        "allow_teacher_pick": allow_teacher_pick,
+        "teachers_by_subject": teachers_by_subject,
+        "teaching_classes": await _teacher_class_options(session, student, academic_year, term) if allow_teacher_pick else [],
     }}
 
 
@@ -246,13 +308,47 @@ async def save_choice(
     student: Student = Depends(get_current_student),
     session: AsyncSession = Depends(get_session),
 ):
-    scheme = await session.get(GaokaoScheme, body.scheme_id)
+    scheme = (await session.execute(select(GaokaoScheme).where(
+        GaokaoScheme.id == body.scheme_id, GaokaoScheme.tenant_id == student.tenant_id,
+    ).with_for_update())).scalar_one_or_none()
     if scheme is None or scheme.tenant_id != student.tenant_id:
         raise HTTPException(status_code=404, detail="高考方案不存在")
     try:
         selected = _selected_subject_ids(body, scheme)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    # 选老师模式：仅当方案开启时接受意向老师；老师必须在本年级任教该科目
+    allow_teacher_pick = (scheme.strategy_config or {}).get("allow_teacher_pick") is True
+    if (body.teacher_preferences or body.teaching_class_preferences) and not allow_teacher_pick:
+        raise HTTPException(status_code=403, detail="教务尚未开启选老师模式，请仅提交选课")
+    teacher_preferences = (
+        {str(k): int(v) for k, v in body.teacher_preferences.items() if v is not None}
+        if allow_teacher_pick else {}
+    )
+    if body.teaching_class_preferences:
+        if student.grade_id is None:
+            raise HTTPException(status_code=422, detail="尚未分配年级，不能选择教学班")
+        classes = (await session.execute(select(TeachingClass).where(
+            TeachingClass.id.in_(body.teaching_class_preferences.values()),
+            TeachingClass.tenant_id == student.tenant_id,
+            TeachingClass.grade_id == student.grade_id,
+            TeachingClass.academic_year == body.academic_year, TeachingClass.term == body.effective_term,
+        ).order_by(TeachingClass.id).with_for_update())).scalars().all()
+        by_id = {c.id: c for c in classes}
+        options = {c['id']: c for c in await _teacher_class_options(session, student, body.academic_year, body.effective_term)}
+        teacher_preferences = {}
+        for subject_id, class_id in body.teaching_class_preferences.items():
+            c = by_id.get(class_id)
+            option = options.get(class_id)
+            if c is None or str(c.subject_id) != subject_id or c.subject_id not in selected or option is None:
+                raise HTTPException(status_code=422, detail="教学班不存在、科目不匹配或老师不可选")
+            if body.status == 'confirmed' and option['is_full'] and not option['selected_by_me']:
+                raise HTTPException(status_code=409, detail=f"{c.name}已选满，请选择其他教学班")
+            teacher_preferences[subject_id] = c.teacher_id
+    elif teacher_preferences:
+        raise HTTPException(status_code=422, detail="请选择老师所开的具体教学班")
+
     item = (await session.execute(select(StudentSubjectChoice).where(
         StudentSubjectChoice.tenant_id == student.tenant_id,
         StudentSubjectChoice.student_id == student.id,
@@ -263,6 +359,7 @@ async def save_choice(
         raise HTTPException(status_code=409, detail="选科已锁定，不能修改")
     values = body.model_dump()
     values["selected_subject_ids"] = list(selected)
+    values["teacher_preferences"] = teacher_preferences
     if item is None:
         item = StudentSubjectChoice(tenant_id=student.tenant_id, student_id=student.id, **values)
         session.add(item)

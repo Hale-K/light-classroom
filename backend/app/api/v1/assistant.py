@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, model_validator
 from app.ai.attachments import MAX_FILE_BYTES, MAX_TEXT_CHARS, MAX_CONTEXT_CHARS, parse_attachment
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.ai.tools.clarification import Clarification
 from app.ai.actions import decide_action
 from app.ai.gateway.assistant import AssistantRequest, assistant_gateway
 from app.api.deps import get_current_tenant, get_current_user, get_user_permission_codes
@@ -24,9 +25,10 @@ router = APIRouter(prefix="/assistant", tags=["轻课堂助手"])
 
 
 class ChatTurn(BaseModel):
-    role: str
-    content: str
+    role: Literal['user', 'assistant']
+    content: str = Field(max_length=12000)
     model_visible: bool = True
+    clarification: Clarification | None = None
 
 
 class ReferenceMaterial(BaseModel):

@@ -74,7 +74,20 @@ export default function FileCenterView() {
   const onDownload = async (job: FileTransferJob) => {
     try {
       const data = await fileCenterApi.download(job.id)
-      window.open(data.url, '_blank')
+      // 本地存储模式返回相对地址；统一补全 origin，桌面桥与浏览器都能拉取
+      const url = new URL(data.url, window.location.origin).toString()
+      // 桌面端（pywebview）没有新标签页语义：window.open 会把整个窗口导航走。
+      // 检测到桌面桥时走原生“另存为”；网页端保持新标签页下载。
+      const bridge = (window as unknown as {
+        pywebview?: { api?: { save_file?: (url: string, filename: string) => Promise<string> } }
+      }).pywebview?.api
+      if (typeof bridge?.save_file === 'function') {
+        const result = await bridge.save_file(url, data.file_name || 'download')
+        if (result === 'ok') message.success('已保存')
+        else if (result !== 'canceled') message.error(result)
+        return
+      }
+      window.open(url, '_blank')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '下载失败')
     }

@@ -1,3 +1,4 @@
+import { useLocale } from '@/i18n'
 import { Tag } from 'antd'
 import type { Dict } from '@/types/dict'
 
@@ -11,6 +12,7 @@ interface DictTagProps {
  * 未知值兜底显示原值（灰 Tag），空值显示 '—'。
  */
 export default function DictTag({ dict, value }: DictTagProps) {
+  useLocale()
   const key = value != null ? String(value) : undefined
   const item = key != null ? dict[key] : undefined
   if (!item) {

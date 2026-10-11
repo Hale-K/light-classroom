@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Alert, App, Button, Form, InputNumber, Modal, Progress, Radio, Segmented, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
@@ -8,6 +9,7 @@ import './walk-course-hours.css'
 import './course-hours.css'
 
 interface CourseHoursPanelProps {
+  toolbarLeading?: ReactNode
   classes: ClassInfo[]
   subjects: SubjectInfo[]
   academicYear: string
@@ -87,6 +89,7 @@ export default function CourseHoursPanel({
   onClassChange,
   classOptions,
   daytimeCapacity,
+  toolbarLeading,
 }: CourseHoursPanelProps) {
   const { message } = App.useApp()
   const [allPlans, setAllPlans] = useState<CourseHourPlanInfo[]>([])
@@ -291,13 +294,15 @@ export default function CourseHoursPanel({
 
   return (
     <section className="sk-hours walk-hours admin-hours">
-      <div className="sk-hours-intro">
-        <Space wrap>
+      <div className="sk-hours-intro hours-controls">
+        {toolbarLeading}
+        <Space wrap className="hours-actions">
           <Select
             allowClear
             value={classId}
             onChange={(next) => onClassChange?.(next)}
             placeholder="全部班级"
+            aria-label="课时班级筛选"
             style={{ width: 220 }}
             popupMatchSelectWidth={280}
             options={classOptions?.length

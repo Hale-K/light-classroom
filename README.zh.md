@@ -70,7 +70,7 @@ pnpm dev
 | 学校登录 | `/login` |
 | 平台超管 | `/admin/login` |
 
-开发超管账号见 `.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`（示例为 `admin` / `admin123`，部署必须改掉）。
+开发超管账号见 `.env` 的 `ADMIN_USERNAME` / `ADMIN_PASSWORD`（示例为 `admin` / `admin123456`，部署必须改掉）。
 
 ## 配置
 

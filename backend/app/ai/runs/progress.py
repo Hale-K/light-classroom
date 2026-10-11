@@ -6,6 +6,11 @@ from typing import Awaitable, Callable
 Progress = Callable[[str, str], Awaitable[None]]
 
 TOOL_LABELS = {
+    'request_clarification': '正在整理需要补充的关键决策',
+    'calculate_resource_plan': '正在计算班级、教室和各科教师需求',
+    'lookup_exam_operations': '正在核对考试、考场、监考和考生安排',
+    'calculate_exam_capacity': '正在验算同场考场和监考需求',
+    'lookup_room_resources': '正在查询教室配置和资源分配',
     'plan_task': '正在拆解任务并建立执行计划',
     'update_plan_task': '正在更新任务计划和完成证据',
     'lookup_school_context': '正在核对学校课表模式和高考模式',

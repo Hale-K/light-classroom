@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Button, Input, Modal, Select, Space, Table, Tag } from 'antd'
+import { Alert, App, Button, Input, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
+import { useAuthStore } from '@/store/auth'
 import { gaokaoApi } from '@/api'
 import { useNavigate } from 'react-router-dom'
 import type { WalkTeachingClass } from '@/api'
@@ -8,6 +9,22 @@ export default function TeachingClassResults({ gradeId, academicYear, term, grad
   gradeId: number; academicYear: string; term: string; gradeName?: string; onClose: () => void
 }) {
   const navigate = useNavigate()
+  const { message } = App.useApp()
+  const user = useAuthStore((state) => state.user)
+  const canManage = [...(user?.roles || []), ...(user?.role ? [user.role] : [])].some((role) => ['director', 'academic_director'].includes(role))
+  const [capacityClass, setCapacityClass] = useState<WalkTeachingClass>()
+  const [capacity, setCapacity] = useState(40)
+  const [savingCapacity, setSavingCapacity] = useState(false)
+  const saveCapacity = async () => {
+    if (!capacityClass) return
+    setSavingCapacity(true)
+    try {
+      await gaokaoApi.setTeachingClassCapacity(capacityClass.id, capacity)
+      setCapacityClass(undefined); setRevision((value) => value + 1)
+      message.success('班级人数上限已更新')
+    } catch (error) { message.error(error instanceof Error ? error.message : '更新失败') }
+    finally { setSavingCapacity(false) }
+  }
   const [classes, setClasses] = useState<WalkTeachingClass[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -51,7 +68,9 @@ export default function TeachingClassResults({ gradeId, academicYear, term, grad
         locale={{ emptyText: error ? '加载失败，请重试' : '本年级本学期尚未生成教学班' }} columns={[
           { title: '教学班', dataIndex: 'name' },
           { title: '科目', dataIndex: 'subject_name' },
-          { title: '人数 / 上限', render: (_, item) => `${item.student_count} / ${item.capacity}` },
+          { title: '已选 / 上限', render: (_, item) => `${item.selected_count ?? item.student_count} / ${item.capacity}` },
+          { title: '选课状态', render: (_, item) => <Tag color={item.is_full ? 'red' : 'green'}>{item.is_full ? '已选满' : '可选'}</Tag> },
+          ...(canManage ? [{ title: '班级上限', render: (_: unknown, item: WalkTeachingClass) => <Button type="link" onClick={() => { setCapacityClass(item); setCapacity(item.capacity) }}>设置上限</Button> }] : []),
           { title: '每周课时', render: (_, item) => <>{item.weekly_periods} {item.hours_overridden && <Tag>单班调整</Tag>}</> },
           { title: '教师', render: (_, item) => item.teacher_name ?? (item.teacher_id ? '已绑定（姓名不可用）' : '未安排') },
           { title: '教室', render: (_, item) => item.room || '未安排' },
@@ -59,6 +78,11 @@ export default function TeachingClassResults({ gradeId, academicYear, term, grad
             {item.student_count ? '查看名单' : '尚未分班'}
           </Button> },
         ]} />
+    </Modal>
+    <Modal title={`设置班级上限 · ${capacityClass?.name ?? ''}`} open={Boolean(capacityClass)} onCancel={() => { if (!savingCapacity) setCapacityClass(undefined) }}
+      confirmLoading={savingCapacity} onOk={() => void saveCapacity()} okText="保存" cancelText="取消">
+      <p>人数上限不能低于已选人数（{capacityClass?.selected_count ?? capacityClass?.student_count ?? 0} 人）。</p>
+      <InputNumber aria-label="班级人数上限" min={Math.max(1, capacityClass?.selected_count ?? capacityClass?.student_count ?? 0)} max={500} precision={0} value={capacity} onChange={(value) => setCapacity(value ?? 40)} />
     </Modal>
     <Modal title={`${selectedClass?.name ?? ''} · 学生名单`} open={Boolean(selectedClass)} width={780} onCancel={() => setSelectedClass(undefined)}
       footer={<Button onClick={() => setSelectedClass(undefined)}>关闭名单</Button>}>

@@ -1,5 +1,16 @@
 import json
 
+
+def test_numerical_json_cells_render_without_changing_quantities():
+    from app.ai.tools.markdown import format_markdown
+    answer = {'summary': '分配草案', 'sections': [{'type': 'table', 'columns': ['科目', '周六课时'],
+        'rows': [['数学', 2], ['心理', 0], ['合计', 2]]}]}
+    result = json.loads(format_markdown(json.dumps(answer, ensure_ascii=False)))
+    assert result['ok'] and '| 心理 | 0 |' in result['data']['markdown']
+    answer['sections'][0]['rows'][0][1] = True
+    invalid = json.loads(format_markdown(json.dumps(answer, ensure_ascii=False)))
+    assert not invalid['ok'] and 'rows.0.1' in invalid['message']
+
 import pytest
 
 from app.ai.gateway.tool import ToolScope

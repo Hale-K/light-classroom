@@ -1,0 +1,22 @@
+# 桌面端构建依赖（CI 与本地一致；版本跟随 backend/pyproject.toml 的核心集合）
+fastapi
+uvicorn[standard]
+sqlmodel
+sqlalchemy
+aiosqlite
+asyncpg
+pydantic
+pydantic-settings
+httpx
+python-multipart
+python-jose[cryptography]
+passlib[bcrypt]
+loguru
+python-dotenv
+openpyxl
+pypdf
+python-docx
+ortools
+minio
+pywebview
+pyinstaller

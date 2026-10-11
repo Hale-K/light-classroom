@@ -12,7 +12,7 @@ import re
 
 def _token_count(text: str) -> int:
     """Cheap, dependency-free token estimate for projection budgeting."""
-    return max(1, (len(text) + 3) // 4)
+    return max(1, int(len(text) * 0.75))
 
 
 _NON_DIALOGUE_PREFIXES = (
@@ -83,15 +83,20 @@ def project_messages(
         projected = projected[-limit:]
     if token_budget is None:
         return projected
-    kept: list[dict] = []
-    used = 0
-    for item in reversed(projected):
-        cost = _token_count(item["content"])
-        if kept and used + cost > token_budget:
+    latest_user = next((i for i in range(len(projected) - 1, -1, -1) if projected[i]['role'] == 'user'), None)
+    required = projected[latest_user] if latest_user is not None else None
+    used = _token_count(required['content']) if required else 0
+    kept_indices = {latest_user} if latest_user is not None else set()
+    for index in range(len(projected) - 1, -1, -1):
+        if index in kept_indices:
             continue
-        kept.append(item)
+        item = projected[index]
+        cost = _token_count(item["content"])
+        if used + cost > token_budget:
+            continue
+        kept_indices.add(index)
         used += cost
-    return list(reversed(kept))
+    return [item for index, item in enumerate(projected) if index in kept_indices]
 
 
 def project_state(messages: Iterable[dict]) -> dict[str, object]:
@@ -101,6 +106,9 @@ def project_state(messages: Iterable[dict]) -> dict[str, object]:
     confirmed = []
     for item in items:
         if item.get("role") != "assistant":
+            continue
+        # An assistant's wording is not independently verified business data.
+        if not item.get('evidence_id') or not item.get('evidence_verified'):
             continue
         match = re.search(r"(?:已确认|确认(?:为|了))[^：:，。]*?(?:为|是)\s*([^，。；;]+)", str(item.get("content") or ""))
         if match:

@@ -1,3 +1,4 @@
+import { useLocale } from '@/i18n'
 import type { ReactNode } from 'react'
 
 interface PageHeaderProps {
@@ -9,6 +10,7 @@ interface PageHeaderProps {
 
 /** 章节标题（Editorial Split：左大标题 + 右操作区），宽容器防窄墙排版 */
 export default function PageHeader({ title, extra }: PageHeaderProps) {
+  useLocale()
   return (
     <div className="chapter">
       <div>

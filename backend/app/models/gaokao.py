@@ -73,6 +73,11 @@ class StudentSubjectChoice(TimestampMixin, TenantMixin, SQLModel, table=True):
     stream: str | None = Field(default=None, max_length=20)
     status: str = Field(default="confirmed", max_length=20, index=True)
     confirmed_at: datetime | None = Field(default_factory=datetime.utcnow)
+    # 选老师模式开启时的意向老师：{"<subject_id>": teacher_id}；开关关闭时强制为空
+    teacher_preferences: dict = Field(default_factory=dict, sa_type=JSON,
+                                      sa_column_kwargs={"server_default": "{}"})
+    teaching_class_preferences: dict = Field(default_factory=dict, sa_type=JSON,
+                                             sa_column_kwargs={"server_default": "{}"})
 
 
 class StudentCredential(TimestampMixin, TenantMixin, SQLModel, table=True):

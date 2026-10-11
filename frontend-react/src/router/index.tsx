@@ -29,6 +29,7 @@ import ExamCalendarView from '@/pages/exam-calendar'
 import ExamInvigilatorsView from '@/pages/exam-invigilators'
 import SchoolSettingsView from '@/pages/settings'
 import SubjectManagementView from '@/pages/subjects'
+import ExcelConfiguration from '@/pages/assistant-excel'
 import TeacherProfilesView from '@/pages/teacher-profiles'
 import FileCenterView from '@/pages/file-center'
 import CoursewareView from '@/pages/courseware'
@@ -148,6 +149,7 @@ export const router = createBrowserRouter([
           { path: 'exam-invigilators', element: <ExamInvigilatorsView /> },
           { path: 'settings', element: <SchoolSettingsView /> },
           { path: 'subjects', element: <SubjectManagementView /> },
+          { path: 'assistant-excel', element: <ExcelConfiguration /> },
           { path: 'campus-buildings', element: <SpaceResourcesView /> },
           { path: 'rooms', element: <Navigate to="/campus-buildings?tab=rooms" replace /> },
           { path: 'meetings', element: <Navigate to="/dashboard" replace /> },

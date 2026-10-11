@@ -26,6 +26,8 @@ class ModeMismatch(ValueError):
 
 class Query(BaseModel):
     model_config = ConfigDict(extra='forbid')
+    scope_source: Literal['explicit', 'current_page'] = Field(default='explicit',
+        description='默认使用用户明确提供的对象。仅用户明确说当前班级、当前年级或这个班时取current_page继承页面筛选。未指定范围不能自动缩小到页面班级。')
     academic_year: str | None = Field(default=None, min_length=1, max_length=20)
     term: Literal['1', '2'] | None = None
     grade_id: int | None = Field(default=None, gt=0, strict=True)
@@ -126,7 +128,7 @@ class Evidence:
         return groups.get(item['class_id'], set())
 
 
-async def _load(session, tenant_id, q):
+async def _load(session, tenant_id, q, *, include_competitors=False):
     if not q.academic_year or not q.term:
         year, term = await _term(session, tenant_id)
         q = q.model_copy(update={'academic_year': q.academic_year or year, 'term': q.term or term})
@@ -158,32 +160,38 @@ async def _load(session, tenant_id, q):
     if (q.grade_id is None and not q.grade and q.class_id is None) or len(matches) != 1:
         raise ValueError('请明确要查询的年级；名称匹配多个年级时请提供具体年级。')
     grade = matches[0]
+    if not include_competitors:
+        classes = {cid: c for cid, c in classes.items() if c.grade_id == grade.id}
     q = q.model_copy(update={'grade_id': grade.id})
     scope = q.model_dump(exclude_none=True, exclude={'offset', 'limit'})
     scope['grade'] = grade.name
     scope.update({'timetable_mode': mode, 'mode_source': 'school_current_setting',
                   'historical_mode_verified': False})
     walks = {c.id: c for c in await _rows(session, TeachingClass, TeachingClass.tenant_id == tenant_id,
-        TeachingClass.academic_year == q.academic_year, TeachingClass.term == q.term)} if mode == 'walk_class' else {}
-    students = {s.id: s for s in await _rows(session, Student, Student.tenant_id == tenant_id)}
+        TeachingClass.academic_year == q.academic_year, TeachingClass.term == q.term,
+        *([] if include_competitors else [TeachingClass.grade_id == grade.id]))} if mode == 'walk_class' else {}
     memberships = await _rows(session, StudentClassMembership,
         StudentClassMembership.tenant_id == tenant_id,
         StudentClassMembership.academic_year == q.academic_year,
-        StudentClassMembership.term == q.term, StudentClassMembership.status == 'active')
-    admin_members = defaultdict(set)
-    for m in memberships:
-        if m.class_id in classes and m.student_id in students and m.grade_id == classes[m.class_id].grade_id:
-            admin_members[m.class_id].add(m.student_id)
+        StudentClassMembership.term == q.term, StudentClassMembership.status == 'active',
+        StudentClassMembership.class_id.in_(classes))
     grade_memberships = await _rows(session, StudentGradeMembership,
         StudentGradeMembership.tenant_id == tenant_id,
         StudentGradeMembership.academic_year == q.academic_year,
         StudentGradeMembership.grade_id == grade.id, StudentGradeMembership.status == 'active')
+    walk_members = await _rows(session, TeachingClassStudent, TeachingClassStudent.tenant_id == tenant_id,
+        TeachingClassStudent.teaching_class_id.in_(walks)) if walks else []
+    student_ids = {m.student_id for m in [*memberships, *grade_memberships, *walk_members]}
+    students = {s.id: s for s in await _rows(session, Student, Student.tenant_id == tenant_id,
+        Student.id.in_(student_ids))}
+    admin_members = defaultdict(set)
+    for m in memberships:
+        if m.class_id in classes and m.student_id in students and m.grade_id == classes[m.class_id].grade_id:
+            admin_members[m.class_id].add(m.student_id)
     grade_students = {m.student_id for m in grade_memberships if m.student_id in students}
     for cid, members in admin_members.items():
         if classes[cid].grade_id == grade.id:
             grade_students.update(members)
-    walk_members = await _rows(session, TeachingClassStudent, TeachingClassStudent.tenant_id == tenant_id,
-        TeachingClassStudent.teaching_class_id.in_(walks)) if walks else []
     members = defaultdict(set)
     invalid_member_count = 0
     for m in walk_members:
@@ -218,7 +226,8 @@ async def _load(session, tenant_id, q):
         if kind == 'walk' and mode == 'administrative':
             continue
         rows = await _rows(session, model, model.tenant_id == tenant_id,
-            model.academic_year == q.academic_year, model.term == q.term)
+            model.academic_year == q.academic_year, model.term == q.term,
+            *([] if include_competitors else [getattr(model, fk).in_(groups)]))
         for s in rows:
             cid = getattr(s, fk)
             if cid not in groups:
@@ -240,7 +249,8 @@ async def _load(session, tenant_id, q):
             if c.grade_id == grade.id and not members[c.id]],
         'students_without_term_class': sorted(grade_students - all_admin_students),
         'invalid_teaching_class_member_count': invalid_member_count,
-        'orphan_schedule_count_in_school_term': orphan_schedules,
+        'orphan_schedule_count_in_school_term': orphan_schedules if include_competitors else None,
+        'orphan_schedule_school_coverage': include_competitors,
         'population_basis': '学年年级快照、学期行政班归属和已保存教学班成员；不使用学生当前年级或旧班级补历史。缺少全部关联的学生无法统计。',
         'walk_enrollment_applicable': mode == 'walk_class',
     }
@@ -265,7 +275,8 @@ async def _choices(session, tenant_id, e):
     choices = {c.student_id: c for c in await _rows(session, StudentSubjectChoice,
         StudentSubjectChoice.tenant_id == tenant_id,
         StudentSubjectChoice.academic_year == q.academic_year,
-        StudentSubjectChoice.effective_term == q.term)}
+        StudentSubjectChoice.effective_term == q.term,
+        StudentSubjectChoice.student_id.in_(e.grade_students))}
     admins_by_student, walks_by_student = defaultdict(list), defaultdict(list)
     for cid, people in e.admin_members.items():
         for sid in people:
@@ -319,9 +330,11 @@ async def _choices(session, tenant_id, e):
 async def _assignments(session, tenant_id, e):
     q = e.query
     assignments = await _rows(session, TeachingAssignment, TeachingAssignment.tenant_id == tenant_id,
-        TeachingAssignment.academic_year == q.academic_year, TeachingAssignment.term == q.term)
+        TeachingAssignment.academic_year == q.academic_year, TeachingAssignment.term == q.term,
+        TeachingAssignment.class_id.in_(e.classes))
     plans = await _rows(session, CourseHourPlan, CourseHourPlan.tenant_id == tenant_id,
-        CourseHourPlan.academic_year == q.academic_year, CourseHourPlan.term == q.term)
+        CourseHourPlan.academic_year == q.academic_year, CourseHourPlan.term == q.term,
+        CourseHourPlan.class_id.in_(e.classes))
     admin = {(a.class_id, a.subject_id): a for a in assignments if a.class_id in e.classes}
     plan_groups = defaultdict(list)
     for p in plans:
@@ -437,7 +450,7 @@ async def execute(name, arguments, *, session, tenant_id, page_context):
         for key in ('academic_year', 'term'):
             if key not in values and context.get(key) is not None:
                 values[key] = context[key]
-        if not any(key in values for key in ('grade_id', 'grade', 'class_id', 'class_name')):
+        if values.get('scope_source') == 'current_page' and not any(key in values for key in ('grade_id', 'grade', 'class_id', 'class_name')):
             for key in ('grade_id', 'class_id'):
                 if context.get(key) is not None:
                     values[key] = context[key]
@@ -450,7 +463,7 @@ async def execute(name, arguments, *, session, tenant_id, page_context):
         return _tool_response(name, ok=False, code='INVALID_ARGUMENT',
             message='查询参数无效，请使用有效的整数ID、学期1或2和分页范围；选科与任课不支持星期节次。')
     try:
-        e = await _load(session, tenant_id, q)
+        e = await _load(session, tenant_id, q, include_competitors=name == 'lookup_schedule_conflicts')
     except ModeMismatch as exc:
         return _tool_response(name, ok=False, code='MODE_MISMATCH', message=str(exc),
             scope={'timetable_mode': 'administrative', 'mode_source': 'school_current_setting'})

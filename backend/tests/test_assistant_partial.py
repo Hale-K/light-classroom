@@ -59,6 +59,17 @@ def test_blocked_snapshot_preserves_finished_evidence_and_does_not_mutate_plan()
     assert plan == original
 
 
+def test_failed_delivery_is_not_displayed_as_completed():
+    plan = {'steps': [
+        {'id': 'query', 'title': '查询课位', 'status': 'completed'},
+        {'id': 'final', 'title': '表格交付方案与分配草案', 'status': 'completed'},
+    ]}
+    saved = blocked_plan(plan, '模型限流，最终回复尚未交付')
+    assert saved['steps'][0]['status'] == 'completed'
+    assert saved['steps'][1]['status'] == 'blocked'
+    assert plan['steps'][1]['status'] == 'completed'
+
+
 @pytest.mark.asyncio
 async def test_loop_failure_preserves_checked_result_without_restarting_or_querying(monkeypatch):
     from app.ai.agent.agent_loop import run_agent_loop

@@ -239,15 +239,26 @@ async def update_school_settings(
         setattr(tenant, key, value)
     if timetable_mode is not None:
         timetable_config = await _timetable_mode_config(session, user.tenant_id)
+        academic_config = await _academic_year_config(session, user.tenant_id)
+        academic_value = _rollover_config_value(academic_config)
+        mode_value = dict(_rollover_config_value(timetable_config))
+        scopes = dict(mode_value['scopes']) if isinstance(mode_value.get('scopes'), dict) else {}
+        year = academic_value.get('current_academic_year')
+        if not year and academic_value.get('current_entry_year'):
+            entry = int(academic_value['current_entry_year'])
+            year = f'{entry}-{entry + 1}'
+        if year:
+            scopes[f"{year}:{academic_value.get('current_term', '1')}"] = timetable_mode
+        mode_value.update({'mode': timetable_mode, 'scopes': scopes})
         if timetable_config is None:
             session.add(TenantConfig(
                 tenant_id=user.tenant_id,
                 config_key="timetable_mode",
-                config_value={"mode": timetable_mode},
+                config_value=mode_value,
                 updated_by=user.id,
             ))
         else:
-            timetable_config.config_value = {"mode": timetable_mode}
+            timetable_config.config_value = mode_value
             timetable_config.updated_by = user.id
     await session.commit()
     await session.refresh(tenant)
@@ -307,6 +318,28 @@ async def save_academic_years(
         "current_academic_year": body.current_academic_year or (f"{(body.current_entry_year or (rows[0][0] if rows else 0))}-{(body.current_entry_year or (rows[0][0] if rows else 0)) + 1}"),
         "current_term": body.current_term,
     }
+    # Keep the outgoing semester's mode before switching the school's current term.
+    timetable_config = await _timetable_mode_config(session, user.tenant_id)
+    mode_value = dict(_rollover_config_value(timetable_config))
+    mode = mode_value.get('mode', 'administrative')
+    if mode in ('administrative', 'walk_class'):
+        scopes = dict(mode_value['scopes']) if isinstance(mode_value.get('scopes'), dict) else {}
+        previous = _rollover_config_value(config)
+        previous_year = previous.get('current_academic_year')
+        if not previous_year and previous.get('current_entry_year'):
+            entry = int(previous['current_entry_year'])
+            previous_year = f'{entry}-{entry + 1}'
+        if previous_year:
+            scopes.setdefault(f"{previous_year}:{previous.get('current_term', '1')}", mode)
+        next_scope = f"{value['current_academic_year']}:{value['current_term']}"
+        scopes.setdefault(next_scope, mode)
+        mode_value.update({'mode': scopes[next_scope], 'scopes': scopes})
+        if timetable_config is None:
+            session.add(TenantConfig(tenant_id=user.tenant_id, config_key='timetable_mode',
+                                    config_value=mode_value, updated_by=user.id))
+        else:
+            timetable_config.config_value = mode_value
+            timetable_config.updated_by = user.id
     if config is None:
         config = TenantConfig(tenant_id=user.tenant_id, config_key="academic_years", config_value=value, updated_by=user.id)
         session.add(config)

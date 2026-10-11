@@ -4393,3 +4393,39 @@ body[data-theme='tech'] .sk-adj-cell.is-risky {
 .schedule-table .st-lesson.is-interactive:active {
   box-shadow: inset 0 0 0 2px var(--primary, #0ea5e9);
 }
+
+/* Consistent spacing for the scheduling workspaces. */
+.sk-page .sk-readiness { margin-bottom: 12px; }
+.sk-page .sk-tabs > .ant-tabs-nav { margin-bottom: 16px !important; }
+.sk-schedule-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  margin-bottom: 16px;
+}
+.sk-schedule-toolbar > .ant-space { margin-left: auto; }
+.sk-page .rule-group-page { padding: 16px; border-radius: 10px; }
+.sk-page .rule-group-heading {
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.sk-page .rule-group-heading h2 { margin: 0; font-size: 18px; }
+.sk-page .rule-group-row {
+  grid-template-columns: minmax(200px, 1.5fr) minmax(160px, 1.1fr) minmax(120px, .8fr) minmax(100px, .7fr) minmax(90px, .6fr) auto;
+  gap: 16px;
+  padding: 16px;
+}
+.sk-page .rule-group-row small { overflow-wrap: anywhere; }
+@media (max-width: 1000px) {
+  .sk-page .rule-group-row { grid-template-columns: minmax(180px, 1.5fr) repeat(2, minmax(120px, 1fr)); }
+}
+@media (max-width: 600px) {
+  .sk-schedule-toolbar > .ant-space { margin-left: 0; width: 100%; }
+  .sk-page .rule-group-row { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .sk-page .rule-group-name { grid-column: 1 / -1; }
+  .sk-page .rule-group-heading > .ant-space { flex-wrap: wrap; }
+}

@@ -11,6 +11,7 @@ class AssistantTurn:
     text: str
     think: list[str] = field(default_factory=list)
     choices: list[dict] = field(default_factory=list)
+    clarification: dict | None = None
     plan: dict | None = None
     jumps: list[dict] = field(default_factory=list)
     model_visible: bool = True

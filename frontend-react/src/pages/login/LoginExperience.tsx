@@ -1,6 +1,7 @@
+import { translate as t, useLocale } from '@/i18n'
 import { useEffect, useRef } from 'react'
 import { Form, Input } from 'antd'
-import { APP_NAME } from '@/types'
+import { useNavigate } from 'react-router-dom'
 import './login-experience.css'
 
 export interface LoginExperienceForm {
@@ -13,13 +14,18 @@ interface LoginExperienceProps {
   onSubmit: (values: LoginExperienceForm) => void
 }
 
-const VIDEO_SRC = '/videos/mainframe-hero.mp4'
+const VIDEO_SRC = 'https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260826_041744_63efcd78-bf7d-4039-99e2-2461e8a61903.mp4'
+const VIDEO_FALLBACK = '/videos/mainframe-hero.mp4'
 
 export default function LoginExperience({ submitting, onSubmit }: LoginExperienceProps) {
+  useLocale()
+  const navigate = useNavigate()
   const videoRef = useRef<HTMLVideoElement>(null)
   const targetTimeRef = useRef(0)
   const previousXRef = useRef<number | null>(null)
   const seekingRef = useRef(false)
+
+  /* 鼠标横向移动搓洗视频进度：delta → 目标时间，seeked 后再排队下一次 seek，防刷屏 */
   useEffect(() => {
     const video = videoRef.current
     if (!video) return
@@ -56,52 +62,57 @@ export default function LoginExperience({ submitting, onSubmit }: LoginExperienc
       seekingRef.current = false
     }
 
+    const handleError = () => {
+      if (video.src !== VIDEO_FALLBACK && !video.src.endsWith(VIDEO_FALLBACK)) video.src = VIDEO_FALLBACK
+    }
+
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseleave', handleMouseLeave)
     video.addEventListener('loadedmetadata', handleLoadedMetadata)
     video.addEventListener('seeked', handleSeeked)
+    video.addEventListener('error', handleError)
 
     return () => {
       window.removeEventListener('mousemove', handleMouseMove)
       window.removeEventListener('mouseleave', handleMouseLeave)
       video.removeEventListener('loadedmetadata', handleLoadedMetadata)
       video.removeEventListener('seeked', handleSeeked)
+      video.removeEventListener('error', handleError)
     }
   }, [])
 
   return (
-    <main className="login-experience" aria-label="轻课堂登录">
+    <main className="login-experience" aria-label={t("轻课堂登录")}>
       <video ref={videoRef} className="login-experience__bg-video" aria-hidden="true" muted playsInline preload="auto" src={VIDEO_SRC} />
-      <div className="login-experience__video-tint" aria-hidden="true" />
       <div className="login-experience__grain" aria-hidden="true" />
       <div className="login-experience__frame" aria-hidden="true"><span /><span /><span /><span /></div>
 
       <header className="login-experience__nav">
         <a className="login-experience__brand" href="#login-card">
-          <span className="login-experience__brand-name">轻课堂<sup>®</sup></span>
+          <span className="login-experience__brand-name">{t("轻课堂")}<sup>®</sup></span>
           <span className="login-experience__brand-mark">✳︎</span>
         </a>
       </header>
 
       <section className="login-experience__content">
         <div id="login-card" className="login-experience__card" role="group" aria-labelledby="login-form-title">
-          <div className="login-experience__card-topline"><span>工作台入口</span><span>// 01</span></div>
-          <div className="login-experience__form-heading"><h2 id="login-form-title">登录轻课堂</h2><span>SECURE ACCESS</span></div>
+          <div className="login-experience__form-heading"><h2 id="login-form-title">{t("登录轻课堂")}</h2></div>
           <Form<LoginExperienceForm> layout="vertical" requiredMark={false} onFinish={onSubmit}>
-            <Form.Item name="phone" label="手机号" rules={[{ required: true, message: '请输入手机号' }, { pattern: /^1\d{10}$/, message: '手机号格式不正确' }]}>
-              <Input size="large" placeholder="请输入手机号" maxLength={11} autoFocus autoComplete="username" />
+            <Form.Item name="phone" label={t("手机号")} rules={[{ required: true, message: t("请输入手机号") }, { pattern: /^1\d{10}$/, message: t("手机号格式不正确") }]}>
+              <Input size="large" placeholder={t("请输入手机号")} maxLength={11} autoComplete="username" />
             </Form.Item>
-            <Form.Item name="password" label="密码" rules={[{ required: true, message: '请输入密码' }]}>
-              <Input.Password size="large" placeholder="请输入密码" autoComplete="current-password" />
+            <Form.Item name="password" label={t("密码")} rules={[{ required: true, message: t("请输入密码") }]}>
+              <Input.Password size="large" placeholder={t("请输入密码")} autoComplete="current-password" />
             </Form.Item>
-            <button type="submit" className="login-experience__submit" disabled={submitting}><span>{submitting ? '正在进入…' : '进入工作台'}</span><span aria-hidden="true">↗</span></button>
+            <button type="submit" className="login-experience__submit" disabled={submitting}><span>{submitting ? t("正在进入…") : t("进入工作台")}</span><span aria-hidden="true">↗</span></button>
           </Form>
-          <div className="login-experience__trust"><span><i />学校数据隔离</span><span><i />操作全程留痕</span></div>
-          <p className="login-experience__card-footer">{APP_NAME} / SCHOOL ADMINISTRATION PLATFORM</p>
+          <div className="login-experience__ends">
+            <span className="is-current">{t("教师工作台")}</span>
+            <a onClick={() => navigate('/admin/login')}>{t("平台超管")}</a>
+            <a onClick={() => navigate('/student/login')}>{t("学生选科")}</a>
+          </div>
         </div>
       </section>
-
-      <footer className="login-experience__footer"><span>轻课堂 · 学校教务管理平台</span><span>© 2026 LIGHTCLASS</span></footer>
     </main>
   )
 }

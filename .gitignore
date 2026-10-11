@@ -43,3 +43,10 @@ db/*.sql
 .codex/backups/
 output/
 .codex/*.db
+
+# Local desktop packaging and runtime data
+desktop/build*/
+desktop/out*/
+backend/*.db
+backend/*.db-*
+backend/storage_local/

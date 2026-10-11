@@ -1,0 +1,23 @@
+.assist-clarify { max-width: 100%; padding: 16px; border: 1px solid #d9e4f1; border-radius: 16px; background: #fff; color: #26354a; }
+.assist-clarify header { display: flex; justify-content: space-between; gap: 12px; align-items: center; margin-bottom: 16px; }
+.assist-clarify header span { font-size: 12px; color: #64748b; white-space: nowrap; }
+.assist-clarify fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.assist-clarify legend { font-weight: 600; line-height: 1.7; padding: 0; margin-bottom: 12px; }
+.assist-clarify label { display: flex; align-items: center; gap: 10px; padding: 10px; margin-bottom: 6px; border: 1px solid #e2e8f0; border-radius: 10px; cursor: pointer; line-height: 1.5; overflow-wrap: anywhere; }
+.assist-clarify label.is-selected { background: #eff6ff; border-color: #60a5fa; }
+.assist-clarify input { accent-color: #2563eb; flex-shrink: 0; }
+.assist-clarify-number { display: grid; place-items: center; width: 24px; height: 24px; background: #edf2f7; border-radius: 6px; flex-shrink: 0; font-size: 12px; }
+.assist-clarify textarea { width: 100%; min-height: 80px; padding: 10px; border: 1px solid #cbd5e1; border-radius: 10px; box-sizing: border-box; font: inherit; resize: vertical; margin-bottom: 8px; }
+.assist-clarify footer { display: flex; justify-content: space-between; gap: 10px; margin-top: 14px; }
+.assist-clarify button { padding: 9px 14px; border: 1px solid #dbe3ed; border-radius: 9px; background: #fff; cursor: pointer; font: inherit; }
+.assist-clarify button.is-primary { color: #fff; background: #2563eb; border-color: #2563eb; }
+.assist-clarify button:disabled { opacity: .45; cursor: default; }
+.assist-clarify :focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
+.assist-clarify dl { margin: 0; }
+.assist-clarify dl div { padding: 10px 0; border-bottom: 1px solid #e2e8f0; }
+.assist-clarify dt { color: #64748b; font-size: 12px; }
+.assist-clarify dd { margin: 6px 0 0; font-weight: 600; }
+.assist-clarify p { color: #64748b; font-size: 12px; line-height: 1.6; }
+.assist-clarify-known { padding: 10px; background: #f5f9ff; border-radius: 8px; margin-bottom: 12px; font-size: 12px; line-height: 1.6; }
+.assist-clarify-known summary { cursor: pointer; color: #37659e; }
+.assist-clarify-known ul { padding-left: 18px; margin: 8px 0 0; }

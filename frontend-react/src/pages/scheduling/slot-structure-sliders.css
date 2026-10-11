@@ -79,3 +79,21 @@ body[data-theme='tech'] .slot-slider-panel .slot-special-slider-day, body[data-t
   .slot-slider-layout { grid-template-columns: minmax(0, 1fr); align-items: start; }
   .slot-slider-day { grid-template-columns: 64px minmax(0, 1fr); }
 }
+
+.slot-slider-preview-head { align-items: center; }
+.slot-slider-preview-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 12px 0 8px;
+}
+.slot-slider-preview-tools .slot-slider-legend { margin: 0; }
+.slot-slider-preview-tools .slot-slider-selection-bar { padding: 0; gap: 12px; }
+.slot-slider-selection-bar > span:empty { display: none; }
+.slot-slider-selection-bar .ant-space { flex-wrap: wrap; }
+.slot-slider-panel .slot-slider-toolbar { margin-bottom: 16px; }
+@media (max-width: 767px) {
+  .slot-slider-preview-tools { align-items: flex-start; flex-direction: column; }
+}

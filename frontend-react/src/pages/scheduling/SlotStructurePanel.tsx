@@ -107,12 +107,14 @@ export default function SlotStructurePanel({ config, academicYear, term, gradeId
           <div className="slot-slider-preview-head"><div className="slot-slider-heading"><h3>一周课位预览</h3></div>
             <Segmented aria-label="课位预览周次" value={parity} options={[{ label: '单周', value: 'odd' }, { label: '双周', value: 'even' }]} onChange={(value) => setParity(value as 'odd' | 'even')} />
           </div>
+          <div className="slot-slider-preview-tools">
           <div className="slot-slider-legend"><span><i className="is-formal" />正式课位</span><span><i className="is-special" />晚自习</span><span>— 不启用</span><span>单 / 双周</span></div>
           <div className="slot-slider-selection-bar">
             <span aria-live="polite">{selected.length ? `已选 ${selected.length} 个课位` : ''}</span>
             <Space><Button size="small" disabled={saving || loading || !cells.length} onClick={() => setSelected(cells)}>全选课位</Button>
               <Button size="small" disabled={!selected.length || saving || loading} onClick={() => setSelected([])}>清除选择</Button>
               <Button size="small" type="primary" disabled={!selected.length || saving || loading} onClick={() => { setSlotMode('all'); setEditing(selected) }}>批量设置</Button></Space>
+          </div>
           </div>
           <div className="slot-slider-matrix-scroll"><table className="slot-slider-matrix"
             onPointerMove={event => {

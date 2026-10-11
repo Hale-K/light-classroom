@@ -44,8 +44,11 @@ class AssistantGateway:
     @staticmethod
     def _project_turns(messages: list[dict]) -> list[dict]:
         candidates: list[dict] = []
-        for item in messages[-24:]:
-            content = compact_for_chat(str(item.get("content") or ""))
+        recent = messages[-24:]
+        latest_user = next((i for i in range(len(recent) - 1, -1, -1) if recent[i].get('role') == 'user'), None)
+        for index, item in enumerate(recent):
+            raw = str(item.get("content") or "")
+            content = raw if index == latest_user else compact_for_chat(raw)
             if not content:
                 continue
             candidates.append({

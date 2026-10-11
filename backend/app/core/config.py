@@ -1,5 +1,6 @@
 """应用配置 - 基于 pydantic-settings，环境变量加载"""
 from functools import lru_cache
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
 
     # 平台超管（创建学校的运营后台）
     admin_username: str = "admin"
-    admin_password: str = "admin123"
+    admin_password: str = "admin123456"
     admin_name: str = "平台管理员"
 
     # 启动时结构同步：模型中删除的列是否从数据库自动 DROP（True 跟随模型，False 保留数据列）
@@ -48,7 +49,11 @@ class Settings(BaseSettings):
     llm_base_url: str = "https://api.deepseek.com/v1"
     llm_api_key: str = ""
     llm_model: str = "deepseek-chat"
-    llm_max_tokens: int = 4096
+    llm_max_tokens: int = 16384
+    # BYOK 长任务容量；独立于执行时间预算，可通过环境变量调整。
+    assistant_max_request_tokens: int = Field(default=64000, ge=1)
+    assistant_max_total_input_tokens: int = Field(default=1280000, ge=1)
+    assistant_tool_result_chars: int = Field(default=16000, ge=256)
     llm_cost_limit_per_sheet: float = 0.5  # 成本红线
     # 教务助手模型服务的进程内熔断策略。多实例部署时会由 Redis 实现接管同一接口。
     assistant_provider_failure_threshold: int = 2
@@ -68,6 +73,8 @@ class Settings(BaseSettings):
     minio_bucket: str = "light-classroom"
     minio_secure: bool = False
     minio_public_base_url: str = "http://localhost:9010"
+    # 本地存储目录：设置后文件中心不再依赖 MinIO，导出/导入直接落盘（桌面端一键安装模式）
+    storage_local_dir: str = ""
 
     # Celery + RabbitMQ
     celery_broker_url: str = "amqp://guest:guest@localhost:5672//"

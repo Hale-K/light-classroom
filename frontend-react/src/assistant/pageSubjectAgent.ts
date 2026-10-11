@@ -1,3 +1,4 @@
+import type { AssistantMaterial } from './materials'
 import { getApiBaseURL, getAuthHeaders } from '@/api/http'
 import { schedulingApi } from '@/api'
 import { setActiveSubjectDraft, type SubjectDraft } from './subjectTask'
@@ -19,10 +20,10 @@ export async function classifyPageIntent(content: string, signal: AbortSignal): 
   return body.data.intent === 'create_subject' ? 'create_subject' : 'other'
 }
 
-export async function prepareSubject(content: string, draft: SubjectDraft | null, signal: AbortSignal): Promise<PreparedSubject> {
+export async function prepareSubject(content: string, draft: SubjectDraft | null, signal: AbortSignal, materials: AssistantMaterial[] = []): Promise<PreparedSubject> {
   const response = await fetch(`${getApiBaseURL()}/page-agent/subjects/prepare`, {
     method: 'POST', headers: { ...getAuthHeaders(), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ content, ...(draft ? { draft } : {}) }), signal,
+    body: JSON.stringify({ content, reference_materials: materials, ...(draft ? { draft } : {}) }), signal,
   })
   const body = await response.json()
   if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : '科目数据校验失败，请重新提供。')

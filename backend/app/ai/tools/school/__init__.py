@@ -32,6 +32,9 @@ from app.ai.tools.school import (
     people,
     playbook,
     rules,
+    resources,
+    resource_planning,
+    exams,
     setup,
     walk,
 )
@@ -71,6 +74,10 @@ _TOOLS_BY_NAME: dict[str, dict] = {
     "lookup_generation_status": generation.TOOLS[1],
     "lookup_walk_classes": walk.TOOLS[0],
     'lookup_school_context': school_context.TOOL,
+    'lookup_room_resources': resources.TOOL,
+    'calculate_resource_plan': resource_planning.TOOL,
+    exams.NAME: exams.TOOL,
+    'calculate_exam_capacity': exams.CAPACITY_TOOL,
     **{tool['function']['name']: tool for tool in evidence.TOOLS},
     **{tool['function']['name']: tool for tool in planning.TOOLS},
 }
@@ -87,6 +94,10 @@ SCHOOL_TOOLS: list[dict] = [_TOOLS_BY_NAME[name] for name in (
     "lookup_generation_status",
     "lookup_walk_classes",
     'lookup_school_context',
+    'lookup_room_resources',
+    'calculate_resource_plan',
+    exams.NAME,
+    'calculate_exam_capacity',
     *evidence.DESCRIPTIONS,
     *planning.DESCRIPTIONS,
 )]
@@ -106,6 +117,14 @@ async def execute_school_tool(
     不重试，直接交给模型澄清。规则草稿与确认写入不经过本函数。
     """
     async def dispatch() -> str:
+        if name == 'calculate_exam_capacity':
+            return exams.calculate_capacity(arguments)
+        if name == exams.NAME:
+            return await exams.execute(arguments, session=session, tenant_id=tenant_id)
+        if name == 'calculate_resource_plan':
+            return resource_planning.calculate_resource_plan(arguments)
+        if name == 'lookup_room_resources':
+            return await resources.execute(arguments, session=session, tenant_id=tenant_id, page_context=page_context)
         if name == 'lookup_school_context':
             return await school_context.lookup_school_context(session, tenant_id, arguments)
         if name in evidence.DESCRIPTIONS:
@@ -117,44 +136,54 @@ async def execute_school_tool(
         context = page_context or {}
         args = _args(arguments)
         scope = {"academic_year": args.get("academic_year") or context.get("academic_year"), "term": args.get("term") or context.get("term")}
+        if name not in {'lookup_playbook', 'lookup_generation_log'}:
+            if not scope['academic_year'] or not scope['term']:
+                current_year, current_term = await _term(session, tenant_id)
+                scope = {'academic_year': scope['academic_year'] or current_year, 'term': scope['term'] or current_term}
+            # Response scope describes execution, not unrelated page class filters.
+            args = {**args, **scope}
+        response_context = {key: value for key, value in context.items() if key in {'academic_year', 'term'}}
         if name == "lookup_walk_classes":
             if await school_context.timetable_mode(session, tenant_id) != 'walk_class':
                 return _tool_response(name, ok=False, code='MODE_MISMATCH',
                     message='学校当前为行政班课表模式；请使用行政班任课或课表查询，不能把历史教学班当作当前走班结果。',
                     scope={'timetable_mode': 'administrative', 'mode_source': 'school_current_setting'})
             return await lookup_walk_classes(session, tenant_id, **scope,
-                grade_id=args.get('grade_id') or (None if args.get('grade') else context.get('grade_id')),
+                grade_id=args.get('grade_id'),
                 grade=args.get('grade'), subject=args.get('subject'))
         if name == "lookup_generation_status":
-            result = await lookup_generation_status(str(args.get("job_id") or context.get("job_id") or ""), tenant_id)
-            return _tool_response(name, message=result, code="EMPTY_RESULT" if "未找到" in result or "没有可核对" in result else "OK", scope=_tool_scope(args, page_context))
+            result = await generation.lookup_saved_generation_status(session, tenant_id,
+                str(args.get("job_id") or context.get("job_id") or ""), **scope,
+                class_id=args.get("class_id"),
+                grade_id=args.get("grade_id"))
+            if result.startswith(('缺少查询学年', '学期参数无效', '未匹配本校')):
+                return _tool_response(name, message=result, ok=False, code='MISSING_SCOPE', scope=_tool_scope(args, response_context))
+            return _tool_response(name, message=result, scope=_tool_scope(args, response_context))
         if name == "lookup_teachers":
             result = await lookup_teachers(session, tenant_id, subject=str(args.get("subject") or ""), keyword=str(args.get("keyword") or ""), **scope)
-            return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有匹配" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
+            return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有匹配" in result else "OK", scope=_tool_scope(args, response_context), data={"text": result})
         if name == "lookup_schedule_setup":
             extra = {key: args[key] for key in ('grade_id', 'grade') if key in args}
-            if not extra and context.get('grade_id') is not None:
-                extra['grade_id'] = context['grade_id']
             result = await lookup_schedule_setup(session, tenant_id,
-                class_id=args.get('class_id') or (None if extra else context.get('class_id')), **extra, **scope)
+                class_id=args.get('class_id'), **extra, **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没设置" in result or "未找到指定班级" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_rules":
-            result = await lookup_rules(session, tenant_id, rule_group_id=args.get("rule_group_id") or context.get("rule_group_id"), **scope)
+            result = await lookup_rules(session, tenant_id, rule_group_id=args.get("rule_group_id"), **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有规则组" in result or "未找到所选规则组" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_subject_capacity":
             result = await lookup_subject_capacity(session, tenant_id, grade=str(args.get("grade") or ""),
-                grade_id=args.get('grade_id') or (None if args.get('grade') else context.get('grade_id')), **scope)
+                grade_id=args.get('grade_id'), **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有班级" in result or "没有找到名称含" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_remaining_capacity":
             result = await lookup_remaining_capacity(session, tenant_id, grade=str(args.get("grade") or ""),
-                grade_id=args.get('grade_id') or (None if args.get('grade') else context.get('grade_id')), **scope)
+                grade_id=args.get('grade_id'), **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "还没有班级" in result or "没有找到名称含" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_generation_log":
             result = await lookup_generation_log(str(args.get("job_id") or context.get("job_id") or ""), tenant_id)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "未找到" in result or "请先提供" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_slot_role_capacity":
             result = await lookup_slot_role_capacity(session, tenant_id,
-                grade_id=args.get('grade_id') or context.get('grade_id'), **scope)
+                grade_id=args.get('grade_id'), **scope)
             return _tool_response(name, message=result, code="EMPTY_RESULT" if "没有启用" in result else "OK", scope=_tool_scope(args, page_context), data={"text": result})
         if name == "lookup_playbook":
             result = lookup_playbook(arguments)

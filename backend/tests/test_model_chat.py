@@ -8,6 +8,47 @@ from app.ai.model.chat import ChatError, _post_chat
 _MSGS = [{"role": "user", "content": "问"}]
 
 
+@pytest.mark.asyncio
+async def test_configured_provider_does_not_add_environment_backup(monkeypatch):
+    from types import SimpleNamespace
+
+    provider = SimpleNamespace(id=7, name='GLM', provider_type='ZHIPU',
+        base_url='https://open.bigmodel.cn/api/paas/v4', chat_model='glm-test',
+        api_key='test-key', timeout_seconds=60, max_output_tokens=16384)
+
+    class Session:
+        async def execute(self, statement):
+            return SimpleNamespace(scalars=lambda: SimpleNamespace(all=lambda: [provider]))
+
+    monkeypatch.setattr(chat, 'decrypt_secret', lambda value: value)
+    monkeypatch.setattr(chat.settings, 'llm_base_url', 'http://127.0.0.1:11434/v1')
+    monkeypatch.setattr(chat.settings, 'llm_api_key', 'unused-local-key')
+    endpoints = await chat.resolve_chat_endpoints(Session(), 1)
+    assert [(item.name, item.model) for item in endpoints] == [('GLM', 'glm-test')]
+
+
+@pytest.mark.asyncio
+async def test_single_provider_failure_never_announces_backup():
+    from app.ai.model.routing import ModelProviderRouter
+    from app.ai.resilience import ProviderCircuitBreaker
+
+    progress, calls = [], []
+    endpoint = chat.ChatEndpoint('only', 'GLM', 'http://test', '', 'glm-test', 60)
+
+    async def invoke(item, budget):
+        calls.append(item.key)
+        raise ChatError('账户额度不足', 'quota')
+
+    async def report(phase, message):
+        progress.append(message)
+
+    with pytest.raises(ChatError, match='账户额度不足'):
+        await ModelProviderRouter(ProviderCircuitBreaker()).route_call(
+            [endpoint], budget_seconds=120, invoke=invoke, on_progress=report)
+    assert calls == ['only']
+    assert not any('备用模型' in message for message in progress)
+
+
 def _call(transport):
     return _post_chat(
         base_url="http://llm.test/v1", api_key="k", model="m", timeout=5,
@@ -70,6 +111,13 @@ async def test_plain_bad_request_classified():
     with pytest.raises(ChatError) as ei:
         await _call(httpx.MockTransport(handler))
     assert ei.value.error_class == "bad_request"
+
+
+def test_output_budget_error_is_configuration_problem_not_user_question():
+    error = chat._status_error(400, '{"error":"max_tokens must be <= 8192 sk-private"}')
+    assert error.error_class == 'config'
+    assert '输出额度' in error.message
+    assert '换一种问法' not in error.message and 'sk-private' not in error.message
 
 
 @pytest.mark.asyncio

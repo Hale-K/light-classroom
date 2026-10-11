@@ -10,11 +10,11 @@ type HoursManagementProps = ComponentProps<typeof CourseHoursPanel> & {
 
 export default function HoursManagement(props: HoursManagementProps) {
   const [mode, setMode] = useState('administrative')
+  const modeSwitch = props.timetableMode === 'walk_class' && <Segmented size="large" value={mode} onChange={setMode} aria-label="课时管理类型"
+      options={[{ label: '行政班课时', value: 'administrative' }, { label: '走班课时', value: 'walk' }]} />
   return <>
-    {props.timetableMode === 'walk_class' && <Segmented size="large" value={mode} onChange={setMode} style={{ marginBottom: 20 }}
-      options={[{ label: '行政班课时', value: 'administrative' }, { label: '走班课时', value: 'walk' }]} />}
-    {mode === 'administrative' ? <CourseHoursPanel {...props} /> : <WalkCourseHoursPanel
-      academicYear={props.academicYear} term={props.term} subjects={props.subjects}
+    {mode === 'administrative' ? <CourseHoursPanel {...props} toolbarLeading={modeSwitch} /> : <WalkCourseHoursPanel
+      toolbarLeading={modeSwitch} academicYear={props.academicYear} term={props.term} subjects={props.subjects}
       initialGradeId={props.classes.find((item) => item.id === props.classId)?.grade_id} />}
   </>
 }

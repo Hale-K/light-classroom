@@ -1,0 +1,75 @@
+name: 桌面端构建（Windows / macOS）
+
+on:
+  push:
+    tags: ['desktop-v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 构建前端
+        working-directory: frontend-react
+        run: |
+          pnpm install --frozen-lockfile
+          npx vite build
+
+      - name: 安装后端依赖与打包工具
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r ../desktop/requirements-build.txt
+
+      - name: PyInstaller 打包
+        run: |
+          pyinstaller desktop/light-classroom.spec --noconfirm --distpath desktop/dist --workpath desktop/build
+
+      - name: Windows 一键安装包（Inno Setup）
+        if: runner.os == 'Windows'
+        run: |
+          choco install innosetup -y --no-progress
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" desktop/installer.iss
+
+      - name: 打包 Windows 压缩包
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: Compress-Archive -Path desktop/dist/LightClassroom -DestinationPath desktop/LightClassroom-${{ matrix.os }}.zip
+
+      - name: 打包 macOS 压缩包
+        if: runner.os == 'macOS'
+        run: |
+          cd desktop/dist && zip -qry ../LightClassroom-macos.zip LightClassroom.app LightClassroom 2>/dev/null || zip -qry ../LightClassroom-macos.zip .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LightClassroom-${{ matrix.os }}
+          path: |
+            desktop/LightClassroom-*.zip
+            desktop/installer/*.exe
+
+      - name: 发布到 Release（desktop-v* 标签触发）
+        if: startsWith(github.ref, 'refs/tags/desktop-v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            desktop/LightClassroom-*.zip
+            desktop/installer/*.exe

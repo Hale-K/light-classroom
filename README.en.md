@@ -70,7 +70,7 @@ Open http://localhost:5176 . The Vite proxy forwards `/api/v1` to `127.0.0.1:800
 | School login | `/login` |
 | Platform admin | `/admin/login` |
 
-Dev admin credentials come from `ADMIN_USERNAME` / `ADMIN_PASSWORD` in `.env` (sample `admin` / `admin123` — change before any real deploy).
+Dev admin credentials come from `ADMIN_USERNAME` / `ADMIN_PASSWORD` in `.env` (sample `admin` / `admin123456` — change before any real deploy).
 
 ## Configuration
 

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Alert, App, Button, Card, Checkbox, Dropdown, InputNumber, Modal, Popconfirm, Select, Space, Table, Tag } from 'antd'
+import { Alert, App, Button, Card, Checkbox, Dropdown, InputNumber, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from 'antd'
 import {
   ApartmentOutlined,
   CheckCircleFilled,
@@ -54,8 +54,20 @@ export default function GaokaoView() {
   const [selectedReviewIds, setSelectedReviewIds] = useState<number[]>([])
 
   const isWalkClass = mode !== 'traditional'
-  const userRoles = user?.roles || (user?.role ? [user.role] : [])
+  const userRoles = [...(user?.roles || []), ...(user?.role ? [user.role] : [])]
   const canReviewChoices = userRoles.includes('head_teacher')
+  const canManageTeacherPick = userRoles.some((role) => ['director', 'academic_director'].includes(role))
+  const [savingTeacherPick, setSavingTeacherPick] = useState(false)
+  const toggleTeacherPick = async (enabled: boolean) => {
+    if (!overview?.scheme) return
+    setSavingTeacherPick(true)
+    try {
+      await gaokaoApi.setTeacherPick(overview.scheme.id, enabled)
+      setOverview((current) => current?.scheme ? { ...current, scheme: { ...current.scheme, strategy_config: { ...current.scheme.strategy_config, allow_teacher_pick: enabled } } } : current)
+      message.success(enabled ? '已开启选老师模式' : '已关闭选老师模式，学生仅可选课')
+    } catch (error) { message.error(error instanceof Error ? error.message : '模式设置失败') }
+    finally { setSavingTeacherPick(false) }
+  }
   const workflow = overview?.workflow
 
   const load = async () => {
@@ -289,6 +301,12 @@ export default function GaokaoView() {
           description={overview.workflow_warnings.map((warning) => <div key={warning}>{warning}</div>)}
         />
       ) : null}
+
+      {canManageTeacherPick && <Card className="gk-card" style={{ marginBottom: 18 }} title="学生选课模式">
+        <Space><span>允许学生选老师</span><Switch aria-label="允许学生选老师" checked={overview?.scheme?.strategy_config?.allow_teacher_pick === true}
+          disabled={!overview?.scheme || loading} loading={savingTeacherPick} onChange={(enabled) => void toggleTeacherPick(enabled)} /></Space>
+        <p>默认仅开放选课。开启后，学生可按老师选择已开设的教学班，查看班级上限和是否选满。请先生成教学班并安排教师，再开启此模式。此设置应用于当前选科方案。</p>
+      </Card>}
 
       <div className="gk-metrics">
         <div className="gk-metric metric-blue">

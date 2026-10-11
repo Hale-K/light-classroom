@@ -116,6 +116,21 @@ async def download_job(
     }
 
 
+@router.get("/storage/{object_key:path}", summary="本地存储文件流式下载（HMAC 签名）")
+async def download_storage_file(object_key: str, expires: str, signature: str):
+    """本地存储模式的下载端点：桌面桥/浏览器凭签名直接拉取，无需登录头。"""
+    from fastapi.responses import FileResponse
+
+    if not minio_client.verify_signature(object_key, expires, signature):
+        raise HTTPException(status_code=403, detail="下载链接无效或已过期")
+    if not minio_client.local_mode():
+        raise HTTPException(status_code=404, detail="本地存储未启用")
+    path = minio_client.local_file_path(object_key)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return FileResponse(path, filename=object_key.rsplit("/", 1)[-1])
+
+
 @router.post("/exports/timetable", summary="异步导出课表")
 async def export_timetable(
     body: ExportTimetableIn,

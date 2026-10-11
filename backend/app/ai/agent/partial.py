@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 from decimal import Decimal
 import json
+import re
 
 from app.ai.agent.models import AssistantTurn
 from app.ai.tools.markdown import format_markdown
@@ -16,6 +17,10 @@ def blocked_plan(plan: dict | None, reason: str) -> dict | None:
     for step in result.get('steps', []):
         if step.get('status') in {'pending', 'running'}:
             step.update(status='blocked', summary=reason)
+    steps = result.get('steps', [])
+    if steps and steps[-1].get('status') == 'completed' and re.search(
+            r'交付|汇总|输出|报告', str(steps[-1].get('title') or '')):
+        steps[-1].update(status='blocked', summary=reason)
     return result
 
 
@@ -23,7 +28,10 @@ def checked_partial(scope, message: str) -> dict | None:
     """Copy the last authorized validator result; never reuse a rejected draft."""
     evidence = getattr(scope, 'checked_hour_evidence', None)
     if not isinstance(evidence, dict):
-        return None
+        resource_plan = getattr(scope, 'checked_resource_plan', None)
+        if isinstance(resource_plan, dict) and resource_plan.get('ok'):
+            return _resource_plan_partial(resource_plan, message)
+        return _checked_read_partial(scope, message)
     data = evidence.get('data') or {}
     scenarios = data.get('scenarios') or []
     if not scenarios or not data.get('all_numeric_constraints_valid'):
@@ -61,6 +69,18 @@ def checked_partial(scope, message: str) -> dict | None:
             rows.append(['合计', quantity(totals['odd']), quantity(totals['even'])])
             sections.append({'type': 'table', 'title': scenario['name'] + '（数值验算记录，未实施）',
                 'columns': ['科目', '单周课时', '双周课时'], 'rows': rows})
+            distributions = scenario.get('daily_distribution_by_week') or {}
+            for leg, label in (('odd', '单周'), ('even', '双周')):
+                distribution = distributions.get(leg)
+                if not distribution or '6' not in {str(day) for day in data.get('weekdays', [])}:
+                    continue
+                split = [[subject, str(distribution['subject_hours'][subject]['weekday']),
+                    str(distribution['subject_hours'][subject]['saturday']), quantity(hours[leg])]
+                    for subject, hours in values.items()]
+                split.append(['合计', str(sum(item['weekday'] for item in distribution['subject_hours'].values())),
+                    str(sum(item['saturday'] for item in distribution['subject_hours'].values())), quantity(totals[leg])])
+                sections.append({'type': 'table', 'title': scenario['name'] + ' · ' + label + '课量分配草案',
+                    'columns': ['科目', '周一至周五', '周六', '全周课时'], 'rows': split})
             missing.update(issue['subject'] for issue in scenario.get('errors', []) if issue.get('code') == 'UNKNOWN_SUBJECT')
         sections.append({'type': 'paragraph', 'title': '尚未完成', 'text':
             '以上只保留已通过程序验算的课量，最终规划未完成。教师与教室冲突、必排课位实际排满、完整规则和求解可行性仍待验证；未保存或修改业务数据。'})
@@ -75,3 +95,68 @@ def checked_partial(scope, message: str) -> dict | None:
         return asdict(AssistantTurn(text=formatted['data']['markdown'], model_visible=False))
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def _readable_scope(scope: dict) -> str:
+    parts = [str(scope.get('grade_name') or scope.get('grade') or '全校')]
+    if scope.get('academic_year'):
+        parts.append(str(scope['academic_year']) + '学年')
+    if scope.get('term'):
+        parts.append('第' + str(scope['term']) + '学期')
+    if scope.get('cohort_label'):
+        parts.append(str(scope['cohort_label']) + '届')
+    if scope.get('room_type'):
+        parts.append('空间类型：' + str(scope['room_type']))
+    return ' · '.join(parts)
+
+
+def _resource_plan_partial(evidence: dict, message: str) -> dict | None:
+    data = evidence['data']
+    options = []
+    for option in data['class_options']:
+        sizes = '，'.join(f"{row['classes']}个班×{row['class_size']}人" for row in option['distribution'])
+        options.append([str(option['class_count']), sizes, str(option['rooms_required'])])
+    sections = [{'type': 'table', 'title': '已验算的分班选择',
+        'columns': ['班级数', '人数分配', '普通教室需求'], 'rows': options}]
+    if data['subjects']:
+        def periods(s, leg):
+            return (s.get('periods_per_class_by_week') or {}).get(leg, s['weekly_periods_per_class'])
+        rows = [[s['subject'], str(periods(s, 'odd')), str(periods(s, 'even')),
+                 str(s['teacher_weekly_periods']), str(s['teachers_required'])] for s in data['subjects']]
+        totals = {leg: sum(Decimal(str(periods(s, leg))) for s in data['subjects']) for leg in ('odd', 'even')}
+        rows.append(['合计', str(totals['odd']), str(totals['even']), '—', str(data['teachers_required'])])
+        sections.append({'type': 'table', 'title': f"{data['selected']['class_count']}个班的师资估算",
+            'columns': ['科目', '每班单周课时', '每班双周课时', '教师周授课上限', '教师人数'], 'rows': rows})
+        sections.append({'type': 'paragraph', 'text': f"每班周均课时：{data['weekly_periods_per_class']}节；教师按开课周峰值计算。"})
+    sections.append({'type': 'paragraph', 'text': '计算依据：' + evidence['scope']['basis']})
+    sections.append({'type': 'paragraph', 'text': '；'.join(data['limitations']) + '。最终规划尚未完成，未修改业务数据。'})
+    formatted = json.loads(format_markdown(json.dumps({'summary': '本轮未完成：' + message,
+        'sections': sections}, ensure_ascii=False)))
+    if not formatted.get('ok'):
+        return None
+    from dataclasses import asdict
+    return asdict(AssistantTurn(text=formatted['data']['markdown'], model_visible=False))
+
+
+def _checked_read_partial(scope, message: str) -> dict | None:
+    evidence = getattr(scope, 'checked_read_evidence', None)
+    if not evidence:
+        return None
+    # Program-generated scoped aggregates only; no model draft or student list.
+    rows = []
+    labels = {'total_matching_records': '匹配记录数（不代表排课完成）',
+              'configured_spaces': '已配置空间数量（含资源类型筛选）',
+              'allocated_distinct_spaces': '已分配空间去重数量'}
+    for receipt in evidence[-5:]:
+        for key, value in receipt.get('summary', {}).items():
+            if type(value) is int and value >= 0:
+                rows.append([_readable_scope(receipt.get('scope') or {}), labels[key], str(value)])
+    if not rows:
+        return None
+    formatted = json.loads(format_markdown(json.dumps({'summary': '本轮未完成：' + message,
+        'sections': [{'type': 'table', 'columns': ['查询范围', '指标', '数量'], 'rows': rows},
+            {'type': 'paragraph', 'text': '以上仅保留本轮已授权查询的统计。最终分析与完整性核对未完成，未修改业务数据。'}]}, ensure_ascii=False)))
+    if not formatted.get('ok'):
+        return None
+    from dataclasses import asdict
+    return asdict(AssistantTurn(text=formatted['data']['markdown'], model_visible=False))

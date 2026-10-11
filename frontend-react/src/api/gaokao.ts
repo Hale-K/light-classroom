@@ -11,6 +11,7 @@ export interface GaokaoOverview {
     name: string
     mode: '3+1+2' | '3+3' | 'traditional'
     entry_year: number
+    strategy_config?: { allow_teacher_pick?: boolean }
   } | null
   workflow: {
     code: 'exploration' | 'intention' | 'effective'
@@ -56,6 +57,8 @@ export interface GaokaoChoiceReview {
 }
 
 export interface WalkTeachingClass {
+  selected_count?: number
+  is_full?: boolean
   id: number
   name: string
   subject_id: number
@@ -79,6 +82,10 @@ export interface WalkTeachingClass {
 }
 
 export const gaokaoApi = {
+  setTeachingClassCapacity: (classId: number, capacity: number) =>
+    unwrap<{ capacity: number }>(http.patch(`/gaokao/teaching-classes/${classId}/capacity`, { capacity })),
+  setTeacherPick: (schemeId: number, enabled: boolean) =>
+    unwrap<{ enabled: boolean }>(http.patch(`/gaokao/schemes/${schemeId}/teacher-pick`, { enabled })),
   studentTimetable: (studentId: number, params: { academic_year: string; term: string }) =>
     unwrap<ScheduleEntry[]>(http.get(`/gaokao/student-timetable/${studentId}`, { params })),
   recommendWalkConfiguration: (data: { grade_id: number; academic_year: string; term: string; room_ids?: number[]; forbidden_slots?: [number, number][] }) =>

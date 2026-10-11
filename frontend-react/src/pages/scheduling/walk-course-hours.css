@@ -48,3 +48,35 @@
   .walk-hours-input-grid { grid-template-columns: 1fr; }
   .walk-hours-modal-context { flex-direction: column; }
 }
+
+/* Keep type selection and actions in one compact toolbar. */
+.sk-hours.walk-hours .hours-controls {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px 24px;
+  padding: 0 0 16px;
+}
+.hours-controls .hours-actions,
+.hours-controls .walk-hours-toolbar { margin-left: auto; }
+.admin-hours .walk-hours-meta {
+  gap: 12px 24px;
+  padding: 12px 16px;
+  margin-bottom: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface);
+}
+.admin-hours .walk-hours-meta > div:not(.walk-hours-term) {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.admin-hours .walk-hours-meta strong { margin-right: 0; }
+@media (max-width: 767px) {
+  .hours-controls .hours-actions,
+  .hours-controls .walk-hours-toolbar { margin-left: 0; width: 100%; }
+  .admin-hours .walk-hours-meta { gap: 12px 20px; }
+}

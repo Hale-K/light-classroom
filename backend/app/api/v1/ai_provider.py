@@ -6,6 +6,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.ai.model.providers import ProbeError, _normalize_probe_base, load_model_ids, test_connection
@@ -122,7 +123,7 @@ async def create_provider(
         video_model=body.video_model,
         audio_model=body.audio_model,
         timeout_seconds=body.timeout_seconds,
-        max_output_tokens=body.max_output_tokens if body.max_output_tokens is not None else 8192,
+        max_output_tokens=body.max_output_tokens if body.max_output_tokens is not None else 16384,
         is_default=body.is_default,
         status=1 if body.status else 0,
         sort=body.sort,
@@ -130,8 +131,17 @@ async def create_provider(
     )
     if row.is_default:
         await _clear_default(session, tenant_id)
+    duplicate = (await session.execute(select(AiProvider.id).where(
+        AiProvider.tenant_id == tenant_id, AiProvider.name == row.name,
+    ))).scalar_one_or_none()
+    if duplicate is not None:
+        raise HTTPException(status_code=409, detail="同名服务商已存在，请换个名称或直接编辑它")
     session.add(row)
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        await session.rollback()
+        raise HTTPException(status_code=409, detail="同名服务商已存在，请换个名称或直接编辑它") from exc
     await session.refresh(row)
     return {"code": 0, "message": "ok", "data": _to_out(row)}
 
@@ -147,7 +157,15 @@ async def update_provider(
     row = await session.get(AiProvider, provider_id)
     if row is None or row.tenant_id != tenant_id:
         raise HTTPException(status_code=404, detail="服务商不存在")
-    row.name = body.name.strip()
+    new_name = body.name.strip()
+    if new_name != row.name:
+        duplicate = (await session.execute(select(AiProvider.id).where(
+            AiProvider.tenant_id == tenant_id, AiProvider.name == new_name,
+            AiProvider.id != provider_id,
+        ))).scalar_one_or_none()
+        if duplicate is not None:
+            raise HTTPException(status_code=409, detail="同名服务商已存在，请换个名称")
+    row.name = new_name
     row.provider_type = body.provider_type.upper()
     row.base_url = body.base_url.strip()
     if body.api_key is not None and body.api_key.strip():

@@ -13,10 +13,12 @@ TOOLS: list[dict] = [
         "type": "function",
         "function": {
             "name": "lookup_teachers",
-            "description": "只读查询本校当前学年学期的在职教师。可按科目或姓名关键词筛选，返回任教学科和班主任班级；不返回排课结果，也不执行修改。",
+            "description": "只读查询本校当前在职教师在指定学年学期的任教和班主任班级。可按科目或姓名筛选；不指定时间时使用页面或学校默认学期。历史结果仅覆盖当前在职教师，不代表当时全部在职人员；不返回排课结果，也不执行修改。",
             "parameters": {
                 "type": "object",
                 "properties": {
+                    "academic_year": {"type": "string", "description": "用户指定学年；省略使用页面或学校默认学年"},
+                    "term": {"type": "string", "enum": ["1", "2"]},
                     "subject": {"type": "string", "description": "本校科目名，如“数学”；不筛选时省略"},
                     "keyword": {"type": "string", "description": "教师姓名关键词；不筛选时省略"},
                 },
@@ -73,6 +75,8 @@ async def lookup_teachers(
 
     head_rows = (await session.execute(select(Class).where(
         Class.tenant_id == tenant_id,
+        Class.academic_year == year,
+        Class.term == term,
         Class.head_teacher_id.in_(ids),
     ))).scalars().all()
     head_classes: dict[int, list[str]] = {}

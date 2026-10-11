@@ -88,7 +88,9 @@ export default function AiProvidersView() {
     if (!cat) return rows
     if (cat.key === 'DECISION') return rows.filter((r) => r.provider_type === 'JEV')
     if (activeCategory !== 'CHAT') return rows.filter((r) => r.provider_type !== 'JEV' && Boolean(r[cat.field]))
-    return rows.filter((r) => r.provider_type !== 'JEV' && Boolean(r[cat.field]))
+    // 未配置任何模型的服务商仍需可见，便于补全；不能保存后从所有分类消失。
+    return rows.filter((r) => r.provider_type !== 'JEV' && (Boolean(r[cat.field])
+      || !MODEL_CATEGORIES.some((category) => Boolean(r[category.field]))))
   }, [rows, activeCategory])
 
   const openEdit = (row?: AiProvider) => {
@@ -106,7 +108,7 @@ export default function AiProvidersView() {
             video_model: row.video_model ?? undefined,
             audio_model: row.audio_model ?? undefined,
             timeout_seconds: row.timeout_seconds,
-            max_output_tokens: row.max_output_tokens ?? 8192,
+            max_output_tokens: row.max_output_tokens ?? 16384,
             is_default: row.is_default,
             status: row.status,
             sort: row.sort,
@@ -117,7 +119,7 @@ export default function AiProvidersView() {
             provider_type: preset.value,
             base_url: preset.defaultBaseUrl,
             timeout_seconds: 120,
-            max_output_tokens: 8192,
+            max_output_tokens: 16384,
             is_default: false,
             status: 1,
             sort: 0,
@@ -205,7 +207,7 @@ export default function AiProvidersView() {
     {
       title: '模型',
       width: 240,
-      render: (_, r) => [r.chat_model, r.vision_model, r.image_model, r.video_model, r.audio_model].filter(Boolean).join(' / ') || '—',
+      render: (_, r) => [r.chat_model, r.vision_model, r.image_model, r.video_model, r.audio_model].filter(Boolean).join(' / ') || <Tag color="orange">待配置模型</Tag>,
     },
     {
       title: '连通性',
@@ -388,7 +390,7 @@ export default function AiProvidersView() {
                     <Select showSearch allowClear placeholder="选择或输入" options={modelOptions[c.key] ?? []} />
                   </Form.Item>
                   {c.key === 'CHAT' && (
-                    <Form.Item name="max_output_tokens" label="最大输出 Token" rules={[
+                    <Form.Item name="max_output_tokens" label="最大输出 Token" extra="新配置默认 16384；复杂规划可设为 32768 或 65536，请按所选模型支持的输出上限填写。这是单次输出上限，并非每次固定消耗。" rules={[
                       { required: true, message: '请输入最大输出 Token' },
                       { type: 'integer', min: 1, max: 262144, message: '请输入 1–262144 的整数' },
                     ]}>

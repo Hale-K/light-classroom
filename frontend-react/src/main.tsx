@@ -1,7 +1,7 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { App as AntdApp, ConfigProvider } from 'antd'
-import zhCN from 'antd/locale/zh_CN'
+import LocaleProvider from './i18n/LocaleProvider'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import App from './App'
 import './index.css'
@@ -111,10 +111,12 @@ const themeConfig = {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ConfigProvider locale={zhCN} theme={themeConfig}>
+      <ConfigProvider theme={themeConfig}>
+        <LocaleProvider>
         <AntdApp>
           <App />
         </AntdApp>
+        </LocaleProvider>
       </ConfigProvider>
     </QueryClientProvider>
   </StrictMode>,

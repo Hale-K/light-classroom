@@ -1,0 +1,247 @@
+[
+  {
+    "question": "高一有1000名学生，每班45至55人，需要多少教室和老师？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一一千名学生，每班四十五到五十五人，师资和教室怎么配比较合适？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "1000个孩子，班额控制在45—55，帮我算算要开多少班、配多少教师和教室。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一1000人，每班45-55人，教室和师资够不够？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "按一千人、每班五十人估算高一的教学资源需求，心理音乐美术体育都要开。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "给1000名高一学生做两个师资配置方案，每班45至55人。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一开20个班，哪些学科缺老师？比较招聘和跨年级兼课两个方案。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "20个班的高一师资够用吗？缺口怎么补更好？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "周一到周五每天9节，前7节必须排满，后2节可选，体育2音乐美术心理各1，给三个方案。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一课时怎么分合理？语数英多一点，艺体心也要保证。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "这次排课为什么失败？查日志并给出最少改动的解决方案。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "课表一直排不出来，帮我找原因并想办法解决。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "数学老师下周三请假，找出受影响课程，比较代课和调课两个方案。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "下周三数学老师来不了，课程怎么协调？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "按高二选科组合和45至55人班额，规划教学班、教师和同时使用的教室。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高二走班怎么分？各科人数不一样，老师和教室要怎么配？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "全面检查高一能否开始分班排课，列出缺项和补充顺序。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一高二共用音乐美术老师和专用教室，请检查资源是否够用并提出错峰方案。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一从20班改为21班，会增加多少教师课时和教室？列出受影响对象。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "在刚才方案上数学加1节，心理隔周上，教师工作量改14节，重新计算并列出差异。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "学生档案1000人，行政班只有980人，查清差异再判断需要几个班。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "完成全校资源检查，超时后继续已完成步骤，最后给报告。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "期中考试监考怎么安排？检查老师和考场冲突，再给调整方案。",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "这次月考考场够不够，监考老师要怎么协调？",
+    "expected": "planning",
+    "actual": "planning",
+    "source": "task_structure",
+    "passed": true
+  },
+  {
+    "question": "高一现在有多少学生？",
+    "expected": "query",
+    "actual": "query",
+    "source": "safe_fallback",
+    "passed": true
+  },
+  {
+    "question": "当前学校课表模式是什么？",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  },
+  {
+    "question": "规划模式是什么意思？",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  },
+  {
+    "question": "学校有多少教室和教师？",
+    "expected": "query",
+    "actual": "query",
+    "source": "safe_fallback",
+    "passed": true
+  },
+  {
+    "question": "高二走班是什么意思？",
+    "expected": "query",
+    "actual": "query",
+    "source": "safe_fallback",
+    "passed": true
+  },
+  {
+    "question": "心理隔周上课是什么意思？",
+    "expected": "query",
+    "actual": "query",
+    "source": "safe_fallback",
+    "passed": true
+  },
+  {
+    "question": "查看高一各科教师工作量",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  },
+  {
+    "question": "查询这次排课失败日志",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  },
+  {
+    "question": "数学老师下周三有没有课？",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  },
+  {
+    "question": "查看期中考试日程",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  },
+  {
+    "question": "列出本校考试",
+    "expected": "query",
+    "actual": "query",
+    "source": "explicit_query",
+    "passed": true
+  }
+]

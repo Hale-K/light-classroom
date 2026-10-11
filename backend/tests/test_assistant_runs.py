@@ -51,8 +51,12 @@ def test_public_run_view_exposes_supervisor_status_without_private_trace():
 def _sqlite_session():
     """单文件内存库 + 同步 Session 的异步适配，仅覆盖 create_run/get_run 用到的窄接口。"""
     engine = create_engine('sqlite://')
+    from app.models.org import Tenant
+    Tenant.__table__.create(engine)
     AiRun.__table__.create(engine)
     sync = Session(engine, expire_on_commit=False)
+    sync.add(Tenant(id=1, code='run-school', name='任务学校'))
+    sync.commit()
 
     class Adapter:
         add = sync.add

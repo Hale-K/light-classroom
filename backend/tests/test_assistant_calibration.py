@@ -22,6 +22,9 @@ async def test_generic_problem_asks_for_symptom_before_readiness(query):
         runtime=AssistantRuntime(services=services),
     )
     assert '具体' in result.text
+    assert '待确认计划' in result.text
+    assert '等待补充' in result.text
+    assert result.plan is None  # A clarification plan is not a rule-write draft.
     assert '清单' not in result.text
     classifier.assert_not_awaited()
 
@@ -64,6 +67,9 @@ async def test_uncertain_intent_does_not_open_model_or_tools(monkeypatch):
         runtime=AssistantRuntime(services=services),
     )
     assert '具体' in result.text
+    assert '待确认计划' in result.text
+    assert '等待补充' in result.text
+    assert result.plan is None
     reply.assert_not_awaited()
 
 
@@ -157,11 +163,11 @@ async def test_supervisor_executes_all_tools_and_keeps_partial_evidence():
 
 
 @pytest.mark.asyncio
-async def test_schedule_setup_uses_selected_class_context(monkeypatch):
+async def test_schedule_setup_uses_explicit_class_argument(monkeypatch):
     from app.ai.tools import school
     lookup = AsyncMock(return_value='指定班级已有配置')
     monkeypatch.setattr(school, 'lookup_schedule_setup', lookup)
-    await school.execute_school_tool('lookup_schedule_setup', '{}', session=None,
+    await school.execute_school_tool('lookup_schedule_setup', '{"class_id":12}', session=None,
         tenant_id=1, page_context={'class_id': 12, 'academic_year': '2026-2027', 'term': '2'})
     assert lookup.await_args.kwargs['class_id'] == 12
 

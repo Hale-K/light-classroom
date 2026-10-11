@@ -176,6 +176,14 @@ def _sync_schema(conn) -> None:
             created_tables.append(table.name)
             continue
 
+        if is_pg and table.name == 'examschedule':
+            constraints = inspector.get_unique_constraints(table.name)
+            legacy = next((c for c in constraints if c['name'] == 'uq_examschedule_grade_session'), None)
+            expected = ['exam_id', 'grade_id', 'subject_id', 'session_index']
+            if legacy and legacy['column_names'] != expected:
+                conn.execute(text('ALTER TABLE examschedule DROP CONSTRAINT uq_examschedule_grade_session'))
+                conn.execute(text('ALTER TABLE examschedule ADD CONSTRAINT uq_examschedule_grade_session UNIQUE (exam_id, grade_id, subject_id, session_index)'))
+
         db_cols = {c["name"]: c for c in inspector.get_columns(table.name)}
         model_cols = {col.name: col for col in table.columns}
 

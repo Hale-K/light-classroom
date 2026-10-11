@@ -1283,7 +1283,51 @@ async def batch_approve_choices(
     return {"code": 0, "message": "批量审核完成", "data": {"updated": updated, "skipped": skipped}}
 
 
-@router.post("/schemes", summary="创建或更新新高考方案")
+class TeacherPickIn(BaseModel):
+    enabled: bool
+
+
+class TeachingClassCapacityIn(BaseModel):
+    capacity: int = Field(ge=1, le=500)
+
+
+@router.patch('/teaching-classes/{class_id}/capacity', dependencies=[Depends(require_management_user)])
+async def set_teaching_class_capacity(class_id: int, body: TeachingClassCapacityIn,
+                                      session: AsyncSession = Depends(get_session),
+                                      tenant_id: int = Depends(get_current_tenant)):
+    from app.services.academic.teacher_pick import class_selection_members
+    item = (await session.execute(select(TeachingClass).where(
+        TeachingClass.id == class_id, TeachingClass.tenant_id == tenant_id,
+    ).with_for_update())).scalar_one_or_none()
+    if item is None:
+        raise HTTPException(status_code=404, detail='教学班不存在')
+    members = await class_selection_members(session, tenant_id, item.academic_year, item.term, [class_id])
+    if body.capacity < len(members[class_id]):
+        raise HTTPException(status_code=409, detail='人数上限不能低于已选人数')
+    item.capacity = body.capacity
+    await session.commit()
+    return {'code': 0, 'message': 'ok', 'data': {'capacity': item.capacity}}
+
+
+@router.patch("/schemes/{scheme_id}/teacher-pick", dependencies=[Depends(require_management_user)],
+              summary="教务开启或关闭学生选老师模式")
+async def set_teacher_pick(
+    scheme_id: int,
+    body: TeacherPickIn,
+    session: AsyncSession = Depends(get_session),
+    tenant_id: int = Depends(get_current_tenant),
+):
+    scheme = (await session.execute(select(GaokaoScheme).where(
+        GaokaoScheme.id == scheme_id, GaokaoScheme.tenant_id == tenant_id,
+    ).with_for_update())).scalar_one_or_none()
+    if scheme is None or scheme.tenant_id != tenant_id:
+        raise HTTPException(status_code=404, detail="高考方案不存在")
+    scheme.strategy_config = {**(scheme.strategy_config or {}), "allow_teacher_pick": body.enabled}
+    await session.commit()
+    return {"code": 0, "message": "ok", "data": {"enabled": body.enabled}}
+
+
+@router.post("/schemes", dependencies=[Depends(require_management_user)], summary="创建或更新新高考方案")
 async def upsert_scheme(
     body: SchemeIn,
     session: AsyncSession = Depends(get_session),
@@ -1698,6 +1742,8 @@ async def list_walk_teaching_classes(
                 "name": student.name,
                 "administrative_class": admin_class_name,
             })
+    from app.services.academic.teacher_pick import class_selection_members
+    selected_members = await class_selection_members(session, tenant_id, academic_year, term, class_ids)
     return {"code": 0, "message": "ok", "data": [{
         "id": item.id,
         "name": item.name,
@@ -1705,6 +1751,8 @@ async def list_walk_teaching_classes(
         "subject_name": subjects.get(item.subject_id, "未知学科"),
         "sequence": item.sequence,
         "capacity": item.capacity,
+        "selected_count": len(selected_members[item.id]),
+        "is_full": len(selected_members[item.id]) >= item.capacity,
         "weekly_periods": item.weekly_periods,
         "weekday_periods": item.weekday_periods,
         "weekend_periods": item.weekend_periods,

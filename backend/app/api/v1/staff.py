@@ -51,6 +51,10 @@ def _require_school_admin(user: User) -> None:
         raise HTTPException(status_code=403, detail="仅校长管理员可以配置人员与权限")
 
 
+def _normalized_name(value: str) -> str:
+    return "".join(value.split()).casefold()
+
+
 def _role_catalog():
     return [item.__dict__ for item in ASSIGNABLE_STAFF_ROLES]
 
@@ -117,6 +121,9 @@ async def create_staff(
     exists = (await session.execute(select(User).where(User.phone == body.phone))).scalar_one_or_none()
     if exists:
         raise HTTPException(status_code=409, detail="该手机号已存在")
+    same_name = (await session.execute(select(User).where(User.tenant_id == tenant_id))).scalars().all()
+    if any(_normalized_name(item.name) == _normalized_name(body.name) for item in same_name):
+        raise HTTPException(status_code=409, detail="本校已有同名人员，请核对后使用唯一姓名")
     if body.teacher_level is not None and body.teacher_level not in TEACHER_LEVELS:
         raise HTTPException(status_code=422, detail="教师职级不合法")
     unit_ids = list(dict.fromkeys(body.unit_ids))
@@ -180,6 +187,9 @@ async def update_staff(
     duplicate = (await session.execute(select(User).where(User.tenant_id == tenant_id, User.phone == body.phone, User.id != staff_id))).scalar_one_or_none()
     if duplicate:
         raise HTTPException(status_code=409, detail="该手机号已存在")
+    same_name = (await session.execute(select(User).where(User.tenant_id == tenant_id, User.id != staff_id))).scalars().all()
+    if any(_normalized_name(item.name) == _normalized_name(body.name) for item in same_name):
+        raise HTTPException(status_code=409, detail="本校已有同名人员，请核对后使用唯一姓名")
     try:
         role_codes = normalize_staff_roles(body.roles)
     except ValueError as exc:

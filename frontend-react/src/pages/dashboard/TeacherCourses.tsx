@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { Alert, Button, Empty, Spin } from 'antd'
 import dayjs from 'dayjs'
 import { useEffect, useMemo, useState } from 'react'
@@ -19,6 +20,7 @@ function currentTerm() {
 }
 
 export default function TeacherCourses() {
+  const locale = useLocale()
   const navigate = useNavigate()
   const teacherId = useAuthStore((state) => state.user?.id)
   const displayName = useAuthStore(selectDisplayName)
@@ -46,7 +48,7 @@ export default function TeacherCourses() {
 
   const lessonsByDay = useMemo(() => WEEKDAYS.map((_, index) =>
     items.filter((item) => item.weekday === index + 1).sort((a, b) => a.period - b.period),
-  ), [items])
+  ), [items, locale])
   const classCount = new Set(items.map((item) => item.class_id)).size
   const subjectCount = new Set(items.map((item) => item.subject_id)).size
 
@@ -54,34 +56,34 @@ export default function TeacherCourses() {
     <div className="teacher-courses-page">
       <header className="tc-page-head">
         <div>
-          <span className="tc-eyebrow">MY COURSES / 我的课程</span>
-          <h1>{displayName || '老师'}的课程</h1>
-          <p>查看本人本学期的任教课程和每周课表。</p>
+          <span className="tc-eyebrow">{t("MY COURSES / 我的课程")}</span>
+          <h1>{displayName || t("老师")}{t("的课程")}</h1>
+          <p>{t("查看本人本学期的任教课程和每周课表。")}</p>
         </div>
-        <div className="tc-term"><Icon name="calendar" size={16} />{academicYear} 学年 · 第 {term} 学期</div>
+        <div className="tc-term"><Icon name="calendar" size={16} />{t("{{p0}} 学年 · 第 {{p1}} 学期", { p0: academicYear, p1: term })}</div>
       </header>
 
-      <section className="tc-summary" aria-label="课程概览">
-        <div><span>每周课程</span><strong>{items.length}</strong><small>节</small></div>
-        <div><span>任教班级</span><strong>{classCount}</strong><small>个</small></div>
-        <div><span>任教学科</span><strong>{subjectCount}</strong><small>门</small></div>
-        <Button type="primary" icon={<Icon name="edit" size={16} />} onClick={() => navigate('/teacher-preparation')}>进入备课</Button>
+      <section className="tc-summary" aria-label={t("课程概览")}>
+        <div><span>{t("每周课程")}</span><strong>{items.length}</strong><small>{t("节")}</small></div>
+        <div><span>{t("任教班级")}</span><strong>{classCount}</strong><small>{t("个")}</small></div>
+        <div><span>{t("任教学科")}</span><strong>{subjectCount}</strong><small>{t("门")}</small></div>
+        <Button type="primary" icon={<Icon name="edit" size={16} />} onClick={() => navigate('/teacher-preparation')}>{t("进入备课")}</Button>
       </section>
 
-      {error && <Alert type="error" showIcon message="课程加载失败" description="暂时无法读取个人课表，请稍后重试。" action={<Button onClick={() => void load()}>重新加载</Button>} />}
-      <Spin spinning={loading} tip="正在加载课程">
-        <section className="tc-week" aria-label="每周课程表">
+      {error && <Alert type="error" showIcon message={t("课程加载失败")} description={t("暂时无法读取个人课表，请稍后重试。")} action={<Button onClick={() => void load()}>{t("重新加载")}</Button>} />}
+      <Spin spinning={loading} tip={t("正在加载课程")}>
+        <section className="tc-week" aria-label={t("每周课程表")}>
           {lessonsByDay.map((lessons, dayIndex) => (
             <article className="tc-day" key={WEEKDAYS[dayIndex]}>
-              <div className="tc-day-head"><h2>{WEEKDAYS[dayIndex]}</h2><span>{lessons.length} 节</span></div>
+              <div className="tc-day-head"><h2>{WEEKDAYS[dayIndex]}</h2><span>{lessons.length} {t("节")}</span></div>
               {lessons.length ? lessons.map((lesson) => (
                 <div className="tc-lesson" key={lesson.id}>
-                  <span className="tc-period">第 {lesson.period} 节</span>
-                  <strong>{lesson.subject_name || '课程'}</strong>
-                  <span>{lesson.class_name || `班级 ${lesson.class_id}`}</span>
-                  <small><Icon name="building" size={13} />{lesson.room || '常规教室'}</small>
+                  <span className="tc-period">{t("第 {{p0}} 节", { p0: lesson.period })}</span>
+                  <strong>{lesson.subject_name || t("课程")}</strong>
+                  <span>{lesson.class_name || t("班级 {{p0}}", { p0: lesson.class_id })}</span>
+                  <small><Icon name="building" size={13} />{lesson.room || t("常规教室")}</small>
                 </div>
-              )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="无课程" />}
+              )) : <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t("无课程")} />}
             </article>
           ))}
         </section>

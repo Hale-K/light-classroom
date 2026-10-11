@@ -55,3 +55,21 @@
   .student-page-header h1 { font-size: 28px; }
   .student-status-card { align-items: flex-start; gap: 12px; flex-direction: column; }
 }
+/* 学生端是浅色页面：tech 暗色主题的全局 antd 覆盖不得渗入，表单钉死浅色 */
+body[data-theme='tech'] .student-shell .ant-form-item-label > label { color: #172033; }
+body[data-theme='tech'] .student-shell .ant-input,
+body[data-theme='tech'] .student-shell .ant-input-affix-wrapper,
+body[data-theme='tech'] .student-shell .ant-select .ant-select-selector {
+  background-color: #fff !important;
+  color: #172033 !important;
+  border-color: #d9e2ec !important;
+}
+body[data-theme='tech'] .student-shell .ant-input::placeholder,
+body[data-theme='tech'] .student-shell .ant-select-selection-placeholder { color: #98a4b5 !important; }
+body[data-theme='tech'] .student-shell .ant-select-arrow,
+body[data-theme='tech'] .student-shell .ant-input-password-icon,
+body[data-theme='tech'] .student-shell .ant-input-prefix { color: #98a4b5 !important; }
+/* 其他端切换行：显式浅色配色，不随主题变量波动 */
+.student-ends { margin-top: 18px; text-align: center; font-size: 12px; color: #7a8699; }
+.student-ends a { color: #2f6bff; cursor: pointer; margin: 0 6px; }
+.student-ends a:hover { text-decoration: underline; }

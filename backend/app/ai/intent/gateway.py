@@ -192,6 +192,34 @@ class IntentGateway:
             return False
         if len(text) < 45 and re.search(r'(?:规划|计划)(?:模式|功能).{0,10}(?:是什么|什么意思|怎么用|如何使用)', text):
             return False
+        # Resolve bounded business coordination locally. This does not infer
+        # missing scope, quantities or permissions; the agent must clarify them.
+        resources = r'教室|教师|老师|师资|教学资源'
+        if re.search(r'(?:设计|制定|生成|给出|编制).{0,16}(?:课时|课程|排课).{0,8}方案', text):
+            return True
+        if (re.search(resources, text) and re.search(r'班|学生|孩子|高[一二三]|[\d一二三四五六七八九十百千]+人', text)
+                and re.search(r'怎么配|如何配|配多少|估算|需求|缺口|怎么补|错峰|共用|改为|调整为|够不够|够用吗', text)):
+            return True
+        if re.search(r'(?:课时|走班).{0,15}(?:怎么分|如何分|怎么安排|如何安排)', text):
+            return True
+        if (re.search(r'排课|课表|课程', text)
+                and re.search(r'解决方案|找原因|诊断|怎么协调|如何协调|错峰', text)):
+            return True
+        if re.search(r'查清.{0,12}(?:差异|差额).{0,12}再(?:判断|计算|决定)', text):
+            return True
+        if (re.search(r'排考|考试|考场|监考|考生|座位', text)
+                and re.search(r'规划|方案|协调|冲突|缺口|怎么安排|如何安排|够不够|够用吗|检查|诊断|调整', text)):
+            return True
+        if re.search(r'(?:两|二|三|多个)(?:个|套|种).{0,12}(?:方案|计划)', text):
+            return True
+        if re.search(r'(?:刚才|上面|上一轮|之前).{0,12}(?:方案|计划)', text):
+            previous = ' '.join(str(item.get('content') or '') for item in turns[:-1][-4:])
+            if re.search(r'方案|计划|规划|步骤', previous) and re.search(r'加|减|改|调整|重算|重新计算|差异', text):
+                return True
+        if (re.search(r'\d+\s*(?:个)?(?:人|名|位)?(?:的)?学生', text)
+                and re.search(r'班|班额', text) and re.search(r'需要|需配|配备|安排|配置', text)
+                and re.search(r'教室|教师|老师|师资', text)):
+            return True
         if re.search(r"(?:[2-9两二三四五六七八九]|多个|几)(?:个|套|种)?(?:课时|排课|教学)?(?:方案|计划)|(?:规划|制定方案|全面验收|全面检查|系统验收|逐步执行)", text):
             return True
         if re.search(r"(?:全校|所有班|全部班|整体).{0,30}(?:汇总|冲突|检查|审计|排课准备)", text):
@@ -206,6 +234,11 @@ class IntentGateway:
 
     @staticmethod
     def _explicit_query(text: str) -> bool:
+        if (len(text) <= 65
+                and not re.search(r'方案|规划|协调|冲突|分析|比较|验算|检查|调整|重算|重新计算|先.{1,40}(?:再|然后)|够不够|够用|缺口', text)
+                and (re.search(r'^(?:请|帮我)?(?:查询|查看|列出|显示|查一下)', text)
+                     or re.search(r'(?:老师|教师).{0,15}(?:有没有课|是否有课)', text))):
+            return True
         # One student's saved records and current environment are focused
         # lookups even with a long field list or a previous planning turn.
         if (len(text) <= 180 and not IntentGateway._requests_write(text)
@@ -250,6 +283,9 @@ class IntentGateway:
         text = " ".join((query or "").split())
         turns = list((recent_turns or [])[-6:])
         deadline = asyncio.get_running_loop().time() + self._classification_timeout
+        if (re.fullmatch(r'(?:请|帮我|麻烦)?(?:安排一下|处理一下|优化一下|这个怎么处理|怎么弄)[。？?]?', text)
+                and not turns[:-1]):
+            return IntentDecision(AssistantIntent.UNKNOWN, 1.0, 'missing_goal', needs_clarification=True)
 
         # Avoid loading the embedding model for requests whose complexity is
         # structurally trivial and which never need school data or tools.
@@ -318,6 +354,8 @@ class IntentGateway:
                 confidence=0.55,
                 source="safe_fallback",
                 route=AssistantRoute.AGENT,
+                needs_clarification=bool(re.fullmatch(r'(?:请|帮我|麻烦)?(?:安排一下|处理一下|优化一下|这个怎么处理|怎么弄)[。？?]?', text)
+                                        and not turns[:-1]),
             )
         return IntentDecision(
             kind=AssistantIntent.UNKNOWN,

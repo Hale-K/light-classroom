@@ -13,6 +13,28 @@ from app.ai.harness.router import GUIDE_HARNESS
 
 
 @pytest.mark.asyncio
+async def test_routed_agent_preserves_large_provider_output_budget():
+    from app.ai.gateway.model import ModelGateway
+    from app.ai.model.chat import ChatEndpoint
+    from app.ai.resilience import ProviderCircuitBreaker
+
+    caller = AsyncMock(return_value=ChatOutcome(text="完成规划"))
+    gateway = ModelGateway(ProviderCircuitBreaker(), tool_caller=caller)
+    endpoint = ChatEndpoint("7:1", "个人模型", "http://test", "test-key", "test", 120, 65536)
+    await gateway.complete_tools_routed(endpoints=[endpoint], timeout=120, messages=[], tools=[])
+    assert caller.await_args.kwargs["max_tokens"] == 65536
+    assert caller.await_args.kwargs["api_key"] == "test-key"
+
+
+def test_medium_tool_result_is_preserved_for_planning():
+    from app.ai.graph.loop import _bounded_tool_result
+
+    evidence = json.dumps({"teachers": [{"id": i, "hours": 14} for i in range(200)]})
+    assert 4000 < len(evidence) < 16000
+    assert _bounded_tool_result(evidence) == evidence
+
+
+@pytest.mark.asyncio
 async def test_default_output_is_not_silently_capped_at_2048(monkeypatch):
     from app.ai.model import chat
     monkeypatch.setattr(chat.settings, "llm_max_tokens", 8192)
@@ -33,7 +55,7 @@ def test_provider_rejects_invalid_token_budget(value):
 
 @pytest.mark.asyncio
 async def test_edit_saves_output_budget_and_old_client_preserves_it():
-    row = SimpleNamespace(id=1, tenant_id=7, max_output_tokens=16384)
+    row = SimpleNamespace(id=1, tenant_id=7, name="模型", max_output_tokens=16384)
     session = SimpleNamespace(get=AsyncMock(return_value=row), add=Mock(), commit=AsyncMock())
     await update_provider(1, ProviderIn(name="模型", base_url="http://test"), session, None, 7)
     assert row.max_output_tokens == 16384

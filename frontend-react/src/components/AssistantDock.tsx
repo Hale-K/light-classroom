@@ -1,10 +1,11 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '@/api/http'
-import { assistantApi, authApi, orgApi, schedulingApi, type AssistantExecution, type AssistantPlan, type AssistantRun } from '@/api'
+import { assistantApi, authApi, orgApi, schedulingApi, type AssistantClarification, type AssistantExecution, type AssistantPlan, type AssistantRun } from '@/api'
 import { watchAssistantRun } from '@/assistant/task'
 import { assistantPageContext } from '@/assistant/context'
 import { useAuthStore } from '@/store/auth'
+import AssistantClarificationCard, { restoreClarification } from '@/components/AssistantClarificationCard'
 import AssistantRulePlan from '@/components/AssistantRulePlan'
 import AssistantAddMenu from '@/components/AssistantAddMenu'
 import { MATERIAL_ACCEPT, mergeMaterials, materialsForTurn, type AssistantMaterial } from '@/assistant/materials'
@@ -20,6 +21,7 @@ import { assistLog, newMsgId } from '@/assistant/trace'
 import { hereOf, jumpLabel, placeLabel, samePlace } from '@/assistant/place'
 import { decideJumpReply } from '@/assistant/jump-intent'
 import { classifyPageIntent, executeSubjectPageTask, prepareSubject } from '@/assistant/pageSubjectAgent'
+import { handoffExcel } from '@/assistant/excelAgent'
 import { isSubjectCreationRequest, isSubjectChoiceReply, isSubjectTaskCancellation, mayRequestPageAction, readExplicitSubjectName, readPendingSubjectDraft, type SubjectDraft } from '@/assistant/subjectTask'
 import { pageSnapshot, type AssistantTask } from '@/assistant/skills'
 import './assistant-dock.css'
@@ -34,6 +36,7 @@ type ChatMsg = {
   text: string
   mid?: string
   hoursDraft?: HoursDraft
+  clarification?: AssistantClarification
   plan?: AssistantPlan
   awaitRules?: boolean
   jumps?: JumpLink[]
@@ -89,6 +92,7 @@ function storedThread(key: string): ChatMsg[] {
         text: value.text.slice(0, 8000),
         mid: typeof value.mid === 'string' ? value.mid.slice(0, 80) : undefined,
         modelVisible: value.modelVisible !== false,
+        clarification: restoreClarification(value.clarification),
         execution: restoreExecution(value.execution),
         activity: restoreActivity(value.activity),
       }]
@@ -114,6 +118,7 @@ function rememberThread(key: string, messages: ChatMsg[]) {
       text: (message.plan ? `${message.text}\n\n${message.plan.summary}` : message.text).slice(0, 8000),
       mid: message.mid,
       modelVisible: message.modelVisible !== false,
+      clarification: message.clarification,
       execution: message.execution,
       activity: message.activity,
     }))
@@ -223,6 +228,8 @@ export default function AssistantDock() {
   const folderInputRef = useRef<HTMLInputElement>(null)
   const uploadRef = useRef<AbortController | null>(null)
   const materialsRef = useRef<AssistantMaterial[]>([])
+  const excelFilesRef = useRef<Map<string, File>>(new Map())
+  useEffect(() => { excelFilesRef.current.clear() }, [schoolCode, userId])
 
   const updateMaterials = (items: AssistantMaterial[]) => {
     materialsRef.current = items
@@ -246,6 +253,7 @@ export default function AssistantDock() {
           if (controller.signal.aborted) return
           // Relative folder names are display data, never server filesystem paths.
           material.name = (file.webkitRelativePath || material.name).slice(0, 200)
+          if (/\.(xlsx|csv)$/i.test(file.name)) excelFilesRef.current.set(material.id, file)
           updateMaterials(mergeMaterials(materialsRef.current, [material]))
         } catch (error) {
           if (controller.signal.aborted) return
@@ -554,6 +562,7 @@ export default function AssistantDock() {
             text: data.text,
             mid: tid,
             execution: outcome.execution,
+            clarification: restoreClarification(data.clarification),
             choices: data.choices,
             plan: data.plan ?? undefined,
             jumps: data.jumps,
@@ -574,8 +583,9 @@ export default function AssistantDock() {
       const msg = stopped ? '已停止。' : err instanceof Error ? err.message : '对话失败'
       assistLog(midRef.current || '-', stopped ? 'stop' : 'fail', msg)
       commitThread((prev) => {
-        // 恢复查看同一个 run 时不要重复追加相同错误气泡，避免重试改变对话布局。
-        if (prev.some((item) => item.role === 'bot' && item.text === msg)) return prev
+        // 只去重本轮已经展示的错误；历史相同错误不能吞掉当前等待气泡。
+        if (!prev.some((item) => item.role === 'bot' && !item.text)
+          && prev.some((item) => item.role === 'bot' && item.mid === midRef.current && item.text === msg)) return prev
         return replaceThinkBot(prev, {
           role: 'bot', text: msg, mid: midRef.current, modelVisible: false,
         })
@@ -630,6 +640,7 @@ export default function AssistantDock() {
         const restoredRemote: ChatMsg[] = remote.messages.map((item) => ({
           role: item.role === 'assistant' ? 'bot' : 'user',
           text: item.content,
+          clarification: restoreClarification(item.clarification),
           modelVisible: item.model_visible !== false,
           execution: restored.find((saved) => saved.role === (item.role === 'assistant' ? 'bot' : 'user') && saved.text === item.content)?.execution,
           activity: restored.find((saved) => saved.role === (item.role === 'assistant' ? 'bot' : 'user') && saved.text === item.content)?.activity,
@@ -642,6 +653,7 @@ export default function AssistantDock() {
           role: item.role === 'bot' ? 'assistant' : 'user',
           content: item.text,
           model_visible: item.modelVisible !== false,
+        clarification: item.clarification,
         }))).catch(() => undefined)
       }
       setConversationReady(true)
@@ -666,6 +678,7 @@ export default function AssistantDock() {
         role: item.role === 'bot' ? 'assistant' as const : 'user' as const,
         content: (item.plan ? `${item.text}\n\n${item.plan.summary}` : item.text).slice(0, 8000),
         model_visible: item.modelVisible !== false,
+        clarification: item.clarification,
       }))
     const timer = window.setTimeout(() => {
       void assistantApi.saveConversation(messages).catch(() => undefined)
@@ -673,7 +686,7 @@ export default function AssistantDock() {
     return () => window.clearTimeout(timer)
   }, [conversationReady, thread])
 
-  const runSubjectConversation = async (content: string, mid: string) => {
+  const runSubjectConversation = async (content: string, mid: string, referenceMaterials: AssistantMaterial[] = []) => {
     const epoch = epochRef.current
     const controller = new AbortController()
     abortRef.current = controller
@@ -693,7 +706,7 @@ export default function AssistantDock() {
           evening_study_allowed: subjectDraftRef.current?.evening_study_allowed ?? null }
         sessionStorage.setItem(subjectStorageKey, JSON.stringify(subjectDraftRef.current))
       }
-      const prepared = await prepareSubject(content, subjectDraftRef.current, controller.signal)
+      const prepared = await prepareSubject(content, subjectDraftRef.current, controller.signal, referenceMaterials)
       controller.signal.throwIfAborted()
       subjectDraftRef.current = prepared.status === 'needs_input' ? prepared.draft : null
       if (subjectDraftRef.current) sessionStorage.setItem(subjectStorageKey, JSON.stringify(subjectDraftRef.current))
@@ -718,7 +731,7 @@ export default function AssistantDock() {
     }
   }
 
-  const runPageIntentConversation = async (content: string, mid: string) => {
+  const runPageIntentConversation = async (content: string, mid: string, referenceMaterials: AssistantMaterial[] = []) => {
     const controller = new AbortController()
     abortRef.current = controller
     busyRef.current = true
@@ -733,7 +746,7 @@ export default function AssistantDock() {
         return
       }
       if (intent === 'create_subject') {
-        void runSubjectConversation(content, mid)
+        void runSubjectConversation(content, mid, referenceMaterials)
         return
       }
       commitThread(prev => replaceThinkBot(prev, { role: 'bot', text: '', mid }))
@@ -762,7 +775,7 @@ export default function AssistantDock() {
     const content = (text ?? draft).trim()
     if (!content || readingFiles) return
     const attached = materialsRef.current
-    const hasMaterials = attached.length > 0 || materialsForTurn(threadRef.current).length > 0
+    const referenceMaterials = attached.length ? attached : materialsForTurn(threadRef.current)
     if (attached.length && subjectDraftRef.current && canUsePageActions(modeRef.current)) {
       setMaterialError('请先完成或取消当前科目草稿，再发送附件')
       return
@@ -775,6 +788,22 @@ export default function AssistantDock() {
     setPanel('home')
     if (!busyRef.current) midRef.current = newMsgId()
     const mid = busyRef.current ? newMsgId() : midRef.current
+    if (canUsePageActions(modeRef.current) && !busyRef.current && !subjectDraftRef.current
+      && /创建|生成|导入|配置|建立/.test(content)
+      && /科目|课程|课时|任课|排课规则|完整配置/.test(content)) {
+      const excelFiles = attached.map(material => excelFilesRef.current.get(material.id)).filter((file): file is File => !!file)
+      if (excelFiles.length) {
+        if (excelFiles.length !== 1) {
+          updateMaterials(attached)
+          setMaterialError('完整配置每批使用一个Excel文件，请分批处理。')
+          return
+        }
+        handoffExcel(excelFiles[0], `${schoolCode}:${userId}`)
+        commitThread(prev => [...prev, { ...userMessage, mid }, { role: 'bot', text: '已带入Excel配置助手。先解析并核对，再二次确认；确认后才会操作页面创建科目、课时、任课关系和规则。', mid, modelVisible: false }])
+        navigate('/assistant-excel')
+        return
+      }
+    }
     if (subjectRunningRef.current) {
       if (isSubjectTaskCancellation(content)) stopTurn()
       else commitThread(prev => [...prev, { role: 'bot', text: '科目操作正在进行，请先停止当前操作，再提供新的要求。', modelVisible: false }])
@@ -796,9 +825,9 @@ export default function AssistantDock() {
       void runSubjectConversation(content, mid)
       return
     }
-    if (canUsePageActions(modeRef.current) && !busyRef.current && !hasMaterials && mayRequestPageAction(content)) {
+    if (canUsePageActions(modeRef.current) && !busyRef.current && mayRequestPageAction(content)) {
       commitThread(prev => upsertThink([...prev, { ...userMessage, mid }], '正在识别操作意图'))
-      void runPageIntentConversation(content, mid)
+      void runPageIntentConversation(content, mid, referenceMaterials)
       return
     }
     assistLog(mid, busyRef.current ? 'steer' : 'followup', content.slice(0, 80))
@@ -1226,11 +1255,14 @@ export default function AssistantDock() {
                     {msg.text ? (
                       <div className={`assist-bubble is-${msg.role}`}>
                         {msg.role === 'bot' && <AssistantExecutionBadge execution={msg.execution} />}
-                        {msg.role === 'bot' ? <AssistMarkdown text={msg.text} /> : msg.text}
+                        {msg.role === 'bot' ? <AssistMarkdown text={msg.clarification ? '先补充关键决策，我会保留已明确的条件继续处理。你也可以直接在消息框回答。' : msg.text} /> : msg.text}
                         {msg.role === 'user' && msg.assistantMode === 'plan' && <small className="assist-turn-mode">计划模式</small>}
                         {msg.role === 'user' && msg.materials?.length ? <div className="assist-sent-materials">{msg.materials.map(item => <span key={item.id}><Icon name="file-text" size={12} />{item.name}</span>)}</div> : null}
                       </div>
                     ) : null}
+                    {msg.role === 'bot' && msg.clarification && i === shownThread.length - 1 && (
+                      <AssistantClarificationCard card={msg.clarification} disabled={chatting} onSubmit={(answer) => send(answer)} />
+                    )}
                     {msg.role === 'bot' && msg.hoursDraft && i === shownThread.length - 1 && (
                       <div className="assist-plan-actions">
                         <button type="button" className="is-ok" disabled={assistantMode === 'plan'} onClick={() => confirmHours(msg.hoursDraft!)}>

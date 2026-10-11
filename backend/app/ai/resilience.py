@@ -48,6 +48,7 @@ class ProviderCircuitBreaker:
         error_class: str,
         *,
         now: float | None = None,
+        retry_after_seconds: int | None = None,
     ) -> CircuitSnapshot:
         """健康类故障累计计数，配置类立即隔离；请求形态类不计数，原样返回当前快照。"""
         current = time.monotonic() if now is None else now
@@ -57,9 +58,11 @@ class ProviderCircuitBreaker:
                 return previous
             failures = previous.failures + 1
             isolate = error_class in _IMMEDIATE_ISOLATION or failures >= self.failure_threshold
+            provider_wait = retry_after_seconds if error_class == 'rate_limit' and retry_after_seconds is not None else 0
+            isolate = isolate or provider_wait > 0
             state = CircuitSnapshot(
                 failures=failures,
-                isolated_until=current + self.cooldown_seconds if isolate else 0.0,
+                isolated_until=max(previous.isolated_until, current + max(self.cooldown_seconds, provider_wait)) if isolate else 0.0,
             )
             self._states[key] = state
             return state

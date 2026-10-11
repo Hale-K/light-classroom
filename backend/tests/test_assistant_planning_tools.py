@@ -59,6 +59,93 @@ async def ask(db, name, context=None, **args):
 
 
 @pytest.mark.asyncio
+async def test_saturday_and_both_weeks_are_distributed_and_verified(planning_db):
+    result = await ask(planning_db, 'validate_hour_scenarios', weekdays=[1, 2, 3, 4, 5, 6],
+        mandatory_periods=list(range(1, 8)), optional_periods=[8, 9], scenarios=[{
+            'name': '基础方案', 'subjects': [
+                {'subject': '数学', 'periods': 40}, {'subject': '体育', 'periods': 2},
+                {'subject': '音乐', 'periods': 1}, {'subject': '心理', 'periods': 1, 'week_parity': 'odd'},
+            ]}])
+    scenario = result['data']['scenarios'][0]
+    assert scenario['total_periods_by_week'] == {'odd': 44, 'even': 43}
+    for leg, expected in [('odd', 44), ('even', 43)]:
+        draft = scenario['daily_distribution_by_week'][leg]
+        assert sum(draft['daily_totals'].values()) == expected
+        assert 7 <= draft['daily_totals']['6'] <= 9
+        assert draft['mandatory_filled']
+        for day in range(1, 7):
+            assert {str(period) for period in range(1, 8)} <= draft['slot_subjects_by_day'][str(day)].keys()
+            assert 7 <= draft['daily_totals'][str(day)] <= 9
+        for subject, row in draft['subject_hours'].items():
+            assert row['weekday'] + row['saturday'] == sum(row['by_day'].values())
+        assert sum(row['saturday'] for row in draft['subject_hours'].values()) == draft['daily_totals']['6']
+    assert scenario['daily_distribution_by_week']['even']['subject_hours']['心理']['saturday'] == 0
+    assert result['data']['coverage']['teacher_conflicts_verified'] is False
+
+
+@pytest.mark.asyncio
+async def test_insufficient_hours_do_not_fabricate_filled_saturday(planning_db):
+    result = await ask(planning_db, 'validate_hour_scenarios', weekdays=[1, 2, 3, 4, 5, 6],
+        mandatory_periods=list(range(1, 8)), optional_periods=[8, 9], scenarios=[{
+            'name': '不足', 'subjects': [{'subject': '数学', 'periods': 40}]}])
+    assert result['data']['scenarios'][0]['daily_distribution_by_week'] == {'odd': None, 'even': None}
+
+
+@pytest.mark.asyncio
+async def test_continuation_preserves_user_slots_and_final_tables(planning_db, monkeypatch):
+    from app.ai.gateway.tool import ToolScope, _validated_rows_error
+    from app.ai.tools.school import evidence
+    from unittest.mock import AsyncMock
+    monkeypatch.setattr(evidence, 'authorized', AsyncMock(return_value=True))
+    scope = ToolScope(planning_db[0], 1, 1, True, {'grade_id': 1, 'academic_year': '2026-2027', 'term': '1'})
+    scope.configure_request('继续之前的任务，设计各科课时方案')
+    scope.configure_planning_history([
+        {'role': 'user', 'content': '周一到周六课位1-7节必须排满，但是8-9节可适当排'},
+        {'role': 'assistant', 'content': '周一到周五1-5节必须排满'},
+        {'role': 'user', 'content': '继续之前的任务，设计各科课时方案'},
+    ])
+    result = json.loads(await scope.execute('validate_hour_scenarios', json.dumps({
+        'weekdays': [1, 2, 3, 4, 5], 'mandatory_periods': [], 'optional_periods': [],
+        'scenarios': [{'name': '基础方案', 'subjects': [
+            {'subject': '数学', 'periods': 43}, {'subject': '心理', 'periods': 1, 'week_parity': 'odd'}]}],
+    }, ensure_ascii=False)))
+    data = result['data']
+    assert data['weekdays'] == [1, 2, 3, 4, 5, 6]
+    scenario = data['scenarios'][0]
+    tables = []
+    for leg, label in [('odd', '单周'), ('even', '双周')]:
+        rows = scenario['daily_distribution_by_week'][leg]['subject_hours']
+        table = [f'### 基础方案 · {label}', '| 科目 | 周一至周五课时 | 周六课时 | 全周课时 |', '| --- | --- | --- | --- |']
+        for subject, row in rows.items():
+            table.append(f'| {subject} | {row["weekday"]} | {row["saturday"]} | {sum(row["by_day"].values())} |')
+        table.append(f'| 合计 | {sum(row["weekday"] for row in rows.values())} | {sum(row["saturday"] for row in rows.values())} | {scenario["total_periods_by_week"][leg]} |')
+        tables.append('\n'.join(table))
+    answer = '\n\n'.join(tables)
+    assert _validated_rows_error(answer, data) is None
+    assert '写成' in _validated_rows_error(answer.replace('| 数学 | 36 | 7 |', '| 数学 | 36 | 8 |'), data)
+    assert '周六' in _validated_rows_error('### 基础方案\n| 科目 | 单周课时 | 双周课时 |\n| --- | --- | --- |\n| 数学 | 43 | 43 |\n| 心理 | 1 | 0 |', data)
+    from app.ai.agent.partial import checked_partial
+    from types import SimpleNamespace
+    from copy import deepcopy
+    three = deepcopy(data)
+    three['scenarios'] = [deepcopy(scenario) for _ in range(3)]
+    for index, item in enumerate(three['scenarios'], 1):
+        item['name'] = f'方案{index}'
+    partial = checked_partial(SimpleNamespace(checked_hour_evidence={'scope': result['scope'], 'data': three}), '模型超时')
+    assert partial and '任务未完成' in partial['text']
+    assert partial['text'].count('单周课量分配草案') == 3
+    assert partial['text'].count('双周课量分配草案') == 3
+    assert '| 心理 | 0 | 0 | 0 |' in partial['text']
+    scope.configure_planning_history([{'role': 'user', 'content': '查询教师人数'}])
+    assert scope._user_slot_constraints == {}
+    scope.configure_planning_history([
+        {'role': 'user', 'content': '周一至周六课位1-7节必须排满'},
+        {'role': 'user', 'content': '继续设计课时方案，改为周一至周五'},
+    ])
+    assert scope._user_slot_constraints['weekdays'] == [1, 2, 3, 4, 5]
+
+
+@pytest.mark.asyncio
 async def test_basis_reads_grade_grid_overrides_parity_and_policy_without_invented_scores(planning_db):
     result = await ask(planning_db, 'lookup_planning_basis')
     assert result['ok']

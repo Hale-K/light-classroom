@@ -24,7 +24,7 @@ const GUIDES: PageGuidance[] = [
   { match: '/exam-venues', title: '考场安排', summary: '为一次考试确定实际使用的考场。', steps: ['选择考试', '勾选考场并核对总容量', '保存后配置考试日程'] },
   { match: '/exam-calendar', title: '考试日程', summary: '设置考试日期、场次和科目时间。', steps: ['选择考试', '安排日期与场次', '检查时间重叠后保存'] },
   { match: '/exam-invigilators', title: '监考教师', summary: '维护本次考试可参与监考的教师。', steps: ['选择考试', '核对教师可用或请假状态', '保存后进入人员排考'] },
-  { match: '/exam-scheduling', title: '排考管理', summary: '生成并检查考生考场与监考安排。', steps: ['确认考场、日程和教师已准备', '生成排考结果', '检查缺员、容量和冲突'] },
+  { match: '/exam-scheduling', title: '排考管理', summary: '按步骤准备考试，调整人员与资源，打印准考证。', steps: ['开始准备：日程、考场与人员', '检查通过后生成安排', '调整座位与监考，打印考试材料'] },
   { match: '/file-center', title: '文件中心', summary: '查看导入导出后台任务和结果文件。', steps: ['按业务和状态筛选任务', '刷新查看处理进度', '完成后下载或查看失败明细'] },
   { match: '/ai-providers', title: '服务商管理', summary: '配置教务助手使用的大模型服务。', steps: ['新增服务商并填写模型', '测试连接', '成功后启用并设为默认'] },
 ]

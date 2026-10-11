@@ -137,6 +137,9 @@ export interface StudentSchoolOption {
 }
 
 export interface StudentChoiceOptions {
+  allow_teacher_pick: boolean
+  teachers_by_subject: Record<string, Array<{ id: number; name: string }>>
+  teaching_classes: Array<{ id: number; name: string; subject_id: number; teacher_id: number; teacher_name: string; capacity: number; selected_count: number; remaining: number; is_full: boolean; selected_by_me: boolean }>
   scheme: {
     id: number
     name: string
@@ -147,6 +150,8 @@ export interface StudentChoiceOptions {
   } | null
   subjects: Array<{ id: number; name: string }>
   choice: {
+    teacher_preferences?: Record<string, number>
+    teaching_class_preferences?: Record<string, number>
     scheme_id: number
     primary_subject_id?: number | null
     secondary_subject_ids: number[]
@@ -165,6 +170,8 @@ export const studentAuthApi = {
   choice: (params: { academic_year: string; term: string }) =>
     unwrap<unknown>(http.get('/student-auth/choice', { params })),
   saveChoice: (data: {
+    teacher_preferences?: Record<string, number>
+    teaching_class_preferences?: Record<string, number>
     scheme_id: number
     academic_year: string
     effective_term: string

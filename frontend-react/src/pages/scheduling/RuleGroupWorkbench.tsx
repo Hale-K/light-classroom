@@ -13,6 +13,10 @@ import {
 import { useEffect, useMemo, useRef, useState } from "react";
 import { schedulingApi } from "@/api";
 import { conciseRuleMeaning } from "./rule-meaning";
+import { RULE_GUIDANCE } from './rule-guidance';
+import { configuredRuleSlots, inspectRuleConfiguration, ruleWeekParity } from './rule-workbench-checks';
+import { RuleCheckReport } from './RuleCheckReport';
+import './rule-workbench.css';
 import { scopeOptionsForRule, type RuleScope } from './rule-scope-options';
 import { getConfiguredSlotOptions } from './scheduling-model';
 import { setAssistantContext, clearAssistantContext } from '@/assistant/context';
@@ -63,11 +67,11 @@ interface DistributionSpec {
 }
 
 const RULE_FAMILY_LABELS: Record<RuleFamily, string> = {
-  slot: "课位规则",
-  distribution: "分布规则",
-  teacher: "教师规则",
-  class: "班级规则",
-  combination: "组合规则",
+  slot: "时间与课位",
+  distribution: "科目课时分布",
+  teacher: "教师时间与工作量",
+  class: "班级与学生",
+  combination: "单双周与课程配对",
 };
 
 interface RuleTemplate {
@@ -97,8 +101,8 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "global",
     scope: "学科",
     operator: "禁止占用指定课位",
-    label: "课位禁排",
-    description: "指定对象在所选课位不排课。",
+    label: "指定时段不排课",
+    description: "指定对象在选定的星期和节次不排课。",
   },
   {
     id: "subject_allowed_slots",
@@ -106,8 +110,8 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "subject",
     scope: "学科",
     operator: "仅允许指定课位",
-    label: "学科课位限制",
-    description: "限定学科可安排的课位。",
+    label: "学科上课时段",
+    description: "选择学科和节次，再决定必须满足或尽量满足。",
   },
   {
     id: "teacher_forbidden_slots",
@@ -115,7 +119,7 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "teacher",
     scope: "教师",
     operator: "禁止排课",
-    label: "教师课位禁排",
+    label: "教师不可排课时段",
     description: "禁止教师在指定星期和节次授课。",
   },
   {
@@ -124,8 +128,8 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "teacher",
     scope: "教师",
     operator: "每日课节上限",
-    label: "工作日教师课节上限",
-    description: "设置教师每日课时上限和白天空节要求。",
+    label: "教师每天最多上几节",
+    description: "设置教师每日课时上限，可另选白天不空节。",
   },
   {
     id: "teacher_consecutive",
@@ -142,8 +146,8 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "teacher",
     scope: "教师",
     operator: "优先安排",
-    label: "教师日期偏好",
-    description: "优先安排在所选星期。",
+    label: "教师晚课日期偏好",
+    description: "晚课优先安排在所选星期。",
   },
   {
     id: "teacher_multi_class_evening_adjacent",
@@ -178,7 +182,7 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "subject",
     scope: "学科",
     operator: "要求连堂",
-    label: "学科连堂",
+    label: "学科连堂要求",
     description: "设置学科每周连堂次数。",
   },
   {
@@ -201,12 +205,12 @@ const RULE_TEMPLATES: RuleTemplate[] = [
   },
   {
     id: "subject_prefer_early_periods",
-    family: "distribution",
+    family: "slot",
     category: "subject",
     scope: "学科",
     operator: "主科靠前",
-    label: "主科尽量靠前",
-    description: "主科优先安排在所选节次。",
+    label: "学科上课时段",
+    description: "选择科目和优先节次，设置允许例外数与满足程度。",
   },
   {
     id: "subject_gap_fill_late_periods",
@@ -214,8 +218,8 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "subject",
     scope: "学科",
     operator: "空节补活动课",
-    label: "活动课补空节",
-    description: "活动课优先安排在第8、9节。",
+    label: "后段空位优先补课（历史规则）",
+    description: "后段有可用空位时，活动课优先排入后段。",
   },
   {
     id: "class_evening_self_study_day",
@@ -268,7 +272,7 @@ const RULE_TEMPLATES: RuleTemplate[] = [
     category: "global",
     scope: "全局",
     operator: "必须安排",
-    label: "课位教师角色",
+    label: "指定时段由班主任授课",
     description: "所选课位必须由各班班主任上课。",
   },
 ];
@@ -296,6 +300,7 @@ export interface GenericScheduleRule {
   distributionTarget?: string;
   distributionSpec?: DistributionSpec;
   specificSlots?: SpecificSlot[];
+  keepTeacherContinuous?: boolean;
     allowedSubjects?: string[];
     parityOddSubject?: string;
     parityEvenSubject?: string;
@@ -447,6 +452,17 @@ const ruleCodeForRule = (
   )
     return "class_slot_pattern";
   return "manual_review";
+};
+
+// 学科时间安排共用一个入口；满足程度决定它是硬性课位范围还是软性时间偏好。
+const effectiveRuleCodeForRule = (rule: GenericScheduleRule): SchedulingRuleCode => {
+  const code = ruleCodeForRule(rule);
+  if (code === "subject_allowed_slots" || code === "subject_prefer_early_periods") {
+    return rule.priority === "soft"
+      ? "subject_prefer_early_periods"
+      : "subject_allowed_slots";
+  }
+  return code;
 };
 
 const familyForRule = (
@@ -675,6 +691,7 @@ const DEFAULT_RULES: GenericScheduleRule[] = [
     cycle: "每周",
     quantity: "每天最多 3 节",
     distributionSpec: { target: "daily-limit", maxLessonsPerDay: 3 },
+    keepTeacherContinuous: true,
     priority: "hard",
     status: "pass",
     title: "工作日教师课节上限",
@@ -719,7 +736,7 @@ const DEFAULT_RULES: GenericScheduleRule[] = [
     },
     priority: "hard",
     status: "pass",
-    title: "学科连堂",
+    title: "学科连堂要求",
     note: "所选学科每周至少有1天安排连续2节，周课时数量以课时管理配置为准。",
   }),
   makeRule({
@@ -1926,6 +1943,7 @@ const buildRuleSummary = (
     | "rule_code"
     | "fillSelfStudy"
     | "trailingEmpty"
+    | "keepTeacherContinuous"
     | "id"
   >,
 ) => {
@@ -1956,7 +1974,7 @@ const buildRuleSummary = (
   if (targetKey === "consecutive") {
     detail = `连${rule.distributionSpec?.consecutiveLength || 2}节/周${rule.distributionSpec?.minimumDays || 1}天`;
   } else if (targetKey === "daily-limit") {
-    detail = `每日最多${teacherDailyLimitCap(rule)}节；白天1–7节不空`;
+    detail = `每日最多${teacherDailyLimitCap(rule)}节${rule.keepTeacherContinuous ? '；白天1–7节不空' : ''}`;
   } else if (rule.rule_code === "class_slot_pattern" || rule.id === "R08-02") {
     const pattern = resolveSlotPattern(rule.distributionSpec, rule.weekday, rule.period);
     detail = `${weekdayLabelFromCodeList(pattern.weekdays)}${periodLabelFromCodeList(pattern.periods)}错开`;
@@ -1970,7 +1988,7 @@ const buildRuleSummary = (
     target: targetKey === "daily-limit" && rule.scope === "学科"
       ? `${shortenTargetLabel(rule.target)}任课教师`
       : rule.allowedSubjects?.length && rule.operator === "仅允许指定科目"
-        ? rule.allowedSubjects.join("、")
+        ? `${rule.target}（${rule.allowedSubjects.join('、')}）`
         : rule.target,
     operator: rule.rule_code === "class_slot_pattern" ? "均衡分布" : rule.operator,
     time,
@@ -1983,7 +2001,7 @@ const buildRuleSummary = (
 type RulePreviewMark = "blocked" | "allowed" | "fixed" | "preferred" | "scope";
 
 const rulePreviewModel = (rule: GenericScheduleRule) => {
-  const code = ruleCodeForRule(rule);
+  const code = effectiveRuleCodeForRule(rule);
   const target = shortenTargetLabel(rule.target || "");
   const days = weekdaySelections(rule.weekday);
   const periods = periodSelections(rule.period);
@@ -2035,8 +2053,8 @@ const rulePreviewModel = (rule: GenericScheduleRule) => {
     detail = "连续课节按教师的全部任教班级统计；跨班模式要求连续课节至少覆盖两个班。";
   } else if (code === "teacher_daily_limit" || code === "teacher_gap_free") {
     mark = "preferred";
-    headline = `${target}工作日每天最多 ${teacherDailyLimitCap(rule)} 节，并保持白天课位连续`;
-    detail = "这是教师负荷与空节控制规则，不会把某一门课钉死在单个课位。";
+    headline = `${target}每天最多 ${teacherDailyLimitCap(rule)} 节${rule.keepTeacherContinuous ? '，并保持白天课位连续' : ''}`;
+    detail = rule.keepTeacherContinuous ? "已额外开启白天不空节；每日上限与连续性会分别检查。" : "只限制每日负荷；可另行开启白天不空节。";
   } else if (code === "subject_daytime_parity_pair" || code === "subject_evening_parity_pair") {
     mark = "fixed";
     headline = `${target}按单双周在同一课位配对`;
@@ -2047,12 +2065,12 @@ const rulePreviewModel = (rule: GenericScheduleRule) => {
     detail = rule.trailingEmpty ? "未选节次不参与连续性判断。" : "第8、9节不参与判断。";
   } else if (code === "subject_prefer_early_periods") {
     mark = "preferred";
-    headline = `${target}优先安排在靠前节次`;
+    headline = `${target}尽量安排在${periods.join("、") || "所选节次"}`;
     detail = `允许最多 ${rule.maxOutsidePreferred ?? rule.quantitySpec?.amount ?? 0} 节落在偏好节次之外。`;
   } else if (code === "subject_gap_fill_late_periods") {
     mark = "preferred";
     headline = `${target}优先填补第 8、9 节活动课位`;
-    detail = "只有前面出现空节时，才会把活动课补进第 1～7 节。";
+    detail = "第 8、9 节有可用空位时优先安排后段；后段已满或被禁排时，可安排前段。";
   } else if (code === "class_evening_self_study_day") {
     mark = "allowed";
     headline = `${target}从候选日期中选择 ${rule.choiceCount || 1} 天保持第 8、9 节自习`;
@@ -2085,29 +2103,15 @@ function RuleImpactPreview({
   const parityPair = ["subject_daytime_parity_pair", "subject_evening_parity_pair"].includes(
     ruleCodeForRule(rule),
   ) || rule.cycle === "单周 / 双周";
-  const hasSavedGrid = gridConfig?.configured === true;
-  const configuredDailyPeriods = hasSavedGrid
-    ? gridConfig?.daily_periods || []
-    : [9, 9, 9, 9, 9, 9, 9];
-  const configuredDays = WEEKDAY_ENUMS.filter((_, index) => configuredDailyPeriods[index] > 0);
-  const daytimePeriodCount = Math.max(1, ...configuredDailyPeriods);
-  const eveningPeriodCount = hasSavedGrid && gridConfig?.enable_evening
-    ? Math.max(...(gridConfig.evening_daily_periods_odd || []), ...(gridConfig.evening_daily_periods_even || []), 0)
-    : 0;
-  const previewDays = configuredDays.length ? configuredDays : WEEKDAY_ENUMS;
-  const configuredPeriodCount = model.isEvening
-    ? daytimePeriodCount + eveningPeriodCount
-    : daytimePeriodCount;
-  const basePeriods = parityPair && model.periods.length === 0
-    ? (model.isEvening ? [`第${Math.max(daytimePeriodCount + 1, 10)}节`] : PERIOD_ENUMS.slice(0, configuredPeriodCount))
-    : [...new Set([
-        ...PERIOD_ENUMS.slice(0, configuredPeriodCount),
-        ...model.periods,
-      ])];
+  const availableSlots = configuredRuleSlots(gridConfig);
+  const previewDays = availableSlots ? WEEKDAY_ENUMS.filter((_, i) => availableSlots.some(slot => slot.weekday === i + 1)) : WEEKDAY_ENUMS;
+  const basePeriods = availableSlots ? [...new Set(availableSlots.filter(slot => model.isEvening ? slot.kind === 'evening' : slot.kind === 'regular').map(slot => slot.period))].sort((a, b) => a - b).map(p => `第${p}节`)
+    : model.periods.length ? model.periods : PERIOD_ENUMS.slice(0, 7);
+  const columnStyle = { gridTemplateColumns: `66px repeat(${Math.max(previewDays.length, 1)}, minmax(42px, 1fr))` };
   const previewRows = parityPair
     ? basePeriods.flatMap((period) => [
-        { label: `${model.isEvening && model.periods.length === 0 ? "晚自习" : period} · 单周`, period, parity: "odd" as const },
-        { label: `${model.isEvening && model.periods.length === 0 ? "晚自习" : period} · 双周`, period, parity: "even" as const },
+        { label: `${period} · 单周`, period, parity: "odd" as const },
+        { label: `${period} · 双周`, period, parity: "even" as const },
       ])
     : basePeriods.map((period) => ({ label: period, period, parity: null }));
   const markText: Record<RulePreviewMark, string> = {
@@ -2125,27 +2129,33 @@ function RuleImpactPreview({
           <strong>{model.headline}</strong>
         </div>
         <Tag color={model.mark === "blocked" ? "red" : model.mark === "fixed" ? "blue" : "gold"}>
-          {rule.priority === "hard" ? "硬约束" : "软目标"}
+          {rule.priority === "hard" ? "必须满足" : "尽量满足"}
         </Tag>
       </div>
       <p className="rule-group-impact-detail">{model.detail}</p>
       {!compact && (
         <div className="rule-group-impact-grid" aria-label="规则作用课位预览">
-          <div className="rule-group-impact-grid-row is-head">
+          <div className="rule-group-impact-grid-row is-head" style={columnStyle}>
             <span>节次</span>
             {previewDays.map((day) => <span key={day}>{day}</span>)}
           </div>
           {previewRows.map((row) => (
-            <div className="rule-group-impact-grid-row" key={row.label}>
+            <div className="rule-group-impact-grid-row" style={columnStyle} key={row.label}>
               <span>{row.label}</span>
               {previewDays.map((day) => {
-                const active = daySet.has(day) && periodSet.has(row.period);
+                const dayCode = WEEKDAY_ENUMS.indexOf(day) + 1;
+                const periodCode = Number(row.period.match(/\d+/)?.[0]);
+                const usable = !availableSlots || availableSlots.some(slot => slot.weekday === dayCode && slot.period === periodCode &&
+                  (!row.parity || slot.week_parity === row.parity) && (ruleWeekParity(rule.cycle) === 'all' || slot.week_parity === ruleWeekParity(rule.cycle)));
+                const selected = rule.specificSlots?.length ? rule.specificSlots.some(slot => slot.weekday === dayCode && slot.periods.includes(periodCode)) : daySet.has(day) && periodSet.has(row.period);
+                const active = usable && selected;
                 return (
                   <span
                     key={`${day}-${row.label}`}
-                    className={`rule-group-impact-cell ${active ? `is-${model.mark}` : ""}`}
+                    title={usable ? `${day} ${row.period}` : '此课位未启用'}
+                    className={`rule-group-impact-cell ${!usable ? 'is-unavailable' : active ? `is-${model.mark}` : ""}`}
                   >
-                    {active ? (row.parity === "odd" ? "单" : row.parity === "even" ? "双" : markText[model.mark]) : ""}
+                    {!usable ? '—' : active ? (row.parity === "odd" ? "单" : row.parity === "even" ? "双" : markText[model.mark]) : ""}
                   </span>
                 );
               })}
@@ -2153,7 +2163,7 @@ function RuleImpactPreview({
           ))}
         </div>
       )}
-      <small>配置影响预览 · 保存后参与排课；最终课表仍需运行排课算法生成。</small>
+      <small>{availableSlots ? '— 表示课位未启用。高亮表示规则作用范围；保存后仍需生成课表。' : '尚未保存课位结构，当前为示意预览。请先配置本年级课位。'}</small>
     </div>
   );
 }
@@ -2396,6 +2406,9 @@ const defaultGroup = (): RuleGroup => ({
 });
 
 const migrateLegacyGroup = (group: RuleGroup): RuleGroup => {
+  // Structured database rules are authoritative. User-created R02/R03/etc. can
+  // share an old preset's ID without sharing its meaning or target.
+  if (group.rules.every(rule => Boolean(rule.rule_code))) return group;
   const hasLegacyPrepRule = group.rules.some(
     (rule) => rule.id === "R01" && rule.title === "各科备课时段禁排",
   );
@@ -2602,7 +2615,7 @@ const migrateLegacyGroup = (group: RuleGroup): RuleGroup => {
     rule.id === "R05" && rule.title === "数学连堂规则"
       ? {
           ...rule,
-          title: "学科连堂",
+          title: "学科连堂要求",
           note: "所选学科每周至少有1天安排连续2节，周课时数量以课时管理配置为准。",
         }
       : rule,
@@ -2722,13 +2735,6 @@ const blankRule = (id: string): GenericScheduleRule =>
     note: "",
   });
 
-const ruleTemplateForRule = (
-  rule: GenericScheduleRule,
-): RuleTemplate | undefined => {
-  const code = rule.rule_code || ruleCodeForRule(rule);
-  return code === "manual_review" ? undefined : RULE_TEMPLATE_MAP.get(code);
-};
-
 const weekdayCodes = (value: string) =>
   weekdaySelections(value)
     .map((day) => WEEKDAY_OPTIONS.indexOf(day) + 1)
@@ -2770,9 +2776,9 @@ const slotTargetId = (target: string) => {
 const R04_SUBJECT_TARGET =
   "语文 / 数学 / 英语 / 物理 / 化学 / 生物 / 政治 / 历史 / 地理 / 音乐 / 美术 / 心理";
 const r04NoteSubject = (amount = 3) =>
-  `学科模式：勾选学科后，这些学科的任课老师都受约束——工作日每天最多 ${amount} 节，白天 1～7 节不能空节。一般不要勾体育。`;
+  `学科模式：勾选学科后，这些学科的任课老师都受约束——每日最多 ${amount} 节；白天不空节可另行勾选。`;
 const r04NoteTeacher = (amount = 3) =>
-  `教师模式：直接勾选老师（或选「多班教师」）。只有名单里的人受约束——工作日每天最多 ${amount} 节，白天 1～7 节不能空节。`;
+  `教师模式：直接勾选老师（或选「多班教师」）。只有名单里的人受约束——每日最多 ${amount} 节；白天不空节可另行勾选。`;
 
 /** 多选对象名称：R04 / 课位禁排等按作用对象放开多选。 */
 const isMultiNameTargetRule = (rule: GenericScheduleRule) => {
@@ -2875,9 +2881,12 @@ const canonicalRule = (
   rule: GenericScheduleRule,
   resources?: SchedulingResources,
 ): SchedulingRuleDefinition[] => {
-  const originalCode = rule.rule_code || ruleCodeForRule(rule);
+  const originalCode = effectiveRuleCodeForRule(rule);
   const ids = resolveTargetIds(rule, resources);
   const targetType = targetTypeForRule(rule);
+  const disabledTeacherNames = targetType === 'teacher' ? (resources?.disabled_teachers || [])
+    .filter(item => normalizeTargetName(rule.target).split(/\s*[\/、]\s*/).includes(item.name))
+    .map(item => item.name) : [];
   const fallback = (id = rule.id): SchedulingRuleDefinition => ({
     id,
     title: rule.title,
@@ -2893,10 +2902,13 @@ const canonicalRule = (
         ? "evening"
         : "regular",
     week_parity: "all",
-    params: { source_operator: rule.operator },
+    params: { source_operator: rule.operator,
+      ...(disabledTeacherNames.length ? { disabled_teacher_names: disabledTeacherNames } : {}),
+    },
   });
   if (
     originalCode === "manual_review" ||
+    disabledTeacherNames.length > 0 ||
     (targetType !== "global" && !ids.length)
   )
     return [fallback()];
@@ -2912,7 +2924,7 @@ const canonicalRule = (
       /晚课/.test(rule.period) || originalCode === "slot_teacher_role_required"
         ? ("evening" as const)
         : ("regular" as const),
-    week_parity: "all" as const,
+    week_parity: ruleWeekParity(rule.cycle),
   };
   if (originalCode === "subject_consecutive" || originalCode === "teacher_consecutive") {
     if ((originalCode === "subject_consecutive" && targetType !== "subject") ||
@@ -3035,12 +3047,12 @@ const canonicalRule = (
         code: originalCode,
         params: { max_lessons_per_day: teacherDailyLimitCap(rule) },
       },
-      {
+      ...(rule.keepTeacherContinuous ? [{
         ...base,
         id: `${rule.id}-continuity`,
-        code: "teacher_gap_free",
+        code: "teacher_gap_free" as const,
         params: {},
-      },
+      }] : []),
     ];
   if (originalCode === "class_allowed_subjects") {
     const forbidAll =
@@ -3451,10 +3463,11 @@ const hydrateGroupFromApi = (
       used.add(apiRule.id);
       continue;
     }
-    if (apiRule.id === "R04-continuity" || apiRule.id === "R04-load") {
-      if (apiRule.id === "R04-continuity") continue;
-      if (apiRule.code === "manual_review") continue;
-      if (used.has("R04")) continue;
+    if ((apiRule.code === 'teacher_gap_free' && apiRule.id.endsWith('-continuity')) ||
+        (apiRule.code === 'teacher_daily_limit' && apiRule.id.endsWith('-load'))) {
+      if (apiRule.id.endsWith('-continuity')) continue;
+      const uiId = apiRule.id.replace(/-load$/, '');
+      if (used.has(uiId)) continue;
       const base = defaultById.get("R04");
       if (!base) continue;
       const isSubject = apiRule.target?.type === "subject";
@@ -3464,13 +3477,19 @@ const hydrateGroupFromApi = (
         teacherDailyLimitCap(base);
       merged.push({
         ...base,
+        id: uiId,
+        keepTeacherContinuous: saved.rules.some(r => r.id === `${uiId}-continuity` && r.code === 'teacher_gap_free' && r.enabled),
         enabled: apiRule.enabled ?? base.enabled,
         priority: apiRule.priority,
+        cycle: apiRule.week_parity === 'odd' ? '单周' : apiRule.week_parity === 'even' ? '双周' : '每周',
         scope: isSubject ? "学科" : "教师",
         target:
           named ||
           (isSubject ? R04_SUBJECT_TARGET : "多班教师"),
-        title: base.title,
+        title: apiRule.title,
+        weekday: weekdayLabelFromCodes(apiRule.weekdays) || '全周',
+        period: periodLabelFromCodes(apiRule.periods) || base.period,
+        scheduleScope: apiRule.schedule_scope || 'all',
         note: isSubject ? r04NoteSubject(dailyCap) : r04NoteTeacher(dailyCap),
         status: "pass",
         rule_code: "teacher_daily_limit",
@@ -3486,9 +3505,9 @@ const hydrateGroupFromApi = (
           maxLessonsPerDay: dailyCap,
         },
       });
-      used.add("R04");
-      used.add("R04-load");
-      used.add("R04-continuity");
+      used.add(uiId);
+      used.add(`${uiId}-load`);
+      used.add(`${uiId}-continuity`);
       continue;
     }
     // 学科上下午分布：配套的「允许课位」不单独展示（已绑在一条 UI 规则里）
@@ -3531,8 +3550,13 @@ const hydrateGroupFromApi = (
         enabled: apiRule.enabled ?? base.enabled,
         priority: apiRule.priority,
         rule_code: apiRule.code,
+        cycle: ['subject_daytime_parity_pair', 'subject_evening_parity_pair'].includes(apiRule.code) ? '单周 / 双周' : apiRule.week_parity === 'odd' ? '单周' : apiRule.week_parity === 'even' ? '双周' : '每周',
         scheduleScope: apiRule.schedule_scope || "all",
         trailingEmpty: apiRule.params?.trailing_empty === true,
+        ...(apiRule.code === 'teacher_forbidden_slots' ? {
+          specificSlots: Array.isArray(apiRule.params.forbidden_slots)
+            ? apiRule.params.forbidden_slots as SpecificSlot[] : undefined,
+        } : {}),
         title: apiRule.title || base.title,
         // 必须以库里的星期/节次为准，否则保存会把后端字段写空（如 R18-lang）
         ...(weekdayFromApi ? { weekday: weekdayFromApi } : {}),
@@ -3619,7 +3643,7 @@ const hydrateGroupFromApi = (
       periodLabelFromCodes(apiRule.periods) ||
       (apiRule.period_scope === "evening" ? "晚课" : UNRESOLVED_PERIOD);
     const operatorForCode =
-      apiRule.code === "student_contiguous"
+      RULE_TEMPLATE_MAP.get(apiRule.code as RuleTemplateId)?.operator || (apiRule.code === "student_contiguous"
         ? "学生课程连续"
         : apiRule.code === "student_gap_minimize"
         ? "减少学生空档"
@@ -3647,7 +3671,7 @@ const hydrateGroupFromApi = (
                   ? "保持连续"
                   : apiRule.code === "teacher_daily_limit"
                     ? "每日课节上限"
-                    : "禁止排课";
+                    : "禁止排课");
     const quantityForCode =
       apiRule.code === "teacher_period_minimum"
         ? `至少 ${Number(apiRule.params?.minimum_lessons) || 2} 节`
@@ -3722,7 +3746,7 @@ const hydrateGroupFromApi = (
         apiRule.code === "subject_daytime_parity_pair" ||
         apiRule.code === "subject_evening_parity_pair"
           ? "单周 / 双周"
-          : "每周",
+          : apiRule.week_parity === 'odd' ? '单周' : apiRule.week_parity === 'even' ? '双周' : "每周",
       quantity: quantityForCode,
       ...(quantitySpecForCode ? { quantitySpec: quantitySpecForCode } : {}),
       ...(distributionSpecForCode
@@ -3736,6 +3760,10 @@ const hydrateGroupFromApi = (
       scheduleScope: apiRule.schedule_scope || "all",
       fillSelfStudy: apiRule.params?.fill_self_study === true,
       trailingEmpty: apiRule.params?.trailing_empty === true,
+      ...(apiRule.code === 'class_allowed_subjects' ? { allowedSubjects: Array.isArray(apiRule.params.allowed_subject_ids) ? resources?.subjects.filter(s => (apiRule.params.allowed_subject_ids as number[]).includes(s.id)).map(s => s.name) : [] } : {}),
+      ...(apiRule.code === 'class_evening_self_study_day' ? { choiceCount: Number(apiRule.params.choose_count) || 1 } : {}),
+      ...(apiRule.code === 'teacher_forbidden_slots' && Array.isArray(apiRule.params.forbidden_slots) ? { specificSlots: apiRule.params.forbidden_slots as SpecificSlot[] } : {}),
+      ...(apiRule.code === 'slot_teacher_role_required' ? { requiredTeacherRole: 'head_teacher' as const } : {}),
       ...(apiRule.code === "subject_daytime_parity_pair"
         ? (() => {
             const oddIds = Array.isArray(apiRule.params?.odd_subject_ids)
@@ -3837,6 +3865,12 @@ export default function RuleGroupWorkbench({
   const [open, setOpenState] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const [typePickerOpen, setTypePickerOpen] = useState(false);
+  const [templateQuery, setTemplateQuery] = useState('');
+  const [templateFamily, setTemplateFamily] = useState<'all' | RuleFamily>('all');
+  const [saving, setSaving] = useState(false);
+  const [checking, setChecking] = useState(false);
+  const [serverCheck, setServerCheck] = useState<{ key: string; message: string; ok: boolean } | null>(null);
+  const [saveError, setSaveError] = useState('');
   const [hintAdd, setHintAdd] = useState(false);
   useEffect(() => {
     const onHint = () => {
@@ -3858,14 +3892,14 @@ export default function RuleGroupWorkbench({
   const [dirty, setDirty] = useState(false);
   const [familyFilter, setFamilyFilter] = useState<"all" | RuleFamily>("all");
   const [scopeFilter] = useState<"全部" | RuleScope>("全部");
-  const [priorityFilter] = useState<"全部" | RulePriority>("全部");
+  const [priorityFilter, setPriorityFilter] = useState<"全部" | RulePriority>("全部");
   const getTargetOptions = (
     scope: RuleScope,
     currentTarget = "",
     options: string[] = slotOptions,
   ) => getTargetOptionsFromResources(scope, currentTarget, options, resources);
   const [statusFilter] = useState<"全部" | RuleStatus>("全部");
-  const [keyword] = useState("");
+  const [keyword, setKeyword] = useState("");
   const resourceReadyKey = `${resources?.subjects?.length ?? 0}:${resources?.teachers?.length ?? 0}:${resources?.classes?.length ?? 0}`;
 
   const decorateGroup = (item: RuleGroup): RuleGroup => {
@@ -4018,11 +4052,28 @@ export default function RuleGroupWorkbench({
     }),
   );
   const draftFamily = draft.family || familyForRule(draft);
-  const draftCode = ruleCodeForRule(draft);
+  const draftCode = effectiveRuleCodeForRule(draft);
     const showStudentContiguous = draftCode === "student_contiguous";
     const showStudentGaps = draftCode === "student_gap_minimize" || showStudentContiguous;
-  const draftTemplate = ruleTemplateForRule(draft);
   const draftScope: RuleScope = draft.scope;
+  const guide = RULE_GUIDANCE[draftCode];
+  const editingGroup = { ...group, rules: isNew ? [...group.rules, draft] : group.rules.map(r => r.id === draft.id ? draft : r) };
+  const apiEditingGroup = toApiRuleGroup(editingGroup, academicYear, term, resources);
+  const checkKey = JSON.stringify(apiEditingGroup);
+  const checkResources = resources ? { ...resources,
+    classes: resources.classes.filter(c => group.grade_id == null || c.grade_id === group.grade_id),
+    assignments: resources.assignments.filter(a => resources.classes.some(c => c.id === a.class_id && (group.grade_id == null || c.grade_id === group.grade_id))),
+  } : undefined;
+  const checkIssues = inspectRuleConfiguration(apiEditingGroup.rules, configuredRuleSlots(gridConfig), checkResources);
+  const checkLinks = Object.fromEntries(editingGroup.rules.flatMap(r => canonicalRule(r, resources).map(c => [c.id, { id: r.id, title: r.title }])));
+  const selectCheckRule = (id: string) => { const linked = editingGroup.rules.find(r => r.id === id); if (linked && linked.id !== draft.id) selectRule(linked); };
+  const currentRuleIds = canonicalRule(draft, resources).map(r => r.id);
+  const currentErrors = checkIssues.filter(i => i.level === 'error' && i.ruleIds.some(id => currentRuleIds.includes(id)));
+  const templateMatches = RULE_TEMPLATES.filter(template => {
+    const isLegacyPreferenceAlias = template.id === 'subject_prefer_early_periods';
+    const search = `${template.label} ${template.description} ${RULE_GUIDANCE[template.id]?.example || ''}${template.id === 'subject_allowed_slots' || isLegacyPreferenceAlias ? ' 学科课位限制 学科节次偏好 主科尽量靠前 活动课优先后段 音乐 美术 第8、9节' : ''}`;
+    return !isLegacyPreferenceAlias && template.id !== 'subject_gap_fill_late_periods' && (templateFamily === 'all' || template.family === templateFamily) && search.includes(templateQuery.trim());
+  });
   const showRelation =
     draftFamily === "combination" || draft.operator === "组合限制";
   const showSlotTeacherBalanceCap = draftCode === "slot_teacher_balance";
@@ -4032,25 +4083,26 @@ export default function RuleGroupWorkbench({
   const showConsecutive = showSubjectConsecutive || showTeacherConsecutive;
   const showSlotPattern = draftCode === "class_slot_pattern";
   const showPreferEarly = draftCode === "subject_prefer_early_periods";
+  const showSubjectPeriodPlan = showPreferEarly || draftCode === 'subject_gap_fill_late_periods';
   const showDistribution =
     !showSlotTeacherBalanceCap &&
     !showPeriodMinimumAmount &&
     !showConsecutive &&
     !showSlotPattern &&
-    !showPreferEarly &&
+    !showSubjectPeriodPlan &&
     (draftFamily === "distribution" ||
       Boolean(
         draft.distributionSpec && draft.distributionSpec.target !== "none",
       ) ||
       ["尽量连续", "保持连续", "均衡分配"].includes(draft.operator));
-  const showSpecificSlots = Boolean(draft.specificSlots?.length);
+  const showSpecificSlots = draft.specificSlots !== undefined;
   const showAllowedSubjects = draftCode === "class_allowed_subjects";
   const showRequiredTeacherRole = draftCode === "slot_teacher_role_required";
   const showSelfStudyDayConfig = draftCode === "class_evening_self_study_day";
   const showDaytimeParityLegs = draftCode === "subject_daytime_parity_pair";
-  const showWeekdayFields = !showSlotPattern && !showPreferEarly;
+  const showWeekdayFields = !showSlotPattern && !showSubjectPeriodPlan;
   const showPeriodField =
-      !showSelfStudyDayConfig && !showConsecutive && !showSlotPattern;
+      !showSelfStudyDayConfig && !showConsecutive && !showSlotPattern && draftCode !== 'subject_gap_fill_late_periods';
   const configuredWeekdayOptions = useMemo(() => {
     const values = WEEKDAY_OPTIONS.filter((day) =>
       slotOptions.some((slot) => slot.startsWith(`${day} ·`)),
@@ -4097,6 +4149,13 @@ export default function RuleGroupWorkbench({
 
   const openWorkbench = (rule?: GenericScheduleRule) => {
     if (!rule) {
+      if (dirty) {
+        modal.confirm({ title: '当前规则还未保存', content: '继续新增会放弃当前修改。', okText: '放弃修改并新增', cancelText: '继续编辑', zIndex: 5000,
+          onOk: () => { const original = group.rules.find(r => r.id === selectedId) || group.rules[0]; setDraft(original ? { ...original } : blankRule('R01')); setSelectedId(original?.id || ''); setIsNew(false); setDirty(false); setTemplateQuery(''); setTemplateFamily('all'); setTypePickerOpen(true); } });
+        return;
+      }
+      setTemplateQuery('');
+      setTemplateFamily('all');
       setTypePickerOpen(true);
       return;
     }
@@ -4148,6 +4207,10 @@ export default function RuleGroupWorkbench({
       status: "unresolved" as RuleStatus,
       note: "",
     };
+    if (RULE_GUIDANCE[template.id]?.recommended === 'soft') next.priority = 'soft';
+    if (template.id === 'subject_allowed_slots') Object.assign(next, { priority: 'soft' as RulePriority, weekday: '全周', period: '第1、2、3、4节', maxOutsidePreferred: 2, quantity: '允许 2 节不在所选节次', distributionTarget: 'none' });
+    if (template.id === 'teacher_daily_limit') Object.assign(next, { distributionSpec: { target: 'daily-limit', maxLessonsPerDay: 3 }, weekday: '周一至周五' });
+    if (template.id === 'class_evening_self_study_day') next.choiceCount = 1;
     if (template.id === "student_gap_minimize" || template.id === "student_contiguous") {
       Object.assign(next, { scope: "全局" as RuleScope, target: "全年级", weekday: "周一至周六",
         period: "第1、2、3、4、5、6、7节", priority: (template.id === "student_contiguous" ? "hard" : "soft") as RulePriority, scheduleScope: "walk" as const,
@@ -4272,7 +4335,7 @@ export default function RuleGroupWorkbench({
         quantity: "不限定",
         priority: "hard" as RulePriority,
         status: "unresolved" as RuleStatus,
-        note: "硬约束：勾选的学科只能排在下面勾选的星期和节次，其它课位一律不能排这些学科。",
+        note: "选择科目和节次；设为必须满足时只能排在所选课位，设为尽量满足时可设置例外数。",
       });
     }
     if (template.id === "slot_teacher_role_required") {
@@ -4330,57 +4393,24 @@ export default function RuleGroupWorkbench({
   };
 
   const selectRule = (rule: GenericScheduleRule) => {
+    if (saving || checking) return;
+    if (rule.id === selectedId && !isNew) return;
     if (dirty) {
-      message.warning("请先保存当前规则，再切换其他明细");
+      modal.confirm({ title: '当前规则还未保存', content: '切换后会放弃当前修改。', okText: '放弃修改并切换', cancelText: '继续编辑', zIndex: 5000,
+        onOk: () => { setDraft({ ...rule }); setSelectedId(rule.id); setIsNew(false); setDirty(false); setSaveError(''); } });
       return;
     }
     setSelectedId(rule.id);
     setDraft({ ...rule });
     setIsNew(false);
+    setSaveError('');
   };
-
-  useEffect(() => {
-    if (!open) return;
-    const familyByLabel: Record<string, "all" | RuleFamily> = {
-      全部规则: "all",
-      [RULE_FAMILY_LABELS.slot]: "slot",
-      [RULE_FAMILY_LABELS.distribution]: "distribution",
-      [RULE_FAMILY_LABELS.teacher]: "teacher",
-      [RULE_FAMILY_LABELS.class]: "class",
-      [RULE_FAMILY_LABELS.combination]: "combination",
-    };
-    const buttons = Array.from(
-      document.querySelectorAll<HTMLButtonElement>(".rule-group-tree button"),
-    );
-    const handleCategoryClick = (event: Event) => {
-      const button = event.currentTarget as HTMLButtonElement;
-      const label = Object.keys(familyByLabel).find((value) =>
-        button.textContent?.trim().startsWith(value),
-      );
-      const next = label ? familyByLabel[label] : undefined;
-      if (!next) return;
-      if (dirty) {
-        message.warning("请先保存当前规则，再切换分类");
-        return;
-      }
-      setFamilyFilter(next);
-      buttons.forEach((item) =>
-        item.classList.toggle("is-active", item === button),
-      );
-    };
-    buttons.forEach((button) =>
-      button.addEventListener("click", handleCategoryClick),
-    );
-    return () =>
-      buttons.forEach((button) =>
-        button.removeEventListener("click", handleCategoryClick),
-      );
-  }, [dirty, message, open]);
 
   useEffect(() => {
     if (
       !open ||
       isNew ||
+      dirty ||
       !visibleRules.length ||
       visibleRules.some((rule) => rule.id === selectedId)
     )
@@ -4389,7 +4419,7 @@ export default function RuleGroupWorkbench({
     setSelectedId(next.id);
     setDraft({ ...next });
     setDirty(false);
-  }, [isNew, open, selectedId, visibleRules]);
+  }, [dirty, isNew, open, selectedId, visibleRules]);
 
   const updateDraft = <K extends keyof GenericScheduleRule>(
     key: K,
@@ -4397,12 +4427,13 @@ export default function RuleGroupWorkbench({
   ) => {
     setDraft((current) => ({ ...current, [key]: value }));
     setDirty(true);
+    setSaveError('');
   };
 
   const handleScopeChange = (scope: RuleScope) => {
     const targetOptions = getTargetOptions(scope, "", slotOptions);
     setDraft((current) => {
-      if (current.id === "R04") {
+      if (current.id === "R04" && ruleCodeForRule(current) === "teacher_daily_limit") {
         const cap = teacherDailyLimitCap(current);
         return {
           ...current,
@@ -4523,7 +4554,8 @@ export default function RuleGroupWorkbench({
   };
 
   const saveDraft = async () => {
-    const savingCode = ruleCodeForRule(draft);
+    if (saving || checking) return;
+    const savingCode = effectiveRuleCodeForRule(draft);
     const isGlobalScopedRule =
       (savingCode === "slot_forbidden" && draft.scope === "全局") ||
       savingCode === "slot_teacher_role_required";
@@ -4551,7 +4583,7 @@ export default function RuleGroupWorkbench({
         return;
       }
       if (!periodCodes(draft.period).length) {
-        message.warning("请选择主科尽量安排的节次");
+        message.warning("请选择尽量安排的节次");
         return;
       }
     }
@@ -4659,7 +4691,7 @@ export default function RuleGroupWorkbench({
         message.warning("请选择对课作用的节次");
         return;
       }
-      draft.target = [...odds, ...evens].join(" / ");
+      // target is kept in sync by the two subject selectors.
     }
     if (
       savingCode === "class_allowed_subjects" &&
@@ -4688,21 +4720,7 @@ export default function RuleGroupWorkbench({
         ? draft.target.trim() || "全年级"
         : draft.target.trim(),
       title: draft.title.trim(),
-      status:
-        (savingCode === "slot_forbidden" &&
-          (isGlobalScopedRule || draft.target.trim())) ||
-        (savingCode === "subject_allowed_slots" && draft.target.trim()) ||
-        savingCode === "slot_teacher_role_required" ||
-        (savingCode === "teacher_period_minimum" && draft.target.trim()) ||
-        (savingCode === "subject_consecutive" && draft.target.trim()) ||
-        (savingCode === "teacher_consecutive" && draft.target.trim()) ||
-        (savingCode === "class_slot_pattern" && draft.target.trim()) ||
-        (savingCode === "subject_daytime_parity_pair" &&
-          Boolean(
-            draft.parityOddSubjects?.length && draft.parityEvenSubjects?.length,
-          ))
-          ? ("pass" as RuleStatus)
-          : draft.status,
+      status: canonicalRule(draft, resources).some(rule => rule.code === 'manual_review') ? ('unresolved' as RuleStatus) : ('pass' as RuleStatus),
     };
     const nextGroup = {
       ...group,
@@ -4710,24 +4728,49 @@ export default function RuleGroupWorkbench({
         ? [...group.rules, nextRule]
         : group.rules.map((rule) => (rule.id === draft.id ? nextRule : rule)),
     };
-    updateActiveGroup(nextGroup);
-    setDirty(false);
-    setIsNew(false);
+    const apiGroup = toApiRuleGroup(nextGroup, academicYear, term, resources);
+    const draftIds = canonicalRule(nextRule, resources).map(r => r.id);
+    const errors = inspectRuleConfiguration(apiGroup.rules, configuredRuleSlots(gridConfig), checkResources)
+      .filter(issue => issue.level === 'error' && issue.ruleIds.some(id => draftIds.includes(id)));
+    if (errors.length) { setSaveError(errors[0].message); return; }
+    setSaving(true);
+    setSaveError('');
     try {
+      const validation = await schedulingApi.validateRuleGroup(apiGroup);
+      const unresolved = validation.unresolved.filter(issue => draftIds.includes(issue.rule_id));
+      if (nextRule.enabled && unresolved.length) { setSaveError(unresolved.map(i => i.message).join('；')); return; }
       await schedulingApi.saveRuleGroup(
         toApiRuleGroup(nextGroup, academicYear, term, resources),
       );
-      message.success("规则明细已保存，并已写入后端规则组");
+      updateActiveGroup(nextGroup);
+      setDraft(nextRule);
+      setDirty(false);
+      setIsNew(false);
+      setServerCheck({ key: JSON.stringify(apiGroup), message: '规则结构检查通过，已保存。生成课表时会继续检查全部约束。', ok: true });
+      message.success("规则已保存，下次生成课表时生效");
     } catch (error) {
-      message.error(
-        error instanceof Error
-          ? error.message
-          : "写入后端失败，请检查网络后重试",
-      );
+      setSaveError(error instanceof Error ? error.message : '保存失败，请检查网络后重试。你的修改已保留。');
+    } finally {
+      setSaving(false);
     }
   };
 
+  const checkAllRules = async () => {
+    if (saving || checking) return;
+    setChecking(true);
+    try {
+      const result = await schedulingApi.validateRuleGroup(apiEditingGroup);
+      const conflictCount = checkIssues.filter(i => i.level === 'error').length;
+      const structureOk = result.compiled && result.unresolved.length === 0;
+      setServerCheck({ key: checkKey, ok: structureOk && conflictCount === 0,
+        message: result.unresolved.length ? result.unresolved.map(i => i.message).join('；') : !structureOk ? '规则结构检查未通过，请完善配置。' : conflictCount ? `结构可解析，但仍有 ${conflictCount} 项配置冲突，请按下方建议调整。` : '结构与已知配置关系检查通过；尚未运行排课求解，完整可行性需生成课表验证。' });
+    } catch (error) {
+      setServerCheck({ key: checkKey, ok: false, message: error instanceof Error ? error.message : '检查失败，请重试。' });
+    } finally { setChecking(false); }
+  };
+
   const closeWorkbench = () => {
+    if (saving || checking) return;
     if (dirty) {
       modal.confirm({
         title: "有未保存的修改",
@@ -4906,7 +4949,7 @@ export default function RuleGroupWorkbench({
         okText="进入工作台"
         cancelText="取消"
         width={520}
-        destroyOnClose
+        destroyOnHidden
       >
         <div className="rule-group-create-form">
           <p>
@@ -4943,18 +4986,24 @@ export default function RuleGroupWorkbench({
 
       <Modal
         className="rule-type-picker-modal"
-        title="选择内部规则类型"
+        title="添加排课规则"
         open={typePickerOpen}
         onCancel={() => setTypePickerOpen(false)}
         footer={null}
         width={1080}
-        destroyOnClose
+        destroyOnHidden
         zIndex={5000}
         getContainer={() => document.body}
       >
         <div className="rule-group-template-picker">
+          <div className="rule-workbench-library-intro"><strong>你希望课表怎样安排？</strong><p>选择规则，再配置对象和时间。</p></div>
+          <Input.Search autoFocus aria-label="搜索规则" placeholder="搜索规则，例如：班会、教研、连堂、空档" allowClear value={templateQuery} onChange={e => setTemplateQuery(e.target.value)} />
+          <div className="rule-workbench-library-filters">
+            <Button size="small" type={templateFamily === 'all' ? 'primary' : 'default'} onClick={() => setTemplateFamily('all')}>全部规则</Button>
+            {(Object.keys(RULE_FAMILY_LABELS) as RuleFamily[]).map(family => <Button size="small" key={family} type={templateFamily === family ? 'primary' : 'default'} onClick={() => setTemplateFamily(family)}>{RULE_FAMILY_LABELS[family]}</Button>)}
+          </div>
           {(Object.keys(RULE_FAMILY_LABELS) as RuleFamily[]).map((family) => {
-            const templates = RULE_TEMPLATES.filter(
+            const templates = templateMatches.filter(
               (template) => template.family === family,
             );
             if (!templates.length) return null;
@@ -4971,12 +5020,15 @@ export default function RuleGroupWorkbench({
                     >
                       <strong>{template.label}</strong>
                       <span>{template.description}</span>
+                      <small>例如：{RULE_GUIDANCE[template.id]?.example}</small>
+                      <em>{RULE_GUIDANCE[template.id]?.recommended === 'soft' ? '建议尽量满足' : '可按需要设置满足程度'}</em>
                     </button>
                   ))}
                 </div>
               </section>
             );
           })}
+          {!templateMatches.length && <div className="rule-group-empty"><strong>没有找到这条规则</strong><p>试试搜索“禁排”“教师”或“单双周”。</p><Button onClick={() => { setTemplateQuery(''); setTemplateFamily('all'); }}>查看全部规则</Button></div>}
         </div>
       </Modal>
 
@@ -4994,56 +5046,26 @@ export default function RuleGroupWorkbench({
         width="calc(100vw - 24px)"
         centered={false}
         zIndex={1200}
-        maskClosable
-        destroyOnClose={false}
+        maskClosable={false}
+        destroyOnHidden={false}
         styles={{
           content: { height: "calc(100vh - 24px)", maxHeight: "calc(100vh - 24px)" },
           body: { height: "100%", overflow: "hidden" },
         }}
       >
         <div className="rule-group-workbench">
-          <aside className="rule-group-sidebar">
-            <div className="rule-group-sidebar-head">
-              <span>RULE GROUP</span>
-              <strong>{group.rules.length} 条明细</strong>
-            </div>
-            <div className="rule-group-tree">
-              <button className="is-active" type="button">
-                全部规则 <span>{group.rules.length}</span>
-              </button>
-              {familyCounts.map((item) => (
-                <button key={item.family} type="button">
-                  {RULE_FAMILY_LABELS[item.family]} <span>{item.count}</span>
-                </button>
-              ))}
-            </div>
-            <div className="rule-group-sidebar-note">
-              <strong>怎么读</strong>
-              <span>
-                左边点一条规则，中间看「谁 + 干什么」。保存只写入数据库，不读浏览器缓存。
-              </span>
-            </div>
-          </aside>
           <section className="rule-group-list">
             <div className="rule-group-panel-head">
-              <div>
-                <h3>规则明细</h3>
+              <div><h3>我的规则</h3><p>{group.rules.length} 条规则 · {enabledRules.length} 条启用</p></div>
+              <Button className={`rule-group-add-btn${hintAdd ? ' is-assist-pulse' : ''}`} type="primary" aria-label="新增规则" onClick={() => openWorkbench()} disabled={saving || checking}>＋ 新增</Button>
+            </div>
+            <div className="rule-workbench-list-tools">
+              <Input.Search aria-label="搜索规则" placeholder="搜索名称、教师或学科" allowClear value={keyword} onChange={e => setKeyword(e.target.value)} />
+              <div className="rule-group-tree" aria-label="规则分类">
+                <button className={familyFilter === 'all' ? 'is-active' : ''} aria-pressed={familyFilter === 'all'} type="button" onClick={() => setFamilyFilter('all')}>全部 <span>{group.rules.length}</span></button>
+                {familyCounts.map(item => <button key={item.family} className={familyFilter === item.family ? 'is-active' : ''} aria-pressed={familyFilter === item.family} type="button" onClick={() => setFamilyFilter(item.family)}>{RULE_FAMILY_LABELS[item.family].replace('规则', '')} <span>{item.count}</span></button>)}
               </div>
-              <Space size={8}>
-                <Tag color="blue">
-                  {visibleRules.length} / {group.rules.length}
-                </Tag>
-                <Button
-                  className={`rule-group-add-btn${hintAdd ? ' is-assist-pulse' : ''}`}
-                  size="small"
-                  type="primary"
-                  title="新增规则"
-                  aria-label="新增规则"
-                  onClick={() => openWorkbench()}
-                >
-                  +
-                </Button>
-              </Space>
+              <Select aria-label="筛选规则要求" value={priorityFilter} onChange={setPriorityFilter} options={[{ value: '全部', label: '全部要求' }, { value: 'hard', label: '必须满足' }, { value: 'soft', label: '尽量满足' }]} />
             </div>
             <div className="rule-group-list-scroll">
               {visibleRules.map((rule) => (
@@ -5056,73 +5078,35 @@ export default function RuleGroupWorkbench({
                   <div>
                     <span>{rule.id}</span>
                     <Tag color={rule.priority === "hard" ? "blue" : "gold"}>
-                      {rule.priority === "hard" ? "硬约束" : "软目标"}
+                      {rule.priority === "hard" ? "必须满足" : "尽量满足"}
                     </Tag>
                   </div>
                   <strong>{rule.title}</strong>
+                  <p>{buildRuleSummary(rule)}</p>
+                  <small>{rule.enabled ? '已启用' : '已停用'} · {rule.scheduleScope === 'admin' ? '行政班' : rule.scheduleScope === 'walk' ? '走班' : '全部课表'}</small>
                 </button>
               ))}
               {!visibleRules.length && (
-                <div className="rule-group-empty">没有匹配的规则明细</div>
+                <div className="rule-group-empty"><strong>{group.rules.length ? '没有找到匹配规则' : '还没有规则'}</strong><p>{group.rules.length ? '换个关键词，或查看全部分类。' : '按需添加排课要求。'}</p><Button onClick={() => { setKeyword(''); setFamilyFilter('all'); setPriorityFilter('全部'); if (!group.rules.length) openWorkbench(); }}>{group.rules.length ? '清除筛选' : '浏览规则库'}</Button></div>
               )}
             </div>
           </section>
           <section className="rule-group-editor">
+            {group.rules.length || isNew ? <>
             <div className="rule-group-panel-head">
               <div>
                 <h3>{isNew ? "新增规则" : "编辑规则"}</h3>
-                <p>修改后保存。</p>
+                <p>{dirty ? '有未保存的修改' : '按对象、时间和要求配置，保存后生效。'}</p>
               </div>
-              <Tag>{draft.id === "R04" ? "R04" : draft.id}</Tag>
+              <Space><Button size="small" disabled={dirty || saving || checking} onClick={() => { setDraft({ ...draft, id: nextRuleId(), title: `${draft.title}（副本）` }); setIsNew(true); setDirty(true); setSelectedId(''); }}>复制规则</Button><Tag>{draft.id}</Tag></Space>
             </div>
-            <div className="rule-group-form">
-              {draft.id === "R04" && (
+            <fieldset className="rule-workbench-edit-fields" disabled={saving || checking}><div className="rule-group-form">
+              {(draft.id === "R04" && draftCode === "teacher_daily_limit") && (
                 <div className="rule-group-form-wide rule-group-plain-explain">
-                  <strong>这条规则在说什么</strong>
-                  <p>
-                    核心是工作日
-                    <b>
-                      {formatTeacherDailyLimitQuantity(
-                        teacherDailyLimitCap(draft),
-                      )}
-                    </b>
-                    ；同时附带白天 <b>第 1～7 节中间不能空节</b>
-                    。节数在下方「排课目标」里改。
-                  </p>
-                  <p>
-                    <b>学科模式</b>
-                    ：勾选学科 → 覆盖这些学科的全部任课老师（建议不要勾体育）。
-                    <br />
-                    <b>教师模式</b>
-                    ：直接勾老师，或选「多班教师」→ 只约束名单里的人。
-                  </p>
-                  <p>
-                    在「选模式」里切换即可。页面只显示一条；保存时会拆成「每日上限 + 不空节」两条算法规则。
-                  </p>
+                  <p>每天最多 <b>{formatTeacherDailyLimitQuantity(teacherDailyLimitCap(draft))}</b>；选学科会约束其任课老师，选教师则只约束名单。白天不空节可单独勾选。</p>
                 </div>
               )}
-              <div className="rule-group-form-wide rule-group-template-info">
-                <span className="rule-group-field-label">规则类型</span>
-                <Tag color="blue">
-                  {draft.id === "R04"
-                    ? draft.scope === "教师"
-                      ? "教师模式 · 课节上限"
-                      : "学科模式 · 课节上限"
-                    : draftCode === "class_gap_free" && draft.trailingEmpty ? "行政课连续" : draftTemplate?.label || "自定义规则"}
-                </Tag>
-                <small>
-                  {showSlotPattern
-                    ? "选学科即可。课位与上下午组合由模板固定，页面只展示示意。"
-                    : draft.id === "R04"
-                      ? draft.scope === "教师"
-                        ? "按教师点名限制每天最多节数（并附带白天不空节）。可改回「学科」批量覆盖。"
-                        : "按学科覆盖任课老师：每天最多 N 节，并附带白天不空节。可改成「教师」点名。"
-                      : draftCode === "class_gap_free" && draft.trailingEmpty
-                        ? "所选节次依次排课，空节只留末尾；未选节次不参与。"
-                        : draftTemplate?.description ||
-                        "未绑定算法的规则不会参与自动排课。"}
-                </small>
-              </div>
+              <div id="rule-step-target" className="rule-workbench-section-title rule-group-form-wide"><b>1</b><div><strong>这条规则约束谁？</strong><small>选择适用课表和对象。</small></div></div>
               <label>
                 <span className="rule-group-field-label">
                   规则名称
@@ -5139,7 +5123,7 @@ export default function RuleGroupWorkbench({
                 <span className="rule-group-field-label">生效课表</span>
                 <Select
                   aria-label="生效课表"
-                    disabled={showStudentGaps}
+                    disabled={showStudentGaps || saving || checking}
                   value={draft.scheduleScope || "all"}
                   onChange={(value: "all" | "admin" | "walk") => updateDraft("scheduleScope", value)}
                   options={[
@@ -5152,24 +5136,10 @@ export default function RuleGroupWorkbench({
               {!showSlotPattern && (
               <label>
                 <span className="rule-group-field-label">
-                  规则类别
-                  <Tooltip title="由规则模板决定，不可手改">
-                    <span className="rule-group-help">?</span>
-                  </Tooltip>
-                </span>
-                <ReadonlyValue
-                  value={RULE_FAMILY_LABELS[draftFamily]}
-                  empty="未设置类别"
-                />
-              </label>
-              )}
-              {!showSlotPattern && (
-              <label>
-                <span className="rule-group-field-label">
-                  {draft.id === "R04" ? "选模式" : "作用对象"}
+                  {(draft.id === "R04" && draftCode === "teacher_daily_limit") ? "选模式" : "作用对象"}
                   <Tooltip
                     title={
-                      draft.id === "R04"
+                      (draft.id === "R04" && draftCode === "teacher_daily_limit")
                         ? "学科=按学科覆盖任课老师；教师=直接点名老师。两种模式约束内容相同。"
                         : "规则类别会限制可选的作用对象，避免规则与对象类型不匹配"
                     }
@@ -5184,9 +5154,9 @@ export default function RuleGroupWorkbench({
                     (value) => ({
                       value,
                       label:
-                        draft.id === "R04" && value === "学科"
+                        (draft.id === "R04" && draftCode === "teacher_daily_limit") && value === "学科"
                           ? "学科模式"
-                          : draft.id === "R04" && value === "教师"
+                          : (draft.id === "R04" && draftCode === "teacher_daily_limit") && value === "教师"
                             ? "教师模式"
                             : value,
                     }),
@@ -5202,7 +5172,7 @@ export default function RuleGroupWorkbench({
               ) && (
               <label>
                 <span className="rule-group-field-label">
-                  {draft.id === "R04"
+                  {(draft.id === "R04" && draftCode === "teacher_daily_limit")
                     ? draftScope === "教师"
                       ? "选择教师"
                       : "选择学科"
@@ -5210,6 +5180,7 @@ export default function RuleGroupWorkbench({
                         draftCode === "teacher_period_minimum"
                       ? "选择教师"
                       : draftCode === "subject_allowed_slots" ||
+                          draftCode === "subject_prefer_early_periods" ||
                           draftCode === "subject_consecutive" ||
                           draftCode === "teacher_consecutive" ||
                           draftCode === "class_slot_pattern" ||
@@ -5222,9 +5193,9 @@ export default function RuleGroupWorkbench({
                           : "对象名称"}
                   <Tooltip
                     title={
-                      draft.id === "R04" && draft.scope === "学科"
+                      (draft.id === "R04" && draftCode === "teacher_daily_limit") && draft.scope === "学科"
                         ? "学科模式：上限/无空节作用于这些学科的全部任课教师；不勾体育即可放宽体育老师"
-                        : draft.id === "R04" && draft.scope === "教师"
+                        : (draft.id === "R04" && draftCode === "teacher_daily_limit") && draft.scope === "教师"
                           ? "教师模式：只约束你勾选的老师；可选「多班教师」一键覆盖教多个班的老师"
                           : draftCode === "teacher_period_minimum"
                             ? "可多选教师；也可选「多班教师」覆盖教多个班的老师。"
@@ -5234,8 +5205,11 @@ export default function RuleGroupWorkbench({
                                 ? "可多选教师；每位教师各自要求每周至少 M 天连堂。"
                               : draftCode === "class_slot_pattern"
                                 ? "可多选；保存时每个学科拆成一条课位组合规则。"
-                                : draftCode === "subject_allowed_slots"
-                                ? "可多选学科。这些学科只能落在下方勾选的星期和节次。"
+                                : draftCode === "subject_allowed_slots" ||
+                                    draftCode === "subject_prefer_early_periods"
+                                ? showPreferEarly
+                                  ? "可多选学科；偏好节次和例外数分别对每个科目生效。"
+                                  : "可多选学科。这些学科只能落在下方勾选的星期和节次。"
                                 : draftCode === "slot_forbidden"
                                   ? "可多选。学科禁排只挡这些学科；教师禁排只挡这些老师；班级禁排让该班对应课位空着。"
                                   : "从已配置的学科、教师、班级或具体课位中选择"
@@ -5387,7 +5361,9 @@ export default function RuleGroupWorkbench({
                     <span className="rule-group-help">?</span>
                   </Tooltip>
                 </span>
-                <ReadonlyValue value={draftCode === "class_gap_free"
+                  <ReadonlyValue value={draftCode === "subject_allowed_slots"
+                    ? "仅允许安排在所选课位"
+                    : draftCode === "class_gap_free"
                   ? (draft.trailingEmpty ? "顺序连续，末尾可空" : "第1–7节排满")
                   : draft.operator} empty="未设置动作" />
               </label>
@@ -5415,6 +5391,9 @@ export default function RuleGroupWorkbench({
                   />
                 </label>
               )}
+              <div id="rule-step-time" className="rule-workbench-section-title rule-group-form-wide"><b>2</b><div><strong>什么时候，怎样安排？</strong><small>{draftCode === "subject_prefer_early_periods" ? "选节次，并设置允许的例外数。" : draftCode === "subject_allowed_slots" ? "所选星期 × 节次共同生效。" : guide?.tip || "所选星期与节次共同生效。"}</small></div></div>
+              {draftCode === 'teacher_forbidden_slots' && <div className="rule-group-form-wide rule-workbench-time-mode"><span>时间选择方式</span><Button type={!showSpecificSlots ? 'primary' : 'default'} onClick={() => updateDraft('specificSlots', undefined)}>按星期和节次</Button><Button type={showSpecificSlots ? 'primary' : 'default'} onClick={() => updateDraft('specificSlots', [{ weekday: weekdayCodes(draft.weekday)[0] || 1, periods: periodCodes(draft.period) }])}>按具体课位</Button></div>}
+              {!showSpecificSlots && showWeekdayFields && draft.scope !== '课位' && <div className="rule-group-form-wide rule-workbench-presets"><span>快捷选择</span><Button size="small" onClick={() => updateDraft('weekday', configuredWeekdayOptions.filter(d => WEEKDAY_ENUMS.slice(0, 5).includes(d)).join('、'))}>周一至周五</Button><Button size="small" onClick={() => updateDraft('weekday', configuredWeekdayOptions.join('、'))}>全部上课日</Button><small>所选星期 × 所选节次，共同生效</small></div>}
               {showSpecificSlots ? (
                 <div className="rule-group-form-wide">
                   <SpecificSlotEditor
@@ -5462,6 +5441,7 @@ export default function RuleGroupWorkbench({
                             value,
                             label: value,
                           }))}
+                          aria-label="生效星期"
                           placeholder="请选择星期（可多选）"
                         />
                       )}
@@ -5474,7 +5454,7 @@ export default function RuleGroupWorkbench({
                         <Tooltip
                           title={
                             showPreferEarly
-                              ? "主科优先排进这些节次；下面可设每个班每门课允许多少节排在这些节次之外"
+                              ? "所选学科尽量安排在这些节次；下面可设每个班每门课允许多少节排在这些节次之外"
                               : draft.scope === "课位"
                               ? "课位规则的节次由模板固定，不可手改"
                               : "选择已配置的具体课位节次，可多选；课位规则会自动带出"
@@ -5501,6 +5481,7 @@ export default function RuleGroupWorkbench({
                             value,
                             label: value,
                           }))}
+                          aria-label="生效节次"
                           placeholder={
                             showPreferEarly
                               ? "请选择尽量安排的节次"
@@ -5574,6 +5555,8 @@ export default function RuleGroupWorkbench({
                 </span>
                 <Select
                   value={draft.cycle}
+                  disabled={draft.kind === '配对'}
+                  aria-label="生效周期"
                   onChange={(value) => updateDraft("cycle", value)}
                   options={(draft.kind === "配对"
                     ? ["每周", "单周", "双周", "单周 / 双周"]
@@ -5597,8 +5580,7 @@ export default function RuleGroupWorkbench({
                       max={20}
                       value={
                         draft.maxOutsidePreferred ??
-                        Number(draft.quantitySpec?.amount) ??
-                        2
+                        Number(draft.quantitySpec?.amount ?? 2)
                       }
                       onChange={(value) => {
                         const amount = Math.max(0, Number(value) || 0);
@@ -5780,8 +5762,11 @@ export default function RuleGroupWorkbench({
                   />
                 </div>
               )}
-              {!showSlotPattern && (
-              <div className="rule-group-form-wide rule-group-generated-summary">
+              {draftCode === 'teacher_daily_limit' && <div className="rule-group-form-wide rule-workbench-extra-requirement">
+                <Checkbox checked={Boolean(draft.keepTeacherContinuous)} onChange={e => updateDraft('keepTeacherContinuous', e.target.checked)}>同时要求白天第 1～7 节中间不空节</Checkbox>
+                <small>每日上限控制负荷，不空节控制连续性；可分别设置。旧规则已开启的要求会保留。</small>
+              </div>}
+              {!showSlotPattern && <div className="rule-group-form-wide rule-group-generated-summary">
                 {draft.rule_code === "class_gap_free" && <Checkbox checked={Boolean(draft.trailingEmpty)}
                   onChange={(event) => updateDraft("trailingEmpty", event.target.checked)}>
                   所选节次连续，末尾可空
@@ -5790,32 +5775,32 @@ export default function RuleGroupWorkbench({
                   onChange={(event) => updateDraft("fillSelfStudy", event.target.checked)}>
                   空位补自习（不计学科课时）
                 </Checkbox>}
-                <span className="rule-group-field-label">
-                  规则摘要
-                  <Tooltip title="根据规则类别、对象、动作和课位字段自动生成，排课算法使用结构化字段而不是这段文字">
-                    <span className="rule-group-help">?</span>
-                  </Tooltip>
-                </span>
-                <p>{buildRuleSummary(draft)}</p>
+              </div>}
+              {!showStudentGaps && !showSlotPattern && <details className="rule-workbench-impact-details">
+                <summary>查看课位影响</summary>
+                <RuleImpactPreview rule={draft} gridConfig={gridConfig} />
+              </details>}
+              <div className="rule-group-form-wide rule-workbench-inline-check" aria-live="polite">
+                <RuleCheckReport issues={checkIssues} links={checkLinks} onSelect={selectCheckRule} />
+                {serverCheck?.key === checkKey && <p>{serverCheck.message}</p>}
+                <Button loading={checking} disabled={saving} onClick={checkAllRules}>检查全部规则</Button>
               </div>
-              )}
-              {!showStudentGaps && !showSlotPattern && <RuleImpactPreview rule={draft} gridConfig={gridConfig} />}
             </div>
-            <div className="rule-group-priority">
-              <span>优先级</span>
+            </fieldset><div id="rule-step-review" className="rule-group-priority">
+              <span>满足程度</span>
               <Button
                 type={draft.priority === "hard" ? "primary" : "default"}
-                  disabled={showStudentGaps}
+                  disabled={showStudentGaps || saving || checking}
                 onClick={() => updateDraft("priority", "hard")}
               >
-                硬约束 · 必须满足
+                必须满足
               </Button>
               <Button
                 type={draft.priority === "soft" ? "primary" : "default"}
-                disabled={showStudentContiguous}
+                disabled={showStudentContiguous || saving || checking}
                 onClick={() => updateDraft("priority", "soft")}
               >
-                软目标 · 尽量满足
+                尽量满足
               </Button>
               <Tag
                 className={`rule-group-enabled-tag${draft.enabled ? " is-on" : ""}`}
@@ -5826,6 +5811,7 @@ export default function RuleGroupWorkbench({
               <Button
                 size="small"
                 type={draft.enabled ? "default" : "primary"}
+                disabled={saving || checking}
                 onClick={() => {
                   const next = !draft.enabled;
                   updateDraft("enabled", next);
@@ -5838,26 +5824,26 @@ export default function RuleGroupWorkbench({
               >
                 {draft.enabled ? "停用" : "启用"}
               </Button>
-              {dirty ? (
-                <small className="rule-group-save-hint">未保存，关闭会丢失</small>
-              ) : null}
+              <small className="rule-workbench-priority-help">{draft.priority === 'hard' ? '硬约束：无法满足时，课表可能无法生成。' : '软目标：先保证能排，再尽量满足偏好。'}</small>
             </div>
+            {saveError && <div className="rule-workbench-save-error" role="alert">{saveError}</div>}
             <div className="rule-group-editor-actions">
-              <Button danger onClick={deleteRule}>
+              <Button danger disabled={saving || checking} onClick={deleteRule}>
                 删除明细
               </Button>
               <Space>
-                <Button onClick={() => setOpen(false)}>取消</Button>
-                <Button type="primary" onClick={saveDraft}>
+                <Button disabled={saving || checking || !dirty} onClick={() => { const original = group.rules.find(r => r.id === selectedId) || group.rules[0]; setDraft(original ? { ...original } : blankRule('R01')); setSelectedId(original?.id || ''); setIsNew(false); setDirty(false); setSaveError(''); }}>撤销修改</Button>
+                <Button aria-label="保存规则" type="primary" loading={saving} disabled={checking || !dirty} onClick={saveDraft}>
                   保存规则
                 </Button>
               </Space>
             </div>
+            </> : <div className="rule-workbench-welcome"><span className="rule-workbench-welcome-icon">＋</span><h3>把排课要求，变成清楚的规则</h3><p>先选一个场景，再选择对象和时间。每一步都会说明规则的实际影响。</p><Button type="primary" onClick={() => openWorkbench()}>从规则库添加</Button><small>教师、班级、教室同时冲突等基础约束由排课系统处理。</small></div>}
           </section>
           <aside className="rule-group-audit">
             <div className="rule-group-sidebar-head">
-              <span>PRECHECK</span>
-              <strong>排课前审计</strong>
+              <span>配置检查</span>
+              <strong>{dirty ? '包含当前修改' : '已保存规则'}</strong>
             </div>
             <div className="rule-group-audit-stats">
               <div>
@@ -5873,13 +5859,22 @@ export default function RuleGroupWorkbench({
                 <strong>{softCount}</strong>
               </div>
               <div>
-                <span>待解析</span>
+                <span>需完善</span>
                 <strong>{unresolvedCount}</strong>
               </div>
             </div>
-            <p className="rule-group-audit-process-empty" style={{ marginTop: 14 }}>
-              生成失败时的求解过程与优化建议在独立的「排课诊断」侧栏中查看，不会占用本工作台。
-            </p>
+            {(group.rules.length > 0 || isNew) && <div className="rule-workbench-review">
+              <strong>当前规则</strong><p>{buildRuleSummary(draft)}</p>
+              <small>{draft.enabled ? '保存后生效' : '已停用'} · 现有课表不变</small>
+            </div>}
+            <div className="rule-workbench-checklist" aria-live="polite">
+              <RuleCheckReport issues={checkIssues} links={checkLinks} onSelect={selectCheckRule} />
+              {currentErrors.length > 0 && <small>请完善当前规则后保存。停用规则可保留配置。</small>}
+              {!gridConfig?.configured && <p>请先保存本年级的课位结构，才能检查可用课位。</p>}
+              {serverCheck?.key === checkKey && <p className={serverCheck.ok ? 'is-check-ok' : 'is-check-error'}>{serverCheck.message}</p>}
+              <Button block loading={checking} disabled={saving || (!group.rules.length && !isNew)} onClick={checkAllRules}>检查全部规则</Button>
+              <details><summary>检查范围</summary><small>检查重复和已知冲突；走班、课时容量及教室资源在生成时检查。</small></details>
+            </div>
             <div className="rule-group-audit-note">
               <strong>规则组范围</strong>
               <span>

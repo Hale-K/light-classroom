@@ -19,11 +19,12 @@ from app.ai.runs.progress import Progress, TOOL_LABELS, report_progress
 from app.ai.runs.events import TraceCallback
 from app.ai.tools.markdown import hour_table_error
 from app.ai.tools.answer_layout import normalize_answer_markdown, answer_layout_error
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
 MAX_STEPS = 4
-_TOOL_TEXT_CAP = 4000
+_TOOL_TEXT_CAP = settings.assistant_tool_result_chars
 _PAGED_EVIDENCE_TOOLS = frozenset({
     'lookup_student_choices', 'lookup_teaching_assignments',
     'lookup_timetable', 'lookup_schedule_conflicts',
@@ -71,6 +72,10 @@ class ReactLoop:
     turn_timeout_seconds: float = 600
     trace_iterations: bool = False
     final_guard: Callable[[str], Awaitable[str | None]] | None = None
+    max_tool_calls: int = 40
+    max_tools_per_step: int = 8
+    max_request_tokens: int = settings.assistant_max_request_tokens
+    max_total_input_tokens: int = settings.assistant_max_total_input_tokens
 
     async def run(self) -> AgentOutcome:
         """执行一个 Turn；每个 Step 开始前先消费 steer/inject。"""
@@ -148,6 +153,7 @@ async def _final_text(loop: ReactLoop, call, convo: list[dict], outcome: ChatOut
 async def _run_react_loop(loop: ReactLoop) -> AgentOutcome:
     convo = list(loop.messages)
     steps: list[AgentStep] = []
+    total_input_tokens = 0
     event_loop = asyncio.get_running_loop()
     turn_deadline = event_loop.time() + min(600, max(.001, loop.turn_timeout_seconds))
     for index in range(loop.max_steps):
@@ -159,6 +165,12 @@ async def _run_react_loop(loop: ReactLoop) -> AgentOutcome:
         call_impl = loop.caller or _default_caller
 
         async def call(**request):
+            nonlocal total_input_tokens
+            estimate = int(len(json.dumps({'messages': request.get('messages'),
+                'tools': request.get('tools')}, ensure_ascii=False)) * 0.75)
+            if estimate > loop.max_request_tokens or total_input_tokens + estimate > loop.max_total_input_tokens:
+                raise ChatError('本轮上下文已达到预算上限，已停止继续查询；请缩小范围或拆分问题。', 'budget')
+            total_input_tokens += estimate
             # All HTTP retries and fallback endpoints share what remains of this
             # cycle. Output repair also uses this same call boundary.
             request['timeout'] = min(request['timeout'], max(.001, cycle_deadline - event_loop.time()))
@@ -218,6 +230,8 @@ async def _run_iteration(loop: ReactLoop, call, convo: list[dict], steps: list[A
                 return None
         return await _finish_answer(loop, call, convo, steps, outcome, final=final)
     convo.append(_assistant_msg(outcome))
+    if len(outcome.tool_calls) > loop.max_tools_per_step or len(steps) + len(outcome.tool_calls) > loop.max_tool_calls:
+        raise ChatError('本轮工具调用已达到预算上限，已停止执行，请缩小查询范围。', 'budget')
     allowed_names = {str(item.get("function", {}).get("name")) for item in loop.tools}
     for tc in outcome.tool_calls:
         if tc.name not in allowed_names:
@@ -247,7 +261,7 @@ async def _run_iteration(loop: ReactLoop, call, convo: list[dict], steps: list[A
                     await loop.on_trace('planning.updated', {'plan': plan})
         await report_progress(loop.on_progress, "observed", "已收到工具返回，正在核对结果")
         steps.append(AgentStep(tool=tc.name, detail="回答格式已处理" if tc.name == "format_markdown" else _brief(result)))
-        model_result = result if tc.name in _PAGED_EVIDENCE_TOOLS else result[:_TOOL_TEXT_CAP]
+        model_result = result if tc.name in _PAGED_EVIDENCE_TOOLS else _bounded_tool_result(result)
         convo.append({"role": "tool", "tool_call_id": tc.id, "content": model_result})
         if tc.name == "format_markdown" and len(outcome.tool_calls) == 1:
             try:
@@ -265,6 +279,40 @@ async def _run_iteration(loop: ReactLoop, call, convo: list[dict], steps: list[A
         if loop.stop_when and loop.stop_when():
             return AgentOutcome(text="", steps=steps)
     return None
+
+
+def _bounded_tool_result(result: str) -> str:
+    """Keep valid JSON and make omissions explicit instead of slicing bytes."""
+    if len(result) <= _TOOL_TEXT_CAP:
+        return result
+    try:
+        payload = json.loads(result)
+    except ValueError:
+        return result[:_TOOL_TEXT_CAP - 40] + '\n[结果已截断，不是完整列表或完整证据]'
+    omissions = []
+
+    def compact(value, path=''):
+        if isinstance(value, list):
+            if len(value) > 10:
+                omissions.append({'path': path, 'total': len(value), 'returned': 10})
+            return [compact(item, f'{path}[{index}]') for index, item in enumerate(value[:10])]
+        if isinstance(value, dict):
+            return {key: compact(item, f'{path}.{key}') for key, item in value.items()}
+        if isinstance(value, str) and len(value) > 600:
+            omissions.append({'path': path, 'original_chars': len(value)})
+            return value[:600] + '[字段已截断]'
+        return value
+
+    payload = compact(payload)
+    if not isinstance(payload, dict):
+        raise ChatError('工具返回过大且缺少结构化范围，请缩小查询范围。', 'budget')
+    payload['response_truncated'] = True
+    payload['omissions'] = omissions[:12]
+    payload['completeness_warning'] = '明细已精简；只能使用明确保留的统计字段，不得把明细数量当总数或声称核对了全部明细。请缩小范围取完整结果。'
+    serialized = json.dumps(payload, ensure_ascii=False)
+    if len(serialized) > _TOOL_TEXT_CAP:
+        raise ChatError('工具结果超过本轮响应预算，请缩小范围后查询。', 'budget')
+    return serialized
 
 
 async def _finish_answer(loop: ReactLoop, call, convo: list[dict], steps: list[AgentStep],

@@ -62,6 +62,8 @@ export const schedulingApi = {
     unwrap<{ group: SchedulingRuleGroup; compiler: Array<{ rule_id: string; code: string; status: 'ready' | 'unresolved'; reason?: string | null }> }>(
       http.put('/scheduling/rule-group', data),
     ),
+  validateRuleGroup: (group: SchedulingRuleGroup) =>
+    unwrap<SchedulingRuleValidationResult>(http.post('/scheduling/rule-group/validate', { group, use_current_schedule: false })),
   applyRuleSuggestion: (data: {
     academic_year: string
     term: string

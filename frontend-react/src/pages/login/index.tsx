@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { useEffect, useState } from 'react'
 import { App } from 'antd'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -5,6 +6,7 @@ import { selectDisplayName, useAuthStore } from '@/store/auth'
 import LoginExperience from './LoginExperience'
 
 export default function Login() {
+  useLocale()
   const { message } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
@@ -24,10 +26,10 @@ export default function Login() {
     try {
       await login(values.phone, values.password)
       const displayName = selectDisplayName(useAuthStore.getState())
-      message.success(`欢迎回来，${displayName || '老师'}`)
+      message.success(t("欢迎回来，{{p0}}", { p0: displayName || t("老师") }))
       navigate(from || '/dashboard', { replace: true })
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '登录失败，请重试')
+      message.error(error instanceof Error ? error.message : t("登录失败，请重试"))
     } finally {
       setSubmitting(false)
     }

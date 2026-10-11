@@ -4,10 +4,11 @@ from __future__ import annotations
 import html
 import json
 import re
+import math
 from decimal import Decimal
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, model_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, ValidationError, model_validator
 
 
 def _text(value):
@@ -19,6 +20,17 @@ def _text(value):
 
 
 Text = Annotated[str, BeforeValidator(_text), Field(min_length=1, max_length=2000)]
+
+
+def _cell(value):
+    # Models commonly emit JSON numbers in numerical tables. Preserve them
+    # verbatim as display quantities, but reject booleans and nonfinite values.
+    if type(value) is int or (type(value) is float and math.isfinite(value)):
+        return str(value)
+    return value
+
+
+Cell = Annotated[Text, BeforeValidator(_cell)]
 
 
 def _prose(value):
@@ -50,7 +62,7 @@ class Table(BaseModel):
     type: Literal["table"]
     title: Text | None = None
     columns: list[Text] = Field(min_length=1, max_length=5)
-    rows: list[list[Text]] = Field(min_length=1, max_length=30)
+    rows: list[list[Cell]] = Field(min_length=1, max_length=30)
 
     @model_validator(mode="after")
     def check_width(self):
@@ -63,7 +75,7 @@ class MarkdownAnswer(BaseModel):
     model_config = ConfigDict(extra="forbid")
     summary: Prose
     sections: list[Annotated[Paragraph | Items | Table, Field(discriminator="type")]] = Field(
-        default_factory=list, max_length=8)
+        default_factory=list, max_length=16)
 
 
 FORMAT_MARKDOWN_TOOL = {
@@ -128,7 +140,7 @@ def hour_tables(markdown: str):
 
 def hour_columns(headers: list[str], *, proposed_only=False) -> list[int]:
     return [index for index, label in enumerate(headers[1:], 1)
-        if re.search(r'方案|建议|课时|节数|周课|周节|节/周|课量|单周|双周', label)
+          if re.search(r'方案|建议|课时|节数|周课|周节|节/周|课量|单周|双周|周六|周一.*周五', label)
         and not (proposed_only and re.search(r'当前|现状|原有|已配', label))]
 
 
@@ -187,6 +199,11 @@ def format_markdown(arguments: str) -> str:
         if len(arguments) > 30000:
             raise ValueError("输入过长")
         markdown = render_markdown(MarkdownAnswer.model_validate_json(arguments))
+    except ValidationError as exc:
+        fields = '; '.join('.'.join(map(str, error['loc'])) + ': ' + error['type']
+            for error in exc.errors(include_input=False)[:4])
+        return json.dumps({'ok': False, 'code': 'INVALID_ARGUMENT', 'message':
+            '整理内容块格式有误：' + fields + '。table最多5列、每行与表头一致；正文使用paragraph，不放Markdown表格。'}, ensure_ascii=False)
     except ValueError as exc:
         return json.dumps({"ok": False, "code": "INVALID_ARGUMENT", "message":
             str(exc) if str(exc).startswith('课时表') else

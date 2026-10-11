@@ -1,18 +1,21 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { App, Button, DatePicker, Form, Input, Modal, Select, Spin, Switch, Table, Tag } from 'antd'
 import dayjs, { type Dayjs } from 'dayjs'
+import { useSearchParams } from 'react-router-dom'
 import { examApi, examSchedulingApi } from '@/api'
 import type { Exam, ExamInvigilatorEntry, ExamPlan } from '@/types'
 import PageHeader from '@/components/PageHeader'
 import ExamModuleNav from '@/pages/exam-scheduling/ModuleNav'
+import TeacherUnavailableTimes from '@/pages/exam-scheduling/TeacherUnavailableTimes'
 import '@/pages/exam-scheduling/index.css'
 
 const STATE_LABEL: Record<ExamInvigilatorEntry['state'], string> = { available: '可监考', assigned: '已分配', leave: '休假', excluded: '本次排除', disabled: '账号停用', conflict: '时间冲突' }
 const STATE_COLOR: Record<ExamInvigilatorEntry['state'], string> = { available: 'success', assigned: 'processing', leave: 'warning', excluded: 'default', disabled: 'error', conflict: 'error' }
-interface EditorValues { enabled: boolean; leave?: [Dayjs, Dayjs]; unavailable_slots?: string[]; note?: string }
+interface EditorValues { enabled: boolean; leave?: [Dayjs, Dayjs]; unavailable_slots?: string[]; weekly_slots?: string[]; note?: string }
 
 export default function ExamInvigilatorsView() {
   const { message } = App.useApp()
+  const [params, setParams] = useSearchParams()
   const [form] = Form.useForm<EditorValues>()
   const [loading, setLoading] = useState(false)
   const [exams, setExams] = useState<Exam[]>([])
@@ -22,21 +25,35 @@ export default function ExamInvigilatorsView() {
   const [keyword, setKeyword] = useState('')
   const [stateFilter, setStateFilter] = useState<string>()
   const [editing, setEditing] = useState<ExamInvigilatorEntry>()
+  const loadRequest = useRef(0)
 
   const load = async (id: number) => {
+    setParams({ examId: String(id) }, { replace: true })
+    const requestId = ++loadRequest.current
     setLoading(true)
-    try { const [rows, planData] = await Promise.all([examSchedulingApi.invigilators(id), examSchedulingApi.plan(id)]); setTeachers(rows); setPlan(planData) }
-    catch (error) { message.error(error instanceof Error ? error.message : '监考教师加载失败') }
-    finally { setLoading(false) }
+    try {
+      const [rows, planData, preview] = await Promise.all([examSchedulingApi.invigilators(id), examSchedulingApi.plan(id), examSchedulingApi.preview(id)])
+      if (!planData.schedules.length) planData.schedules = preview
+      if (requestId === loadRequest.current) { setTeachers(rows); setPlan(planData) }
+    } catch (error) {
+      if (requestId === loadRequest.current) message.error(error instanceof Error ? error.message : '监考教师加载失败')
+    } finally {
+      if (requestId === loadRequest.current) setLoading(false)
+    }
   }
-  useEffect(() => { examApi.list().then((rows) => { setExams(rows); if (rows[0]) { setExamId(rows[0].id); void load(rows[0].id) } }) }, [])
+  useEffect(() => {
+    let active = true
+    examApi.list().then((rows) => { if (active) { setExams(rows); const initial = rows.find(r => r.id === Number(params.get('examId'))) || rows[0]; if (initial) { setExamId(initial.id); void load(initial.id) } } })
+      .catch((error) => { if (active) message.error(error instanceof Error ? error.message : '考试列表加载失败') })
+    return () => { active = false; loadRequest.current += 1 }
+  }, [])
   const slots = useMemo(() => [...new Map((plan?.schedules || []).map((item) => [`${item.exam_date}#${item.session_index}`, { value: `${item.exam_date}#${item.session_index}`, label: `${item.exam_date} ${item.start_time}—${item.end_time}` }])).values()], [plan])
   const filtered = useMemo(() => teachers.filter((teacher) => (!keyword.trim() || teacher.teacher_name.toLowerCase().includes(keyword.trim().toLowerCase())) && (!stateFilter || teacher.state === stateFilter)), [keyword, stateFilter, teachers])
-  const open = (teacher: ExamInvigilatorEntry) => { setEditing(teacher); form.setFieldsValue({ enabled: teacher.enabled, leave: teacher.leave_start && teacher.leave_end ? [dayjs(teacher.leave_start), dayjs(teacher.leave_end)] : undefined, unavailable_slots: teacher.unavailable_slots, note: teacher.note || '' }) }
+  const open = (teacher: ExamInvigilatorEntry) => { setEditing(teacher); form.setFieldsValue({ enabled: teacher.enabled, leave: teacher.leave_start && teacher.leave_end ? [dayjs(teacher.leave_start), dayjs(teacher.leave_end)] : undefined, unavailable_slots: teacher.unavailable_slots.filter(item => !item.startsWith('weekly#')), weekly_slots: teacher.unavailable_slots.filter(item => item.startsWith('weekly#')), note: teacher.note || '' }) }
   const save = async () => {
     if (!examId || !editing) return
     const values = await form.validateFields(); setLoading(true)
-    try { await examSchedulingApi.saveInvigilator(examId, editing.teacher_id, { enabled: values.enabled, leave_start: values.leave?.[0].format('YYYY-MM-DD') || null, leave_end: values.leave?.[1].format('YYYY-MM-DD') || null, unavailable_slots: values.unavailable_slots || [], note: values.note || null }); setEditing(undefined); await load(examId); message.success('教师监考状态已保存') }
+    try { await examSchedulingApi.saveInvigilator(examId, editing.teacher_id, { enabled: values.enabled, leave_start: values.leave?.[0].format('YYYY-MM-DD') || null, leave_end: values.leave?.[1].format('YYYY-MM-DD') || null, unavailable_slots: [...(values.unavailable_slots || []), ...(values.weekly_slots || [])], note: values.note || null }); setEditing(undefined); await load(examId); message.success('教师监考状态已保存') }
     catch (error) { message.error(error instanceof Error ? error.message : '状态保存失败') }
     finally { setLoading(false) }
   }
@@ -58,6 +75,6 @@ export default function ExamInvigilatorsView() {
       <div className="es-filter-bar"><Input.Search allowClear value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="搜索教师姓名" /><Select allowClear value={stateFilter} onChange={setStateFilter} placeholder="全部状态" options={Object.entries(STATE_LABEL).map(([value, label]) => ({ value, label }))} /></div>
       <Table rowKey="teacher_id" columns={columns} dataSource={filtered} pagination={{ pageSize: 10, showSizeChanger: false, showTotal: (total) => `共 ${total} 名` }} />
     </section>
-    <Modal title={editing ? `设置 ${editing.teacher_name} 的监考状态` : '设置监考状态'} open={!!editing} onCancel={() => setEditing(undefined)} onOk={save} okText="保存" cancelText="取消" forceRender><Form form={form} layout="vertical"><Form.Item label="参与本次监考" name="enabled" valuePropName="checked"><Switch /></Form.Item><Form.Item label="休假日期" name="leave"><DatePicker.RangePicker /></Form.Item><Form.Item label="指定不可用场次" name="unavailable_slots"><Select mode="multiple" options={slots} placeholder="可多选" /></Form.Item><Form.Item label="备注" name="note"><Input.TextArea rows={3} maxLength={200} /></Form.Item></Form></Modal>
+    <Modal title={editing ? `设置 ${editing.teacher_name} 的监考状态` : '设置监考状态'} open={!!editing} onCancel={() => setEditing(undefined)} onOk={save} okText="保存" cancelText="取消" forceRender><Form form={form} layout="vertical"><Form.Item label="参与本次监考" name="enabled" valuePropName="checked"><Switch /></Form.Item><Form.Item label="休假日期" name="leave"><DatePicker.RangePicker /></Form.Item><Form.Item label="指定不可用场次" name="unavailable_slots"><Select mode="multiple" options={slots} placeholder="可多选" /></Form.Item><Form.Item label="每周不可监考时段" name="weekly_slots"><TeacherUnavailableTimes /></Form.Item><Form.Item label="备注" name="note"><Input.TextArea rows={3} maxLength={200} /></Form.Item></Form></Modal>
   </div></Spin>
 }

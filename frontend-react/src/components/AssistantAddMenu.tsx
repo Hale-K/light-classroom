@@ -1,15 +1,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import Icon from './Icon'
+import { useNavigate } from 'react-router-dom'
 
 type Props = { disabled: boolean; planMode: boolean; onPlanMode: () => void; onFiles: () => void; onFolder: () => void; onPage: () => void }
 
 export default function AssistantAddMenu({ disabled, planMode, onPlanMode, onFiles, onFolder, onPage }: Props) {
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const root = useRef<HTMLDivElement>(null)
   const trigger = useRef<HTMLButtonElement>(null)
   useEffect(() => {
     if (!open) return
-    root.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not(:disabled)')?.focus()
+    root.current?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')?.focus()
     const outside = (event: PointerEvent) => {
       if (!root.current?.contains(event.target as Node)) setOpen(false)
     }
@@ -23,8 +25,8 @@ export default function AssistantAddMenu({ disabled, planMode, onPlanMode, onFil
     if (event.key === 'Tab') { setOpen(false); return }
     if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
-    const items = Array.from(root.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]:not(:disabled)') ?? [])
-    const index = items.indexOf(document.activeElement as HTMLButtonElement)
+    const items = Array.from(root.current?.querySelectorAll<HTMLElement>('[role^="menuitem"]:not(:disabled)') ?? [])
+    const index = items.indexOf(document.activeElement as HTMLElement)
     const next = event.key === 'Home' ? 0 : event.key === 'End' ? items.length - 1 : (index + (event.key === 'ArrowUp' ? -1 : 1) + items.length) % items.length
     items[next]?.focus()
   }
@@ -35,6 +37,8 @@ export default function AssistantAddMenu({ disabled, planMode, onPlanMode, onFil
     </button>
     {open && <div className="assist-add-menu" role="menu" aria-label="添加">
       <span className="assist-add-label">添加资料</span>
+      <button role="menuitem" type="button" disabled={planMode} onClick={() => choose(() => navigate('/assistant-excel'))}><Icon name="file-text" size={18} /><span>Excel配置助手</span></button>
+      <a role="menuitem" href={`${import.meta.env.BASE_URL}templates/scheduling-configuration.xlsx`} download="轻课堂排课配置模板.xlsx" onClick={() => setOpen(false)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', color: 'inherit', textDecoration: 'none' }}><Icon name="file-text" size={18} /><span>下载排课配置模板</span></a>
       <button role="menuitem" type="button" onClick={() => choose(onFiles)}><Icon name="file-text" size={18} /><span>上传文件</span></button>
       <button role="menuitem" type="button" onClick={() => choose(onFolder)}><Icon name="book" size={18} /><span>选择文件夹</span></button>
       <button role="menuitem" type="button" onClick={() => choose(onPage)}><Icon name="dashboard" size={18} /><span>附加当前页面</span></button>

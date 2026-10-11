@@ -5,13 +5,31 @@ import type {
   ExamInvigilatorEntry,
   ExamPlan,
   ExamRoomEntry,
+  ExamRoomAssignment,
   ExamScheduleEntry,
   ExamVenuePlan,
   ExamSchedulingConfig,
+  ExamCheckReport,
+  AdmissionTicketPage,
+  ExamOverview,
 } from '@/types'
 import { http, unwrap } from './http'
 
 export const examSchedulingApi = {
+  overview: (id: number) => unwrap<ExamOverview>(http.get(`/exam-scheduling/plans/${id}/overview`)),
+  subjects: (id: number) => unwrap<Array<{ id: number; name: string; grade_ids: number[] }>>(http.get(`/exam-scheduling/exams/${id}/subjects`)),
+  checks: (id: number) => unwrap<ExamCheckReport>(http.get(`/exam-scheduling/plans/${id}/checks`)),
+  preview: (id: number) => unwrap<ExamScheduleEntry[]>(http.get(`/exam-scheduling/plans/${id}/preview`)),
+  preflight: (data: { exam_id: number; start_date: string; grade_ids: number[]; sessions: ExamSchedulingConfig['sessions']; excluded_dates: string[]; invigilators_per_room: number }) =>
+    unwrap<{ ok: boolean; student_count: number; room_count: number; session_count: number }>(http.post('/exam-scheduling/plans/check', data)),
+  adjustRoom: (id: number, room: number, data: { room_name?: string; invigilator_ids?: number[] }) =>
+    unwrap<ExamRoomAssignment>(http.patch(`/exam-scheduling/plans/${id}/rooms/${room}`, data)),
+  swapInvigilators: (id: number, data: { first_room_id: number; first_teacher_id: number; second_room_id: number; second_teacher_id: number }) =>
+    unwrap<{ swapped: boolean }>(http.post(`/exam-scheduling/plans/${id}/invigilators/swap`, data)),
+  adjustSeat: (id: number, assignment: number, data: { room_assignment_id: number; seat_no: number; swap?: boolean }) =>
+    unwrap<ExamCandidateAssignment>(http.patch(`/exam-scheduling/plans/${id}/candidates/${assignment}`, data)),
+  tickets: (id: number, params: { grade_id?: number; class_id?: number; keyword?: string; page?: number; page_size?: number } = {}) =>
+    unwrap<AdmissionTicketPage>(http.get(`/exam-scheduling/plans/${id}/admission-tickets`, { params })),
   get: (examId: number) => unwrap<ExamScheduleEntry[]>(http.get(`/exam-scheduling/${examId}`)),
   generate: (data: {
     exam_id: number
@@ -27,6 +45,12 @@ export const examSchedulingApi = {
       items: ExamRoomEntry[]
       pagination: { page: number; page_size: number; total: number; total_pages: number }
     }>(http.get('/exam-scheduling/rooms', { params })),
+  allRooms: async () => {
+    const first = await examSchedulingApi.rooms({ page: 1, page_size: 300 })
+    const pages = await Promise.all(Array.from({ length: Math.max(0, first.pagination.total_pages - 1) },
+      (_, index) => examSchedulingApi.rooms({ page: index + 2, page_size: 300 })))
+    return [...first.items, ...pages.flatMap(page => page.items)]
+  },
   venues: (examId: number) =>
     unwrap<ExamVenuePlan>(http.get(`/exam-scheduling/exams/${examId}/venues`)),
   saveVenues: (examId: number, rooms: ExamVenuePlan['rooms']) =>

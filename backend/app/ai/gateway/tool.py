@@ -15,6 +15,7 @@ from app.ai.tools.school import SCHOOL_TOOLS, _term, execute_school_tool
 from app.ai.tools.school import evidence
 from app.ai.tools.school.common import _tool_response
 from app.ai.tools.markdown import FORMAT_MARKDOWN_TOOL, format_markdown, hour_columns, hour_tables, hour_value
+from app.ai.tools.clarification import CLARIFICATION_TOOL, Clarification
 from app.ai.tools.task_plan import TASK_PLAN_TOOLS, execute_task_plan
 
 
@@ -45,6 +46,15 @@ def _explicit_fixed_hours(query: str) -> dict[str, float]:
     return {subject: next(iter(values)) for subject, values in seen.items() if len(values) == 1}
 
 
+def _staffing_demand(query: str) -> bool:
+    clauses = re.split(r'[，,；;。\n]', query)
+    relevant = ' '.join(part for part in clauses if not re.search(
+        r'(?:历史|之前).{0,12}(?:师资|教师|老师).{0,12}(?:不能当|不要当|不等于|不是)|'
+        r'(?:不需要|不要|不做|不计算|不测算).{0,8}(?:师资|教师|老师)', part))
+    return bool(re.search(r'教师|老师|师资', relevant) and re.search(
+        r'需要|要(?:安排|配备)?多少|配多少|怎么配|估算|重新计算|重算|测算|方案|规划|需求|计算', relevant))
+
+
 def _fixed_rows_error(text: str, fixed: dict[str, float]) -> str | None:
     """Check declared subject rows across every proposed numeric table column."""
     tables = re.findall(r'(?:^[ \t]*\|.*\|[ \t]*(?:\n|$))+', text, re.M)
@@ -56,7 +66,7 @@ def _fixed_rows_error(text: str, fixed: dict[str, float]) -> str | None:
             continue
         columns = [index for index, label in enumerate(rows[0][1:], 1)
             if re.search(r'方案|建议|课时|节数|周课|单周|双周', label)
-            and not re.search(r'当前|现状|原有|已配', label)]
+            and not re.search(r'当前|现状|原有|已配|周六|周一.*周五', label)]
         if not columns:
             continue
         checked += 1
@@ -87,6 +97,7 @@ def _validated_rows_error(text: str, validation: dict) -> str | None:
     """Final quantities must be the exact scenarios that the server checked."""
     scenarios = validation.get('scenarios', [])
     covered: dict[int, set[str]] = {}
+    covered_segments: dict[int, set[tuple[str, str]]] = {}
 
     def matching(label: str) -> list[int]:
         clean = re.sub(r'\s|\*|[（(].*?[）)]', '', label).lower()
@@ -118,8 +129,16 @@ def _validated_rows_error(text: str, validation: dict) -> str | None:
                 subject = expected.setdefault(item['subject'], {'odd': Decimal(0), 'even': Decimal(0)})
                 for leg in legs:
                     subject[leg] += hours
-            leg = 'odd' if '单周' in header and '双周' not in header else (
-                'even' if '双周' in header and '单周' not in header else None)
+            parity_label = header if '单周' in header or '双周' in header else heading
+            leg = 'odd' if '单周' in parity_label and '双周' not in parity_label else (
+                'even' if '双周' in parity_label and '单周' not in parity_label else None)
+            segment = 'saturday' if '周六' in header else ('weekday' if re.search(r'周一.*周五|工作日', header) else None)
+            if segment:
+                distributions = scenario.get('daily_distribution_by_week') or {}
+                if not all(distributions.get(parity) for parity in ('odd', 'even')):
+                    return '分日课量尚无完整程序验算，不可编造周六分配。'
+                expected = {subject: {parity: Decimal(str(distributions[parity]['subject_hours'].get(subject, {}).get(segment, 0)))
+                    for parity in ('odd', 'even')} for subject in expected}
             shown: set[str] = set()
             for row in rows[2:]:
                 subject = re.sub(r'\s*[（(].*', '', row[0]).strip()
@@ -147,6 +166,8 @@ def _validated_rows_error(text: str, validation: dict) -> str | None:
             if missing:
                 return f'课时表「{header}」缺少最后验算的科目：{"、".join(sorted(missing))}。须逐科完整列出，不能漏项改变方案。'
             covered.setdefault(scenario_index, set()).add(leg or 'all')
+            if segment and leg:
+                covered_segments.setdefault(scenario_index, set()).add((leg, segment))
     if not covered:
         return '最终课时方案缺少可核对的科目表。请将验算结果逐科列出，并明确各方案与单双周。'
     missing_scenarios = [scenario['name'] for index, scenario in enumerate(scenarios) if index not in covered]
@@ -155,6 +176,10 @@ def _validated_rows_error(text: str, validation: dict) -> str | None:
     for index, legs in covered.items():
         if 'all' not in legs and legs != {'odd', 'even'}:
             return f'课时表「{scenarios[index]["name"]}」只列出一个周次，须同时列出单周与双周，保留完整验算范围。'
+        distribution = scenarios[index].get('daily_distribution_by_week') or {}
+        if (6 in validation.get('weekdays', []) and all(distribution.get(leg) for leg in ('odd', 'even'))
+                and covered_segments.get(index, set()) != {(leg, part) for leg in ('odd', 'even') for part in ('weekday', 'saturday')}):
+            return f'课时表「{scenarios[index]["name"]}」遗漏周六或周一至周五分配。须分单周、双周逐科列出周一至周五、周六及全周课时，沿用程序返回的分配草案。'
     return None
 
 
@@ -207,6 +232,7 @@ class ToolScope:
     on_trace: TraceCallback | None = None
     plan: dict | None = None
     task_plan: dict | None = None
+    clarification: dict | None = None
     _checked_hour_scenarios: bool = False
     _user_fixed_subject_hours: dict[str, float] = field(init=False, default_factory=dict)
     _last_hour_validation: dict | None = field(init=False, default=None)
@@ -215,7 +241,15 @@ class ToolScope:
     _attempted_evidence: set[str] = field(init=False, default_factory=set)
     _successful_evidence: set[str] = field(init=False, default_factory=set)
     _permission_denied: bool = field(init=False, default=False)
+    _read_cache: dict = field(init=False, default_factory=dict)
+    _resource_count_request: bool = field(init=False, default=False)
     _plan_mode: bool = field(init=False, default=False)
+    _expected_scope: dict = field(init=False, default_factory=dict)
+    _evidence_receipts: list[dict] = field(init=False, default_factory=list)
+    _read_summaries: list[dict] = field(init=False, default_factory=list)
+    checked_resource_plan: dict | None = field(init=False, default=None)
+    _staffing_plan_request: bool = field(init=False, default=False)
+    _user_slot_constraints: dict = field(init=False, default_factory=dict)
 
     @property
     def permission_denied(self) -> bool:
@@ -223,17 +257,67 @@ class ToolScope:
         return self._permission_denied
 
     def __post_init__(self):
+        self.page_context = deepcopy(self.page_context or {})
         # Snapshot request mode once: neither later page metadata nor model output can unlock it.
         self._plan_mode = (self.page_context or {}).get('assistant_mode') == 'plan'
 
     def configure_request(self, query: str) -> None:
         """Called only by the server with the actual user turn, never tool args."""
+        self.clarification = None
+        self._required_evidence.clear()
+        self._successful_evidence.clear()
+        self._attempted_evidence.clear()
+        self._expected_scope.clear()
+        self._read_cache.clear()
+        self._read_summaries.clear()
+        self._evidence_receipts.clear()
+        self._checked_hour_scenarios = False
+        self._last_hour_validation = None
+        self._last_hour_scope = None
+        self.checked_resource_plan = None
+        self._staffing_plan_request = _staffing_demand(query)
         self._user_fixed_subject_hours = _explicit_fixed_hours(query)
+        year = re.search(r'20\d{2}\s*[-—–至]\s*20\d{2}', query)
+        if year:
+            self._expected_scope['academic_year'] = re.sub(r'\s*[-—–至]\s*', '-', year.group())
+        semester = re.search(r'第?([12一二])\s*学期', query)
+        if semester:
+            self._expected_scope['term'] = {'一': '1', '二': '2'}.get(semester[1], semester[1])
+        self._resource_count_request = bool(re.search(r'教室|场地|空间资源|教学空间', query)
+            and re.search(r'多少|几间|几处|数量|总数|共有几', query)
+            and not re.search(r'课表|课节|时段|实际使用|实际占用|上课|需要|需配|配备|规划|方案', query))
+        if self._resource_count_request:
+            self._required_evidence.add('lookup_room_resources')
         if re.search(r'查|查询|查看|核对|有哪些|多少|几条', query):
             if re.search(r'个人(?:保存)?课表|(?:已保存|保存的)课表', query):
                 self._required_evidence.add('lookup_timetable')
             if re.search(r'学生选科|选科状态|入班情况', query):
                 self._required_evidence.add('lookup_student_choices')
+        if re.search(r'(?:排课|课表生成).{0,4}(?:进度|状态)', query):
+            self._required_evidence.add('lookup_generation_status')
+
+    def configure_planning_history(self, turns: list[dict]) -> None:
+        """Carry explicit user slot declarations into a planning continuation.
+
+        Assistant replies and tool arguments cannot establish these constraints.
+        The latest user declaration wins; unrelated new questions do not inherit.
+        """
+        users = [str(turn.get('content') or '') for turn in turns if turn.get('role') == 'user']
+        self._user_slot_constraints = {}
+        if not users or not re.search(r'继续|课位|课时方案|单双周|周六', users[-1]):
+            return
+        for text in users:
+            if re.search(r'新任务|另一个任务|不沿用|重新开始', text):
+                self._user_slot_constraints.clear()
+            days = re.search(r'周一\s*(?:至|到|[-—~～])\s*(?:星期|周)?([一二三四五六日天1-7])', text)
+            if days:
+                end = {'一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7}.get(days[1])
+                self._user_slot_constraints['weekdays'] = list(range(1, (end or int(days[1])) + 1))
+            mandatory = re.search(r'第?\s*([1-9])\s*(?:至|到|[-—~～])\s*第?\s*([1-9])\s*节.{0,8}(?:必|排满)', text)
+            optional = re.search(r'第?\s*([1-9])\s*(?:至|到|[-—~～])\s*第?\s*([1-9])\s*节.{0,8}(?:可|适当)', text)
+            for match, key in ((mandatory, 'mandatory_periods'), (optional, 'optional_periods')):
+                if match and int(match[1]) <= int(match[2]):
+                    self._user_slot_constraints[key] = list(range(int(match[1]), int(match[2]) + 1))
 
     @property
     def user_fixed_subject_hours(self) -> dict[str, float]:
@@ -245,6 +329,10 @@ class ToolScope:
         if not self._checked_hour_scenarios or self._last_hour_validation is None:
             return None
         return deepcopy({'scope': self._last_hour_scope, 'data': self._last_hour_validation})
+
+    @property
+    def checked_read_evidence(self) -> list[dict]:
+        return deepcopy(self._read_summaries)
 
     async def environment(self) -> dict:
         """在模型答复前核对学校环境；不依赖模型是否记得调用工具。"""
@@ -264,7 +352,7 @@ class ToolScope:
 
     @property
     def definitions(self) -> list[dict]:
-        tools = [*SCHOOL_TOOLS, FORMAT_MARKDOWN_TOOL, *TASK_PLAN_TOOLS, *([PROPOSE_RULES_TOOL] if self.can_manage_rules else [])]
+        tools = [*SCHOOL_TOOLS, CLARIFICATION_TOOL, FORMAT_MARKDOWN_TOOL, *TASK_PLAN_TOOLS, *([PROPOSE_RULES_TOOL] if self.can_manage_rules else [])]
         if self._plan_mode:
             tools = [item for item in tools if item['function']['name'] != 'propose_rules']
         if self.allowed_tools is None:
@@ -272,10 +360,20 @@ class ToolScope:
         return [item for item in tools if item["function"]["name"] in self.allowed_tools]
 
     async def final_guard(self, text: str) -> str | None:
+        if (self._staffing_plan_request and not self.checked_resource_plan
+                and re.search(r'\d+\s*(?:位|名|人)|\|[^\n]*教师', text)):
+            return ('内部执行检查：师资数字方案必须先调用calculate_resource_plan验算，不能只心算或复用历史结论。'
+                    '隔周1节填写weekly_periods=1和week_parity=odd或even，按开课周峰值计算；'
+                    '缺少人数、班额或工作量时先给待确认计划并询问，不猜测补齐。')
         if self._permission_denied and re.search(r'菜单|页面入口|账号管理|页面操作|页面上.*筛选|页面.*查看明细', text):
             return ('内部执行检查：本轮查询已被实际账号权限拒绝。只说明缺少权限，建议联系本校管理员核对账号。'
                     '删除未经核实的菜单入口和页面操作建议，不能暗示通过页面绕过权限；不要沿用历史回复中的入口。')
         for tool in self._required_evidence - self._successful_evidence:
+            if (text.strip().endswith(('？', '?'))
+                    and re.search(r'你指|是指|想问的是|请确认|需要确认|哪种|哪个范围', text)
+                    and not re.search(r'(?:\d+|[零一二三四五六七八九十百千万两]+)\s*(?:间|个|节|名|人)|已完成|已生成|只有|共有|已确认|已经', text)):
+                # Clarifying the object's meaning needs no database query.
+                continue
             if (tool in self._attempted_evidence
                     and re.search(r'无权限|权限|查询失败|无法查询|未能查询|未匹配|请提供|请补充|未唯一匹配', text)
                     and not re.search(r'已查询|已核对|查得|已确认', text)):
@@ -321,17 +419,72 @@ class ToolScope:
         return None
 
     async def execute(self, name: str, arguments: str) -> str:
+        """同一轮、同参数的成功只读结果复用；不缓存失败或跨轮旧数据。"""
+        try:
+            normalized = json.dumps(json.loads(arguments or '{}'), sort_keys=True, ensure_ascii=False)
+        except (ValueError, TypeError):
+            normalized = arguments
+        key = (name, normalized)
+        if name.startswith('lookup_') and key in self._read_cache:
+            if self.on_trace:
+                await self.on_trace('tool.reused', {'tool': name})
+            return self._read_cache[key]
+        result = await self._execute(name, arguments)
+        if name.startswith('lookup_'):
+            try:
+                if json.loads(result).get('ok') is True:
+                    self._read_cache[key] = result
+            except (ValueError, AttributeError, TypeError):
+                pass
+        return result
+
+    async def _execute(self, name: str, arguments: str) -> str:
         allowed = {item["function"]["name"] for item in self.definitions}
         if name not in allowed:
             if self.on_trace:
                 await self.on_trace("tool.denied", {"tool": name, "reason": "not_allowed"})
             return "工具未被授权，已拒绝执行。"
+        if self._expected_scope and name.startswith('lookup_'):
+            definition = next(item['function'] for item in self.definitions if item['function']['name'] == name)
+            properties = definition.get('parameters', {}).get('properties', {})
+            try:
+                values = json.loads(arguments or '{}')
+                if isinstance(values, dict):
+                    values.update({key: value for key, value in self._expected_scope.items() if key in properties})
+                    arguments = json.dumps(values, ensure_ascii=False)
+            except (ValueError, TypeError):
+                pass
+        if self._resource_count_request and name == 'lookup_timetable':
+            return _tool_response(name, ok=False, code='QUERY_OBJECT_MISMATCH',
+                message='当前问题询问空间资源数量，未明确要求课表实际使用数量。请区分已配置、已分配和实际使用；需要查配置或分配时使用lookup_room_resources，口径不明确时先澄清。不能默认查询页面单班课表代替。')
+        if name == "request_clarification":
+            try:
+                self.clarification = Clarification.model_validate_json(arguments).model_dump()
+            except ValueError:
+                return _tool_response(name, ok=False, code="INVALID_ARGUMENT", message="引导问题格式无效，请提供1至4个问题、唯一编号和简短选项。")
+            if self.task_plan:
+                for step in self.task_plan.get('steps', []):
+                    if step.get('status') in {'pending', 'running'}:
+                        step.update(status='blocked', summary='等待用户补充引导问题，尚未执行完成。')
+                if self.on_trace:
+                    await self.on_trace('planning.updated', {'plan': deepcopy(self.task_plan)})
+            return _tool_response(name, ok=True, code="OK", message="已展示引导问题，等待用户补充。")
         if name == "format_markdown":
-            return format_markdown(arguments)
+            result = format_markdown(arguments)
+            payload = json.loads(result)
+            if not payload.get('ok') and self.on_trace:
+                await self.on_trace('answer.format_rejected', {'reason': payload.get('message', '')[:500]})
+            return result
+        if name == 'calculate_resource_plan':
+            from app.ai.tools.school.resource_planning import calculate_resource_plan
+            result = calculate_resource_plan(arguments)
+            payload = json.loads(result)
+            self.checked_resource_plan = deepcopy(payload) if payload.get('ok') else None
+            return result
         if name in {'plan_task', 'update_plan_task'}:
             result, self.task_plan = execute_task_plan(name, arguments, self.task_plan)
             return result
-        if name in evidence.DESCRIPTIONS or name in {'lookup_planning_basis', 'validate_hour_scenarios', 'lookup_walk_classes'}:
+        if name in evidence.DESCRIPTIONS or name in {'lookup_exam_operations', 'lookup_planning_basis', 'validate_hour_scenarios', 'lookup_walk_classes', 'lookup_generation_status', 'lookup_room_resources'}:
             self._attempted_evidence.add(name)
             try:
                 permitted = await evidence.authorized(self.session, self.tenant_id, self.user_id)
@@ -351,6 +504,9 @@ class ToolScope:
                 self._last_hour_scope = None
                 try:
                     values = json.loads(arguments or '{}')
+                    if isinstance(values, dict):
+                        values.update(self._user_slot_constraints)
+                        arguments = json.dumps(values, ensure_ascii=False)
                     if isinstance(values, dict) and self._user_fixed_subject_hours:
                         supplied = values.get('fixed_subject_hours') or {}
                         if isinstance(supplied, dict):
@@ -366,8 +522,29 @@ class ToolScope:
                 page_context=self.page_context,
             )
             try:
-                if json.loads(result).get('ok') is True:
+                payload = json.loads(result)
+                scope = payload.get('scope') or {}
+                if payload.get('ok') is True and any(str(scope.get(key)) != value
+                        for key, value in self._expected_scope.items()) and name not in {'lookup_playbook', 'lookup_school_context'}:
+                    return _tool_response(name, ok=False, code='SCOPE_MISMATCH',
+                        message='工具证据未匹配用户明确指定的学年学期。请使用明确参数重新查询；不能据此声称已核实。', scope=scope)
+                if payload.get('ok') is True:
                     self._successful_evidence.add(name)
+                    receipt = {'tool': name, 'scope': deepcopy(scope),
+                        'code': payload.get('code'), 'evidence_id': f'{name}:{len(self._evidence_receipts) + 1}'}
+                    self._evidence_receipts.append(receipt)
+                    payload['evidence'] = receipt
+                    data = payload.get('data')
+                    if name in evidence.DESCRIPTIONS and isinstance(data, dict) and isinstance(data.get('total'), int):
+                        self._read_summaries.append({**receipt, 'summary': {'total_matching_records': data['total']}})
+                    elif name == 'lookup_room_resources' and isinstance(data, dict):
+                        summary = {}
+                        if isinstance(data.get('inventory'), dict):
+                            summary['configured_spaces'] = data['inventory'].get('total')
+                        if isinstance(data.get('allocation'), dict):
+                            summary['allocated_distinct_spaces'] = data['allocation'].get('distinct_rooms')
+                        self._read_summaries.append({**receipt, 'summary': summary})
+                    result = json.dumps(payload, ensure_ascii=False)
             except (ValueError, AttributeError):
                 pass
             if name == 'validate_hour_scenarios':

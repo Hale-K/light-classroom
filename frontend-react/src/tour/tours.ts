@@ -209,23 +209,23 @@ export const PAGE_TOURS: Record<string, TourStep[]> = {
     { title: '座位结果', content: '生成后逐行核对考生与座位号；调整规则后需要重新生成并再次检查。', target: firstOf('.st-seat-grid', '.ant-table-wrapper') },
   ],
   '/exam-venues': [
-    { title: '排考流程', content: '顶部导航可以在排考四个环节之间切换，建议按从左到右的顺序配置。', target: '.es-nav' },
+    { title: '考试工作台', content: '回到考试工作台，按步骤准备、检查和打印。', target: '.es-nav' },
     { title: '考试与考场范围', content: '先选择考试，再勾选本次实际使用的考场；保存后考试日程才有明确容量范围。', target: '.es-venue-picker' },
   ],
   '/exam-calendar': [
-    { title: '排考流程', content: '当前处于考试日程环节，前一步应已准备好本次使用的考场。', target: '.es-nav' },
+    { title: '考试日程', content: '这里只保存日程，到考试工作台统一生成安排。', target: '.es-nav' },
     { title: '日程配置', content: '设置考试日期、每天场次和科目时长；时间重叠会直接影响考场与监考安排。', target: '.es-config' },
     { title: '日程预览', content: '这里按日期查看考试场次。保存前核对科目、开始时间和结束时间。', target: '.es-surface' },
   ],
   '/exam-invigilators': [
-    { title: '排考流程', content: '当前维护监考教师范围；完成后再进入人员排考。', target: '.es-nav' },
+    { title: '考试工作台', content: '设置教师可用时间后，回到工作台检查并生成。', target: '.es-nav' },
     { title: '选择考试', content: '教师可用性按考试保存，先确认当前考试，避免配置到错误批次。', target: '.es-exam-select' },
     { title: '教师状态', content: '按可用、请假或排除状态核对教师；状态会参与后续监考分配。', target: '.es-personnel' },
   ],
   '/exam-scheduling': [
-    { title: '排考流程', content: '这是最后的人员排考环节，前面的考场、日程和教师可用性需要先准备完成。', target: '.es-nav' },
+    { title: '准备考试', content: '点击“开始准备”，依次设置日程、考场与人员，检查后生成。', target: '.es-workflow' },
     { title: '选择考试', content: '先确认本次要处理的考试，页面指标和人员安排都会切换到该考试。', target: '.es-exam-select' },
-    { title: '排考结果', content: '这里查看考生考场和监考教师安排。生成后仍需检查缺员、容量和时间冲突。', target: '.es-personnel' },
+    { title: '调整与打印', content: '生成后可调整监考、考场和座位，并打印准考证与监考任务单。', target: '.es-workflow' },
   ],
 }
 

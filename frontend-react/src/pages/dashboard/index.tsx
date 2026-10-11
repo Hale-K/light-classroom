@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { useEffect, useMemo, useState } from 'react'
 import { App, Spin } from 'antd'
 import dayjs from 'dayjs'
@@ -34,6 +35,7 @@ const academicActions: WorkbenchAction[] = [
 ]
 
 function Metric({ icon, label, value, suffix, hint }: { icon: string; label: string; value: number | string; suffix?: string; hint: string }) {
+  useLocale()
   return (
     <div className="wb-metric">
       <span className="wb-metric-label"><i><Icon name={icon} size={15} /></i>{label}</span>
@@ -44,6 +46,7 @@ function Metric({ icon, label, value, suffix, hint }: { icon: string; label: str
 }
 
 function ActionCard({ action, onClick }: { action: WorkbenchAction; onClick: () => void }) {
+  useLocale()
   return (
     <button type="button" className="wb-action-card" onClick={onClick}>
       <span className={`wb-action-icon ${action.tone}`}><Icon name={action.icon} size={19} /></span>
@@ -54,6 +57,7 @@ function ActionCard({ action, onClick }: { action: WorkbenchAction; onClick: () 
 }
 
 function AcademicWorkbench() {
+  const locale = useLocale()
   const navigate = useNavigate()
   const { message } = App.useApp()
   const schoolCode = useAuthStore((state) => state.schoolCode)
@@ -77,7 +81,7 @@ function AcademicWorkbench() {
         setScheduleResources(resources)
         setScheduleVersions(versions)
       } catch {
-        if (!cancelled) message.error('加载工作台数据失败')
+        if (!cancelled) message.error(t("加载工作台数据失败"))
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -93,17 +97,17 @@ function AcademicWorkbench() {
     () => scheduleResources.assignments.filter(
       (item) => item.academic_year === activeAcademicYear && item.term === activeTerm,
     ),
-    [activeAcademicYear, activeTerm, scheduleResources.assignments],
+    [activeAcademicYear, activeTerm, scheduleResources.assignments, locale],
   )
   const scheduledVersion = useMemo(
     () => scheduleVersions.find(
       (item) => item.academic_year === activeAcademicYear && item.term === activeTerm,
     ),
-    [activeAcademicYear, activeTerm, scheduleVersions],
+    [activeAcademicYear, activeTerm, scheduleVersions, locale],
   )
   const plannedLessons = useMemo(
     () => Math.round(activeAssignments.reduce((total, item) => total + (item.weekly_periods || 0), 0) * 10) / 10,
-    [activeAssignments],
+    [activeAssignments, locale],
   )
   const scheduledLessons = scheduledVersion?.lesson_count || 0
   const pendingLessons = Math.max(0, Math.round((plannedLessons - scheduledLessons) * 10) / 10)
@@ -112,11 +116,11 @@ function AcademicWorkbench() {
     : 0
   const scheduleClassCount = useMemo(
     () => new Set(activeAssignments.map((item) => item.class_id)).size,
-    [activeAssignments],
+    [activeAssignments, locale],
   )
   const unboundTeacherCount = useMemo(
     () => activeAssignments.filter((item) => item.teacher_id === null).length,
-    [activeAssignments],
+    [activeAssignments, locale],
   )
 
   return (
@@ -124,66 +128,66 @@ function AcademicWorkbench() {
       <Spin spinning={loading}>
         <header className="wb-header">
           <div>
-            <span className="wb-kicker"><i />教务工作台 · {schoolCode || '当前学校'}</span>
-            <h1>本学期教学安排</h1>
-            <p>统一查看排课、排考与班级资源。</p>
+            <span className="wb-kicker"><i />{t("教务工作台 ·")}{schoolCode || t("当前学校")}</span>
+            <h1>{t("本学期教学安排")}</h1>
+            <p>{t("统一查看排课、排考与班级资源。")}</p>
           </div>
           <div className="wb-header-meta">
-            <span className="wb-sync"><i />数据已同步</span>
+            <span className="wb-sync"><i />{t("数据已同步")}</span>
             <span>{dayjs().format('YYYY年M月D日')}</span>
             <b>{dayjs().format('dddd')}</b>
           </div>
         </header>
 
-        <section className="wb-metrics" aria-label="工作台统计">
-          <Metric icon="calendar" label="计划课时" value={plannedLessons} suffix="节" hint="本学期配置" />
-          <Metric icon="circle-check" label="已生成" value={scheduledLessons} suffix="节" hint="当前课表版本" />
-          <Metric icon="alert-triangle" label="待排课时" value={pendingLessons} suffix="节" hint="需要处理" />
-          <Metric icon="users" label="任教关系" value={activeAssignments.length} suffix="条" hint="当前学期" />
+        <section className="wb-metrics" aria-label={t("工作台统计")}>
+          <Metric icon="calendar" label={t("计划课时")} value={plannedLessons} suffix={t("节")} hint={t("本学期配置")} />
+          <Metric icon="circle-check" label={t("已生成")} value={scheduledLessons} suffix={t("节")} hint={t("当前课表版本")} />
+          <Metric icon="alert-triangle" label={t("待排课时")} value={pendingLessons} suffix={t("节")} hint={t("需要处理")} />
+          <Metric icon="users" label={t("任教关系")} value={activeAssignments.length} suffix={t("条")} hint={t("当前学期")} />
         </section>
 
-        <section className="wb-schedule-overview" aria-label="排课进度">
+        <section className="wb-schedule-overview" aria-label={t("排课进度")}>
           <div className="wb-overview-head">
             <div>
-              <span className="wb-section-label">排课进度</span>
-              <h2>{scheduledVersion ? `第 ${scheduledVersion.version_id} 版课表` : '尚未生成课表'}</h2>
+              <span className="wb-section-label">{t("排课进度")}</span>
+              <h2>{scheduledVersion ? t("第 {{p0}} 版课表", { p0: scheduledVersion.version_id }) : t("尚未生成课表")}</h2>
             </div>
             <strong>{scheduleCoverage}%</strong>
           </div>
           <div className="wb-overview-track"><i style={{ width: `${scheduleCoverage}%` }} /></div>
           <div className="wb-overview-meta">
-            <span>已生成 {scheduledLessons} 节</span>
-            <span>共计划 {plannedLessons} 节</span>
-            <span>{pendingLessons > 0 ? `还差 ${pendingLessons} 节` : '课时已覆盖'}</span>
+            <span>{t("已生成")}{scheduledLessons} {t("节")}</span>
+            <span>{t("共计划")}{plannedLessons} {t("节")}</span>
+            <span>{pendingLessons > 0 ? t("还差 {{p0}} 节", { p0: pendingLessons }) : t("课时已覆盖")}</span>
           </div>
           <div className="wb-resource-strip">
-            <span><i className="blue" />班级范围 <b>{scheduleClassCount}</b></span>
-            <span><i className="violet" />教师资源 <b>{scheduleResources.teachers.length}</b></span>
-            <span><i className="green" />任教关系 <b>{activeAssignments.length}</b></span>
+            <span><i className="blue" />{t("班级范围")}<b>{scheduleClassCount}</b></span>
+            <span><i className="violet" />{t("教师资源")}<b>{scheduleResources.teachers.length}</b></span>
+            <span><i className="green" />{t("任教关系")}<b>{activeAssignments.length}</b></span>
           </div>
         </section>
 
-        <section className="wb-focus-card" aria-label="下一步操作">
+        <section className="wb-focus-card" aria-label={t("下一步操作")}>
           <span className="wb-focus-mark"><Icon name="calendar" size={24} /></span>
           <div className="wb-focus-copy">
-            <span className="wb-section-label">现在开始</span>
-            <h2>{pendingLessons > 0 ? `还有 ${pendingLessons} 节课待排` : '课表已生成，继续校验冲突'}</h2>
+            <span className="wb-section-label">{t("现在开始")}</span>
+            <h2>{pendingLessons > 0 ? t("还有 {{p0}} 节课待排", { p0: pendingLessons }) : t("课表已生成，继续校验冲突")}</h2>
             <p>
               {unboundTeacherCount > 0
-                ? `发现 ${unboundTeacherCount} 条任教关系尚未绑定教师。`
-                : '检查任教关系、课时和教室后生成最终课表。'}
+                ? t("发现 {{p0}} 条任教关系尚未绑定教师。", { p0: unboundTeacherCount })
+                : t("检查任教关系、课时和教室后生成最终课表。")}
             </p>
           </div>
           <button type="button" className="wb-focus-action" onClick={() => navigate('/scheduling')}>
-            {pendingLessons > 0 ? '处理待排' : '进入排课'} <Icon name="arrow-right" size={14} />
+            {pendingLessons > 0 ? t("处理待排") : t("进入排课")} <Icon name="arrow-right" size={14} />
           </button>
         </section>
 
         <section className="wb-section">
           <div className="wb-section-head">
             <div>
-              <span className="wb-section-label">功能导航</span>
-              <h2>常用功能</h2>
+              <span className="wb-section-label">{t("功能导航")}</span>
+              <h2>{t("常用功能")}</h2>
             </div>
           </div>
           <div className="wb-action-grid">
@@ -199,6 +203,7 @@ function AcademicWorkbench() {
 }
 
 export default function Dashboard() {
+  useLocale()
   const user = useAuthStore((state) => state.user)
   const role = getWorkbenchRole(user)
   if (role === 'teacher') return <TeacherWorkbench />

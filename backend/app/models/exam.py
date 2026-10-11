@@ -3,7 +3,7 @@ exam / paper / question
 """
 from datetime import date, datetime
 from sqlmodel import SQLModel, Field
-from sqlalchemy import JSON, UniqueConstraint
+from sqlalchemy import JSON, UniqueConstraint, Column, String, text
 
 from app.db.base import SoftDeleteMixin, TimestampMixin, TenantMixin
 from app.models.enums import (
@@ -26,7 +26,7 @@ class Exam(TimestampMixin, TenantMixin, SQLModel, table=True):
 class ExamSchedule(TimestampMixin, TenantMixin, SQLModel, table=True):
     """考试日期与监考安排"""
     __table_args__ = (
-        UniqueConstraint("exam_id", "grade_id", "session_index", name="uq_examschedule_grade_session"),
+        UniqueConstraint("exam_id", "grade_id", "subject_id", "session_index", name="uq_examschedule_grade_session"),
         {"comment": "考试日程"},
     )
     id: int | None = Field(default=None, primary_key=True)
@@ -77,10 +77,14 @@ class ExamSchedulingConfig(TimestampMixin, TenantMixin, SQLModel, table=True):
     id: int | None = Field(default=None, primary_key=True)
     exam_id: int = Field(index=True)
     grade_ids: list[int] = Field(default_factory=list, sa_type=JSON)
+    subject_ids: list[int] = Field(default_factory=list, sa_column=Column(JSON, nullable=False, server_default=text("'[]'")))
+    candidate_mode: str = Field(default="grade", sa_column=Column(String(20), nullable=False, server_default=text("'grade'")))
+    schedule_mode: str = Field(default="custom", sa_column=Column(String(20), nullable=False, server_default=text("'school'")))
     start_date: date | None = Field(default=None)
     excluded_dates: list[str] = Field(default_factory=list, sa_type=JSON)
     sessions: list[dict] = Field(default_factory=list, sa_type=JSON)
     invigilators_per_room: int = Field(default=1, ge=1, le=3)
+    rules: dict = Field(default_factory=dict, sa_column=Column(JSON, nullable=False, server_default=text("'{}'")))
 
 
 class ExamInvigilatorAvailability(TimestampMixin, TenantMixin, SQLModel, table=True):

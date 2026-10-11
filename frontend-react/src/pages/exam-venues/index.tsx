@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { App, Button, Checkbox, Input, Select, Spin, Table, Tag } from 'antd'
 import { examApi, examSchedulingApi, orgApi } from '@/api'
 import type { Exam, ExamRoomAssignment, ExamRoomEntry, ExamSchedulingConfig, Grade } from '@/types'
@@ -11,6 +12,7 @@ const EXAM_ROOM_STATE_LABEL: Record<string, string> = { available: '可用', sel
 
 export default function ExamVenuesView() {
   const { message } = App.useApp()
+  const [params, setParams] = useSearchParams()
   const [loading, setLoading] = useState(false)
   const [exams, setExams] = useState<Exam[]>([])
   const [grades, setGrades] = useState<Grade[]>([])
@@ -22,25 +24,33 @@ export default function ExamVenuesView() {
   const [confirmed, setConfirmed] = useState(false)
   const [assignedRooms, setAssignedRooms] = useState<ExamRoomAssignment[]>([])
   const [keyword, setKeyword] = useState('')
+  const loadRequest = useRef(0)
 
   const loadSelection = async (id: number, catalog: ExamRoomEntry[]) => {
+    setParams({ examId: String(id) }, { replace: true })
+    const requestId = ++loadRequest.current
     setLoading(true)
     try {
       const [plan, scope, generatedPlan] = await Promise.all([examSchedulingApi.venues(id), examSchedulingApi.config(id), examSchedulingApi.plan(id)])
+      if (requestId !== loadRequest.current) return
       setConfig(scope); setGradeIds(scope.grade_ids)
       setAssignedRooms(generatedPlan.rooms)
       const names = new Set(plan.rooms.map((room) => room.name))
       setSelectedIds(plan.confirmed ? catalog.filter((room) => names.has(room.name)).map((room) => room.id) : catalog.filter((room) => room.status === 'available').map((room) => room.id))
       setConfirmed(plan.confirmed)
-    } catch (error) { message.error(error instanceof Error ? error.message : '考场安排加载失败') }
-    finally { setLoading(false) }
+    } catch (error) { if (requestId === loadRequest.current) message.error(error instanceof Error ? error.message : '考场安排加载失败') }
+    finally { if (requestId === loadRequest.current) setLoading(false) }
   }
 
   useEffect(() => {
-    Promise.all([examApi.list(), examSchedulingApi.rooms({ page: 1, page_size: 300 }), orgApi.grades()]).then(([examRows, roomData, gradeRows]) => {
-      setExams(examRows); setRooms(roomData.items); setGrades(gradeRows)
-      if (examRows[0]) { setExamId(examRows[0].id); void loadSelection(examRows[0].id, roomData.items) }
-    }).catch((error) => message.error(error instanceof Error ? error.message : '页面加载失败'))
+    let active = true
+    Promise.all([examApi.list(), examSchedulingApi.allRooms(), orgApi.grades()]).then(([examRows, roomData, gradeRows]) => {
+      if (!active) return
+      setExams(examRows); setRooms(roomData); setGrades(gradeRows)
+      const initial = examRows.find(r => r.id === Number(params.get('examId'))) || examRows[0]
+      if (initial) { setExamId(initial.id); void loadSelection(initial.id, roomData) }
+    }).catch((error) => { if (active) message.error(error instanceof Error ? error.message : '页面加载失败') })
+    return () => { active = false; loadRequest.current += 1 }
   }, [])
 
   const selected = rooms.filter((room) => selectedIds.includes(room.id))
@@ -80,7 +90,7 @@ export default function ExamVenuesView() {
     { title: '座位容量', dataIndex: 'capacity', width: 110 },
     { title: '资源状态', dataIndex: 'status', width: 100, render: (value: ExamRoomEntry['status']) => value === 'available' ? '可用' : value === 'maintenance' ? '维护中' : '已停用' },
     { title: '本次状态', width: 100, render: (_: unknown, room: ExamRoomEntry) => EXAM_ROOM_STATE_LABEL[examRoomState(room)] },
-    { title: '来源', width: 120, render: (_: unknown, row: ExamRoomEntry) => row.source_class_id ? '行政班教室' : '手动创建' },
+    { title: '来源', width: 120, render: () => '空间资源' },
   ]
 
   return <Spin spinning={loading}><div className="es-page">

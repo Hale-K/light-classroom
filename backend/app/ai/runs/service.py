@@ -187,6 +187,8 @@ async def _reject_concurrent_run(session, run_id: str, tenant_id: int, user_id: 
 
 
 async def create_run(session, run_id: str, tenant_id: int, user_id: int, payload: dict) -> tuple[dict, bool]:
+    from app.ai.write_lock import lock_tenant_write
+    await lock_tenant_write(session, tenant_id)
     digest = fingerprint(payload)
     existing = await session.get(AiRun, run_id)
     if existing:
@@ -293,8 +295,8 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
         try:
             async with asyncio.timeout(TERMINAL_PERSIST_TIMEOUT):
                 return await persist(**values)
-        except Exception:
-            logger.exception('assistant terminal status persistence failed id=%s', run_id)
+        except Exception as exc:
+            logger.error('assistant terminal status persistence failed id=%s exception=%s', run_id, type(exc).__name__)
             return False
 
     async def trace(kind: str, data: dict) -> None:
@@ -343,11 +345,13 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
             if user is None:
                 raise ChatError("账号已失效，请重新登录")
             permissions = await get_user_permission_codes(session, user_id)
+            recent = payload['messages'][-24:]
+            latest_user = next((i for i in range(len(recent) - 1, -1, -1) if recent[i].get('role') == 'user'), None)
             candidates = [{
                 "role": item["role"] if item["role"] in ("user", "assistant") else "user",
-                "content": compact_for_chat(item["content"]),
+                "content": item["content"] if index == latest_user else compact_for_chat(item["content"]),
                 "model_visible": item.get("model_visible", True),
-            } for item in payload["messages"][-24:] if item["content"].strip()]
+            } for index, item in enumerate(recent) if item["content"].strip()]
             turns = project_messages(candidates, limit=20)
             turns.extend(await consume_inbox("turn"))
             memory_summary = project_summary(payload.get("memory_summary") or "")
@@ -392,7 +396,10 @@ async def execute_run(run_id: str, tenant_id: int, user_id: int, payload: dict, 
         checkpoint['cycle_status'] = 'timed_out'
         await persist_terminal(status="timed_out", checkpoint=checkpoint, message=f"本轮等待超过{RUN_TIMEOUT}秒，已停止请求；已完成步骤保留，未执行规则写入。")
     except Exception as exc:
-        logger.exception("assistant run failed id=%s class=%s", run_id, getattr(exc, "error_class", "-"))
+        # Traceback-local diagnostics can include provider credentials and full
+        # school evidence. Persist bounded metadata, not exception locals.
+        logger.error("assistant run failed id=%s class=%s exception=%s", run_id,
+                     getattr(exc, "error_class", "-"), type(exc).__name__)
         message = exc.message if isinstance(exc, ChatError) else "处理失败，请重试；未执行规则写入。"
         status = 'timed_out' if isinstance(exc, ChatError) and exc.error_class == 'timeout' else 'failed'
         checkpoint['stage'] = status

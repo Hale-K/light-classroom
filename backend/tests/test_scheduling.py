@@ -1370,7 +1370,7 @@ def test_exam_candidate_arrangement_rejects_room_capacity_shortage():
         subject_names={1: "语文"},
     )
 
-    with pytest.raises(ValueError, match="考场容量不足"):
+    with pytest.raises(ValueError, match="本场共 5 名考生，当前选中 1 间考场、可用 4 座，还差 1 座"):
         arrange_exam_candidates(
             schedules,
             candidate_ids_by_course={101: [1, 2, 3, 4, 5]},

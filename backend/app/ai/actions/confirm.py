@@ -8,7 +8,7 @@ from __future__ import annotations
 from datetime import datetime
 
 from fastapi import HTTPException
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from app.ai.actions.proposal import (
     RulesProposal,
@@ -38,6 +38,8 @@ def check_action(action: AiAction | None, tenant_id: int, user_id: int) -> None:
 
 
 async def decide_action(session, tenant_id: int, user_id: int, action_id: str, decision: str) -> dict:
+    from app.ai.write_lock import lock_tenant_write
+    await lock_tenant_write(session, tenant_id)
     from app.ai.tools.school import _term
     from app.api.v1.scheduling import SCHEDULING_RULE_GROUP_CONFIG_KEY, _load_grid_config
     action = (await session.execute(select(AiAction).where(
@@ -80,9 +82,14 @@ async def decide_action(session, tenant_id: int, user_id: int, action_id: str, d
     updated = RuleGroupDocument.model_validate({**old, "rules": [*group.rules, *rules], "version": group.version + 1})
     compile_rule_group(updated)
     config[scope] = dump_stored_rule_groups([updated if g.id == group.id else g for g in groups], active_id)
-    row.config_value = config
-    row.updated_by = user_id
-    row.updated_at = datetime.utcnow()
+    saved = await session.execute(update(TenantConfig).where(
+        TenantConfig.id == row.id, TenantConfig.tenant_id == tenant_id,
+        TenantConfig.updated_at == row.updated_at,
+    ).values(config_value=config, updated_by=user_id, updated_at=datetime.utcnow())
+        .execution_options(synchronize_session='fetch'))
+    if saved.rowcount != 1:
+        await session.rollback()
+        raise HTTPException(409, '规则配置被其他操作修改，请重新预览')
     action.status = "executed"
     action.result = {
         "text": f"已向「{group.name}」保存 {len(rules)} 条规则。请到排课页生成课表并检查冲突。",

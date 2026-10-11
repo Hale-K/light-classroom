@@ -30,13 +30,23 @@ _ERROR_PRIORITY = {
 def _prefer_error(current: ChatError | None, candidate: ChatError) -> ChatError:
     if current is None:
         return candidate
+    if current.details.get('http_status') == 429 and candidate.error_class == 'bad_request':
+        return ChatError(current.message + ' 备用模型也拒绝了请求参数。', current.error_class, details=current.details)
+    if (current.details.get('http_status') == candidate.details.get('http_status') == 429
+            and current.details.get('limit_reason') != 'unknown' and candidate.details.get('limit_reason') == 'unknown'):
+        return current
     return candidate if _ERROR_PRIORITY.get(candidate.error_class, 0) >= _ERROR_PRIORITY.get(current.error_class, 0) else current
 
 
-def _failover_message(error_class: str) -> str:
+def _failover_message(error_class: str, message: str | None = None) -> str:
+    if error_class in {'rate_limit', 'quota'} and message:
+        return message + ' 正在尝试备用模型。'
     reason = {
         "timeout": "首选模型本次调用超时",
         "network": "当前模型连接失败",
+        "auth": "当前模型服务商鉴权失败，请检查API Key及服务商地址",
+        "bad_request": "当前模型拒绝了请求参数，请检查接口兼容性",
+        "config": "当前模型服务商配置不可用",
         "incomplete_output": "当前模型输出未完成",
         "rate_limit": "当前模型受到限流",
     }.get(error_class, "当前模型未能完成请求")
@@ -129,13 +139,17 @@ class ModelProviderRouter:
                     await on_trace('provider.selected', {'provider': endpoint.name, 'provider_key': endpoint.key,
                                                         'used_backup': endpoint.key != endpoints[0].key})
                 return value
+            if error.details.get('http_status') == 429:
+                error = ChatError(endpoint.name + '：' + error.message, error.error_class,
+                    details={**error.details, 'provider': endpoint.name, 'model': endpoint.model})
             last_error = _prefer_error(last_error, error)
-            self._circuits.record_failure(endpoint.key, error.error_class)
+            self._circuits.record_failure(endpoint.key, error.error_class,
+                retry_after_seconds=error.details.get('retry_after_seconds'))
             if on_trace:
                 await on_trace('provider.failed', {'provider': endpoint.name, 'error_class': error.error_class,
-                                                  'message': error.message})
+                                                  'message': error.message, 'details': error.details})
             if index < len(ordered) - 1:
-                await report_progress(on_progress, 'recovering', _failover_message(error.error_class))
+                await report_progress(on_progress, 'recovering', _failover_message(error.error_class, error.message))
         if last_error is not None:
             raise last_error
         if not endpoints:
@@ -170,12 +184,16 @@ class ModelProviderRouter:
             try:
                 value = await invoke(endpoint)
             except ChatError as exc:
+                if exc.details.get('http_status') == 429:
+                    exc = ChatError(endpoint.name + '：' + exc.message, exc.error_class,
+                        details={**exc.details, 'provider': endpoint.name, 'model': endpoint.model})
                 if on_trace:
-                    await on_trace("provider.failed", {"provider": endpoint.name, "error_class": exc.error_class, "message": exc.message})
+                    await on_trace("provider.failed", {"provider": endpoint.name, "error_class": exc.error_class, "message": exc.message, "details": exc.details})
                 state.last_error = exc
                 result.last_error = _prefer_error(result.last_error, exc)
                 state.trail.append(f"{endpoint.name}({exc.error_class})")
-                circuit_state = self._circuits.record_failure(endpoint.key, exc.error_class)
+                circuit_state = self._circuits.record_failure(endpoint.key, exc.error_class,
+                    retry_after_seconds=exc.details.get('retry_after_seconds'))
                 logger.warning(
                     "assistant.provider fail id=%s provider=%s class=%s failures=%s isolated=%s",
                     message_id or "-", endpoint.name, exc.error_class, circuit_state.failures, circuit_state.isolated,
@@ -183,7 +201,7 @@ class ModelProviderRouter:
                 if circuit_state.isolated:
                     await report_progress(on_progress, "isolated", f"{endpoint.name} 连续异常，已临时隔离")
                 if index < len(endpoints) - 1:
-                    await report_progress(on_progress, "recovering", _failover_message(exc.error_class))
+                    await report_progress(on_progress, "recovering", _failover_message(exc.error_class, exc.message))
                 continue
             self._circuits.record_success(endpoint.key)
             if on_trace:

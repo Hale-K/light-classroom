@@ -4786,7 +4786,7 @@ class SequentialExamScheduleStrategy(ExamScheduleStrategy):
                 subject_id=int(paper["subject_id"]),
                 grade_id=int(paper["grade_id"]),
                 exam_date=current_date,
-                session_index=session_index + 1,
+                session_index=paper_index + 1,
                 start_time=start_time,
                 end_time=end_time,
                 invigilator_id=_paper_invigilator(paper, teacher_ids, paper_index),
@@ -4830,7 +4830,11 @@ def arrange_exam_candidates(
     rooms: Iterable[ExamRoomResource],
     teacher_ids: Iterable[int],
     unavailable_teacher_slots: Mapping[int, set[tuple[date, int]]] | None = None,
+    unavailable_room_slots: Mapping[str, set[tuple[date, int]]] | None = None,
     invigilators_per_room: int = 2,
+    teacher_daily_limit: int | None = None,
+    existing_daily_workload: Mapping[tuple[int, date], int] | None = None,
+    excluded_teachers_by_course: Mapping[int, set[int]] | None = None,
 ) -> ExamArrangementResult:
     """Assign every candidate to a concrete room, seat and invigilation team."""
     room_resources = [item for item in rooms if item.capacity > 0 and item.name.strip()]
@@ -4840,6 +4844,10 @@ def arrange_exam_candidates(
         raise ValueError("每个考场至少需要一名监考教师")
     teachers = list(dict.fromkeys(int(item) for item in teacher_ids))
     unavailable = unavailable_teacher_slots or {}
+    unavailable_rooms = unavailable_room_slots or {}
+    workload = {teacher_id: 0 for teacher_id in teachers}
+    daily_workload = dict(existing_daily_workload or {})
+    excluded_by_course = excluded_teachers_by_course or {}
     grouped: dict[tuple[date, int], list[ExamScheduleItem]] = {}
     for schedule in schedules:
         grouped.setdefault((schedule.exam_date, schedule.session_index), []).append(schedule)
@@ -4847,33 +4855,51 @@ def arrange_exam_candidates(
     room_assignments: list[ExamRoomAssignment] = []
     seats: list[ExamCandidateSeat] = []
     for slot, slot_schedules in sorted(grouped.items()):
+        # Capacity is a per-session total: the same rooms may be reused in a
+        # later session, but never simultaneously. Check this before allocating
+        # individual rooms so users can see the actual arithmetic.
+        slot_candidates = [
+            (schedule, list(dict.fromkeys(int(item) for item in candidate_ids_by_course.get(schedule.course_key, ()))))
+            for schedule in sorted(slot_schedules, key=lambda item: (item.grade_id, item.subject_id, item.course_key))
+        ]
+        available_rooms = [room for room in room_resources if slot not in unavailable_rooms.get(room.name, set())]
+        required_seats = sum(len(candidates) for _, candidates in slot_candidates)
+        available_seats = sum(room.capacity for room in available_rooms)
+        largest_room = max((room.capacity for room in available_rooms), default=1)
+        minimum_rooms = sum((len(ids) + largest_room - 1) // largest_room for _, ids in slot_candidates)
+        if required_seats > available_seats:
+            first = slot_schedules[0]
+            raise ValueError(
+                f"考场容量不足：{slot[0]} {first.start_time}–{first.end_time} 本场共 {required_seats} 名考生，"
+                f"当前选中 {len(available_rooms)} 间考场、可用 {available_seats} 座，还差 {required_seats - available_seats} 座。"
+                f"按分科设场至少需要 {minimum_rooms} 间考场、{minimum_rooms * invigilators_per_room} 名监考教师。"
+                "考场座位按同一场次核算，下一场可以重复使用这些考场。"
+            )
         candidates_seen: set[int] = set()
         room_cursor = 0
-        teacher_cursor = 0
-        for schedule in sorted(slot_schedules, key=lambda item: (item.grade_id, item.subject_id, item.course_key)):
-            candidates = list(dict.fromkeys(int(item) for item in candidate_ids_by_course.get(schedule.course_key, ())))
+        demands: list[tuple[int, set[int]]] = []
+        for schedule, candidates in slot_candidates:
             duplicate = candidates_seen.intersection(candidates)
             if duplicate:
                 raise ValueError(f"同一场次存在 {len(duplicate)} 名重复考生，请检查选科冲突")
             candidates_seen.update(candidates)
             candidate_cursor = 0
             while candidate_cursor < len(candidates):
+                while room_cursor < len(room_resources) and slot in unavailable_rooms.get(room_resources[room_cursor].name, set()):
+                    room_cursor += 1
                 if room_cursor >= len(room_resources):
-                    shortage = len(candidates) - candidate_cursor
-                    raise ValueError(f"考场容量不足，当前场次还有 {shortage} 名考生无法安排")
+                    # Guard for any future allocation rule that changes the
+                    # room loop after the aggregate check above.
+                    raise ValueError(f"分科考场不足：{slot[0]} {schedule.start_time} 至少需要 {minimum_rooms} 间考场，"
+                                     f"当前只有 {len(available_rooms)} 间可用；不同科目的剩余考生需分别设场，请增加考场")
                 room_resource = room_resources[room_cursor]
                 room_cursor += 1
                 assigned = candidates[candidate_cursor:candidate_cursor + room_resource.capacity]
                 candidate_cursor += len(assigned)
-                available_teachers = [
-                    teacher_id for teacher_id in teachers[teacher_cursor:]
-                    if teacher_id != schedule.paper_teacher_id
-                    and slot not in unavailable.get(teacher_id, set())
-                ]
-                if len(available_teachers) < invigilators_per_room:
-                    raise ValueError("监考教师不足，无法覆盖当前场次的全部考场")
-                invigilators = tuple(available_teachers[:invigilators_per_room])
-                teacher_cursor = max(teachers.index(item) for item in invigilators) + 1
+                excluded = set(excluded_by_course.get(schedule.course_key, set()))
+                if schedule.paper_teacher_id is not None:
+                    excluded.add(schedule.paper_teacher_id)
+                demands.extend((len(room_assignments), excluded) for _ in range(invigilators_per_room))
                 room_assignments.append(ExamRoomAssignment(
                     course_key=schedule.course_key,
                     subject_id=schedule.subject_id,
@@ -4883,7 +4909,7 @@ def arrange_exam_candidates(
                     room_name=room_resource.name,
                     capacity=room_resource.capacity,
                     candidate_count=len(assigned),
-                    invigilator_ids=invigilators,
+                    invigilator_ids=(),
                 ))
                 seats.extend(
                     ExamCandidateSeat(
@@ -4900,6 +4926,35 @@ def arrange_exam_candidates(
                     )
                     for seat_no, student_id in enumerate(assigned, start=1)
                 )
+        # Match all teams together. A teacher excluded for one subject can still
+        # cover another; favor lighter workloads without sacrificing feasibility.
+        options = [sorted(
+            (tid for tid in teachers if tid not in excluded and slot not in unavailable.get(tid, set())
+             and (teacher_daily_limit is None or daily_workload.get((tid, slot[0]), 0) < teacher_daily_limit)),
+            key=lambda tid: (workload[tid], tid),
+        ) for _, excluded in demands]
+        matched: dict[int, int] = {}
+
+        def place(demand: int, seen: set[int]) -> bool:
+            for tid in sorted(options[demand], key=lambda value: (value in matched, workload[value], value)):
+                if tid in seen:
+                    continue
+                seen.add(tid)
+                if tid not in matched or place(matched[tid], seen):
+                    matched[tid] = demand
+                    return True
+            return False
+
+        for demand in sorted(range(len(demands)), key=lambda index: len(options[index])):
+            if not place(demand, set()):
+                raise ValueError(f"{slot[0]} {slot_schedules[0].start_time} 监考教师不足，需要 {len(demands)} 人；请增加可用教师，检查每日上限与学科回避，或减少同时启用的考场")
+        teams: dict[int, list[int]] = {}
+        for tid, demand in matched.items():
+            teams.setdefault(demands[demand][0], []).append(tid)
+            workload[tid] += 1
+            daily_workload[tid, slot[0]] = daily_workload.get((tid, slot[0]), 0) + 1
+        for room_index, team in teams.items():
+            room_assignments[room_index] = replace(room_assignments[room_index], invigilator_ids=tuple(sorted(team)))
     return ExamArrangementResult(rooms=room_assignments, seats=seats)
 
 

@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Alert, App, Checkbox, Input, Spin } from 'antd'
 import dayjs from 'dayjs'
@@ -77,15 +78,16 @@ function uniqueClassPills(items: ClassPill[]) {
 }
 
 export default function TeacherWorkbench() {
+  const locale = useLocale()
   const navigate = useNavigate()
   const { message } = App.useApp()
   const user = useAuthStore((s) => s.user)
   const displayName = useAuthStore(selectDisplayName)
   const teacherId = user?.id
-  const roles = useMemo(() => user?.roles || [], [user?.roles])
+  const roles = useMemo(() => user?.roles || [], [user?.roles, locale])
   const canHead = roles.includes('head_teacher')
 
-  const { academicYear, term } = useMemo(() => currentTerm(), [])
+  const { academicYear, term } = useMemo(() => currentTerm(), [locale])
   const [view, setView] = useState<TeacherView>(() => {
     const saved = localStorage.getItem(VIEW_KEY) as TeacherView | null
     if (saved === 'head' && canHead) return 'head'
@@ -138,7 +140,7 @@ export default function TeacherWorkbench() {
           myAssignments.map((a) => {
             const cls = resources.classes.find((c) => c.id === a.class_id) || classes.find((c) => c.id === a.class_id)
             const subject = resources.subjects.find((s) => s.id === a.subject_id)
-            return { id: a.class_id, name: cls?.name || `班级 ${a.class_id}`, subjectHint: subject?.name }
+            return { id: a.class_id, name: cls?.name || t("班级 {{p0}}", { p0: a.class_id }), subjectHint: subject?.name }
           }),
         )
         const head = classes.filter((c) => c.head_teacher_id === teacherId).map((c) => ({ id: c.id, name: c.name }))
@@ -146,7 +148,7 @@ export default function TeacherWorkbench() {
         setHeadPills(head)
         if (canHead && head.length && !roles.includes('subject_teacher')) setView('head')
       } catch {
-        if (!cancelled) { setResourcesError(true); message.error('加载教师工作台失败') }
+        if (!cancelled) { setResourcesError(true); message.error(t("加载教师工作台失败")) }
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -171,18 +173,18 @@ export default function TeacherWorkbench() {
     } catch {
       setEntries([])
       setScheduleError(true)
-      message.error('加载课表失败')
+      message.error(t("加载课表失败"))
     } finally {
       setScheduleLoading(false)
     }
-  }, [academicYear, activeClassId, message, teacherId, term, view])
+  }, [academicYear, activeClassId, message, teacherId, term, view, locale])
 
   useEffect(() => { void loadSchedule() }, [loadSchedule])
 
   const todayLessons = useMemo(() => {
     const weekday = ((dayjs().day() + 6) % 7) + 1
     return entries.filter((e) => e.weekday === weekday && (view === 'subject' || e.teacher_id === teacherId))
-  }, [entries, teacherId, view])
+  }, [entries, teacherId, view, locale])
 
   const sortedToday = [...todayLessons].sort((a, b) => a.period - b.period)
   const pending = todos.filter((item) => !item.done).length
@@ -195,7 +197,7 @@ export default function TeacherWorkbench() {
 
   const exportHeadStudentTimetables = async () => {
     if (view !== 'head' || !headPills.length) {
-      message.warning('当前没有可导出的班级')
+      message.warning(t("当前没有可导出的班级"))
       return
     }
     try {
@@ -206,9 +208,9 @@ export default function TeacherWorkbench() {
         sheets: ['cover', 'student_timetables'],
         student_zip: true,
       })
-      message.success(`已创建 ${headPills.length} 个班级的学生课表导出任务，可在文件中心下载`)
+      message.success(t("已创建 {{p0}} 个班级的学生课表导出任务，可在文件中心下载", { p0: headPills.length }))
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '学生课表导出失败')
+      message.error(error instanceof Error ? error.message : t("学生课表导出失败"))
     }
   }
 
@@ -217,15 +219,15 @@ export default function TeacherWorkbench() {
       <Spin spinning={loading}>
         <section className="td-overview">
           <div className="td-greeting">
-            <h1>{displayName || '老师'}，今天有 <b>{loading || scheduleLoading || scheduleError ? '—' : todayLessons.length}</b> 节课，<b>{pending}</b> 项待办待完成</h1>
-            {showViewSwitch && <select aria-label="工作台身份" value={view} onChange={(event) => setView(event.target.value as TeacherView)}><option value="subject">任课教师</option><option value="head">班主任</option></select>}
+            <h1>{displayName || t("老师")}{t("，今天有")}<b>{loading || scheduleLoading || scheduleError ? '—' : todayLessons.length}</b> {t("节课，")}<b>{pending}</b> {t("项待办待完成")}</h1>
+            {showViewSwitch && <select aria-label={t("工作台身份")} value={view} onChange={(event) => setView(event.target.value as TeacherView)}><option value="subject">{t("任课教师")}</option><option value="head">{t("班主任")}</option></select>}
           </div>
           <div className="td-stats">
             {[
-              { label: '今日概览', icon: 'calendar', value: loading || scheduleLoading || scheduleError ? '—' : todayLessons.length, unit: '节', hint: '今日课程' },
-              { label: '待批改', icon: 'edit', value: '—', unit: '份', hint: '暂无批改统计' },
-              { label: '待辅导', icon: 'book', value: '—', unit: '人', hint: '暂无辅导统计' },
-              { label: '通知', icon: 'message', value: '—', unit: '条', hint: '暂无通知数据' },
+              { label: t("今日概览"), icon: 'calendar', value: loading || scheduleLoading || scheduleError ? '—' : todayLessons.length, unit: t("节"), hint: t("今日课程") },
+              { label: t("待批改"), icon: 'edit', value: '—', unit: t("份"), hint: t("暂无批改统计") },
+              { label: t("待辅导"), icon: 'book', value: '—', unit: t("人"), hint: t("暂无辅导统计") },
+              { label: t("通知"), icon: 'message', value: '—', unit: t("条"), hint: t("暂无通知数据") },
             ].map((stat) => <article className="td-stat" key={stat.label}>
               <div className="td-stat-heading"><h2>{stat.label}</h2><span><Icon name={stat.icon} size={17} /></span></div>
               <div className="td-stat-number"><i><Icon name={stat.icon} size={32} /></i><strong>{stat.value}</strong><span>{stat.unit}</span></div>
@@ -234,23 +236,23 @@ export default function TeacherWorkbench() {
           </div>
         </section>
         <div className="td-grid">
-          {resourcesError && <Alert className="td-wide" type="error" showIcon message="班级信息加载失败，请刷新页面重试" />}
+          {resourcesError && <Alert className="td-wide" type="error" showIcon message={t("班级信息加载失败，请刷新页面重试")} />}
           <section className="td-card td-schedule">
-            <div className="td-section-heading"><h2>今日课表</h2><button onClick={() => navigate('/teacher-courses')}>完整课表 <Icon name="arrow-right" size={14} /></button></div>
+            <div className="td-section-heading"><h2>{t("今日课表")}</h2><button onClick={() => navigate('/teacher-courses')}>{t("完整课表")}<Icon name="arrow-right" size={14} /></button></div>
             <Spin spinning={scheduleLoading}>
-              {scheduleError ? <Alert type="error" showIcon message="课表加载失败" action={<button onClick={() => void loadSchedule()}>重新加载</button>} /> : sortedToday.length ? <div className="td-lessons">{sortedToday.map((lesson) => <div className="td-lesson" key={lesson.id}>
-                <strong>第 {lesson.period} 节</strong><span>{lesson.subject_name || '课程'}</span><span>{lesson.class_name || classPills.find((item) => item.id === lesson.class_id)?.name || '班级未命名'}</span><span className="td-room">{lesson.room || '常规课堂'}</span><button onClick={() => navigate('/file-center')}>备课资料</button>
-              </div>)}</div> : <div className="td-empty"><Icon name="calendar" size={30} /><p>今天暂无课程安排</p><span>可前往完整课表查看本周教学安排</span></div>}
+              {scheduleError ? <Alert type="error" showIcon message={t("课表加载失败")} action={<button onClick={() => void loadSchedule()}>{t("重新加载")}</button>} /> : sortedToday.length ? <div className="td-lessons">{sortedToday.map((lesson) => <div className="td-lesson" key={lesson.id}>
+                <strong>{t("第 {{p0}} 节", { p0: lesson.period })}</strong><span>{lesson.subject_name || t("课程")}</span><span>{lesson.class_name || classPills.find((item) => item.id === lesson.class_id)?.name || t("班级未命名")}</span><span className="td-room">{lesson.room || t("常规课堂")}</span><button onClick={() => navigate('/file-center')}>{t("备课资料")}</button>
+              </div>)}</div> : <div className="td-empty"><Icon name="calendar" size={30} /><p>{t("今天暂无课程安排")}</p><span>{t("可前往完整课表查看本周教学安排")}</span></div>}
             </Spin>
           </section>
           <section className="td-card td-todos">
-            <div className="td-section-heading"><h2>教学待办</h2><span>{pending} 项未完成</span></div>
-            <div className="td-todo-list">{todos.length ? todos.map((todo) => <div className={`td-todo${todo.done ? ' is-done' : ''}`} key={todo.id}><Checkbox checked={todo.done} onChange={(event) => setTodos((prev) => prev.map((item) => item.id === todo.id ? { ...item, done: event.target.checked } : item))}>{todo.text}</Checkbox><button aria-label={`删除待办：${todo.text}`} onClick={() => setTodos((prev) => prev.filter((item) => item.id !== todo.id))}><Icon name="x" size={14} /></button></div>) : <p className="td-muted">待办已清空，添加下一项教学安排吧。</p>}</div>
-            <form className="td-add-todo" onSubmit={(event) => { event.preventDefault(); addTodo() }}><Input aria-label="新待办事项" placeholder="添加教学待办…" value={todoDraft} onChange={(event) => setTodoDraft(event.target.value)} maxLength={120} /><button type="submit" disabled={!todoDraft.trim()} aria-label="添加待办"><Icon name="plus" size={18} /></button></form>
+            <div className="td-section-heading"><h2>{t("教学待办")}</h2><span>{pending} {t("项未完成")}</span></div>
+            <div className="td-todo-list">{todos.length ? todos.map((todo) => <div className={`td-todo${todo.done ? ' is-done' : ''}`} key={todo.id}><Checkbox checked={todo.done} onChange={(event) => setTodos((prev) => prev.map((item) => item.id === todo.id ? { ...item, done: event.target.checked } : item))}>{todo.text}</Checkbox><button aria-label={t("删除待办：{{p0}}", { p0: todo.text })} onClick={() => setTodos((prev) => prev.filter((item) => item.id !== todo.id))}><Icon name="x" size={14} /></button></div>) : <p className="td-muted">{t("待办已清空，添加下一项教学安排吧。")}</p>}</div>
+            <form className="td-add-todo" onSubmit={(event) => { event.preventDefault(); addTodo() }}><Input aria-label={t("新待办事项")} placeholder={t("添加教学待办…")} value={todoDraft} onChange={(event) => setTodoDraft(event.target.value)} maxLength={120} /><button type="submit" disabled={!todoDraft.trim()} aria-label={t("添加待办")}><Icon name="plus" size={18} /></button></form>
           </section>
           <section className="td-card">
-            <div className="td-section-heading"><h2>班级关注</h2><div className="td-heading-actions">{view === 'head' && <button onClick={() => void exportHeadStudentTimetables()}>导出所管学生课表</button>}{classPills.length > 0 && <select aria-label="关注班级" value={activeClassId ?? ''} onChange={(event) => setClassId(Number(event.target.value))}>{classPills.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</div></div>
-            <div className="td-attention">{[{ label: '作业异常', icon: 'clipboard' }, { label: '近期考试', icon: 'file-text' }, { label: '成绩波动', icon: 'chart' }].map((item) => <div key={item.label}><i><Icon name={item.icon} size={25} /></i><span><b>{item.label}</b><small>暂无统计数据</small></span></div>)}</div>
+            <div className="td-section-heading"><h2>{t("班级关注")}</h2><div className="td-heading-actions">{view === 'head' && <button onClick={() => void exportHeadStudentTimetables()}>{t("导出所管学生课表")}</button>}{classPills.length > 0 && <select aria-label={t("关注班级")} value={activeClassId ?? ''} onChange={(event) => setClassId(Number(event.target.value))}>{classPills.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</div></div>
+            <div className="td-attention">{[{ label: t("作业异常"), icon: 'clipboard' }, { label: t("近期考试"), icon: 'file-text' }, { label: t("成绩波动"), icon: 'chart' }].map((item) => <div key={item.label}><i><Icon name={item.icon} size={25} /></i><span><b>{item.label}</b><small>{t("暂无统计数据")}</small></span></div>)}</div>
           </section>
         </div>
       </Spin>

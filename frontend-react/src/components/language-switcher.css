@@ -1,0 +1,10 @@
+.language-switcher { display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; font-size: 12px; color: var(--text-2, #52525b); }
+.language-switcher select { max-width: 130px; min-height: 32px; padding: 4px 24px 4px 8px; font: inherit; color: inherit; background: var(--surface, #fff); border: 1px solid var(--border, #eaeaea); border-radius: 6px; cursor: pointer; }
+.language-switcher select:focus-visible { outline: 2px solid var(--accent, #1f6c9f); outline-offset: 2px; }
+.login-experience__nav .language-switcher { margin-left: auto; color: #fff; }
+.login-experience__nav .language-switcher select { background: #161616; border-color: #555; }
+.login-card > .language-switcher, .student-login-card > .language-switcher { display: flex; justify-content: flex-end; margin-bottom: 16px; }
+.choice-topbar > .language-switcher { margin-left: auto; }
+html[lang="en-US"] .nav-label { white-space: normal; line-height: 1.35; }
+html[lang="en-US"] .nav-item { min-height: 40px; height: auto; }
+@media (max-width: 768px) { .header-right { flex-wrap: wrap; } .choice-topbar { gap: 8px; flex-wrap: wrap; } }

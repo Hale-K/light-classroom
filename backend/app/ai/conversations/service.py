@@ -2,44 +2,37 @@
 from datetime import datetime
 
 from sqlalchemy import delete, select
-import tiktoken
 
+from app.ai.tools.clarification import restore_clarification
 from app.ai.conversations.models import AiConversation
 from app.ai.conversations.projector import is_model_visible, project_summary
 
 MAX_MESSAGES = 40
 MAX_SUMMARY_CHARS = 8000
-MAX_CONTENT_CHARS = 8000
+MAX_CONTENT_CHARS = 12000
 CHAT_CONTEXT_CHARS = 4000
 CHAT_CONTEXT_TOKENS = 1200
 
 
-def count_tokens(text: str, model: str = "deepseek-chat") -> int:
-    """Count model-compatible tokens before putting user content into context."""
-    try:
-        encoding = tiktoken.encoding_for_model(model)
-    except KeyError:
-        encoding = tiktoken.get_encoding("cl100k_base")
-    return len(encoding.encode(text or ""))
+def count_tokens(text: str, model: str = "") -> int:
+    """上下文护栏用的近似 token 估算。
+
+    tiktoken 的词表文件在离线/打包环境不可用（模型名也只认 OpenAI 系列），
+    而这里只需要截断阈值级别的粗估值：中文约 0.7 token/字，按 0.75 从宽计。"""
+    return int(len(text or "") * 0.75)
 
 
 def compact_for_chat(content: str, limit: int = CHAT_CONTEXT_CHARS, token_limit: int = CHAT_CONTEXT_TOKENS) -> str:
     """Extractive compression for oversized live requests; never sends the full payload to the LLM."""
-    text = " ".join((content or "").split())
+    text = (content or "").strip()
     if len(text) <= limit and count_tokens(text) <= token_limit:
         return text
-    # Keep the beginning and conclusion, plus sentence-sized evidence from the middle.
-    parts = [p.strip() for p in __import__("re").split(r"(?<=[。！？.!?；;])", text) if p.strip()]
-    if len(parts) <= 2:
-        return text[:limit // 2] + "\n[内容过长，已压缩]\n" + text[-limit // 2:]
-    head = "".join(parts[: max(1, len(parts) // 3)])
-    tail = "".join(parts[-max(1, len(parts) // 4):])
-    middle = "".join(parts[max(1, len(parts) // 3): max(1, len(parts) // 3) + 3])
-    result = head[: limit // 2] + "\n[中间内容已压缩，保留关键片段]\n" + middle + tail
-    result = result[:limit]
-    while count_tokens(result) > token_limit and len(result) > 400:
-        result = result[: int(len(result) * 0.85)]
-    return result
+    marker = '\n[历史内容已压缩，非完整证据]\n'
+    budget = max(0, min(limit, int(token_limit / 0.75)) - len(marker))
+    if budget == 0:
+        return marker[:max(0, min(limit, int(token_limit / 0.75)))]
+    head_size = budget // 2
+    return text[:head_size] + marker + text[-(budget - head_size):]
 
 
 def _clean(messages: list[dict]) -> list[dict]:
@@ -49,10 +42,12 @@ def _clean(messages: list[dict]) -> list[dict]:
         content = str(item.get("content") or "").strip()[:MAX_CONTENT_CHARS]
         if role not in ("user", "assistant") or not content:
             continue
+        card = restore_clarification(item.get("clarification")) if role == "assistant" else None
         clean.append({
             "role": role,
             "content": content,
             "model_visible": is_model_visible(item),
+            **({"clarification": card} if card else {}),
         })
     return clean
 

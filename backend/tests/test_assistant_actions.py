@@ -77,12 +77,12 @@ def database(monkeypatch):
     from sqlalchemy.orm import Session
     from sqlmodel import SQLModel
     from app.api.v1 import scheduling
-    from app.models.org import Subject, TenantConfig, User
+    from app.models.org import Subject, Tenant, TenantConfig, User
     from app.models.audit import AuditLog
     from app.services.scheduling.rules import RuleGroupDocument, dump_stored_rule_groups
 
     engine = create_engine("sqlite://")
-    tables = [t.__table__ for t in (AiAction, Subject, TenantConfig, User, AuditLog)]
+    tables = [t.__table__ for t in (AiAction, Subject, Tenant, TenantConfig, User, AuditLog)]
     SQLModel.metadata.create_all(engine, tables=tables)
     sync = Session(engine, expire_on_commit=False)
     class SessionAdapter:
@@ -94,6 +94,8 @@ def database(monkeypatch):
             sync.flush()
         async def commit(self):
             sync.commit()
+        async def rollback(self):
+            sync.rollback()
     async def term(*args):
         return "2026", "1"
     async def grid(*args):
@@ -103,6 +105,7 @@ def database(monkeypatch):
     monkeypatch.setattr(scheduling, "_load_grid_config", grid)
     group = RuleGroupDocument(id="g", name="高一规则", academic_year="2026", term="1")
     sync.add_all([
+        Tenant(id=1, code='audit-school', name='审查学校'),
         Subject(id=42, tenant_id=1, name="数学"),
         Subject(id=43, tenant_id=2, name="外校科目"),
         TenantConfig(tenant_id=1, config_key=scheduling.SCHEDULING_RULE_GROUP_CONFIG_KEY, config_value={"2026:1": dump_stored_rule_groups([group], "g")}),

@@ -46,9 +46,9 @@ def _tool_response(
 def _tool_scope(args: dict, page_context: dict | None) -> dict:
     context = page_context or {}
     return {
-        key: args.get(key) or context.get(key)
-        for key in ("academic_year", "term", "class_id", "rule_group_id", "job_id")
-        if args.get(key) or context.get(key)
+        key: args.get(key) or (context.get(key) if key in {'academic_year', 'term', 'job_id'} else None)
+        for key in ("academic_year", "term", "grade_id", "class_id", "rule_group_id", "job_id")
+        if args.get(key) or (key in {'academic_year', 'term', 'job_id'} and context.get(key))
     }
 
 

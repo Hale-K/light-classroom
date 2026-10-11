@@ -14,6 +14,10 @@ _FAQ = {
 def consultation_reply(query: str) -> str | None:
     text = query.strip()
     if _GENERIC_PROBLEM.fullmatch(text):
-        return '具体遇到了什么问题？可以发报错截图，或说明哪个年级、在哪一步出现异常。'
+        return ('先给出待确认计划：\n\n'
+                '1. 明确具体问题、涉及年级和学期。\n'
+                '2. 核对行政班或走班环境，再查询相关配置、课表或日志。\n'
+                '3. 按证据定位原因，验算建议后交付。\n\n'
+                '请说明在哪一步出现异常、期望怎样的结果；确认范围前等待补充，不修改数据。')
     # Exact reviewed questions only; never bypass a specific school-data query.
     return _FAQ.get(text.rstrip('。！？?!'))

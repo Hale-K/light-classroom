@@ -55,12 +55,19 @@ export const aiProviderApi = {
     unwrap<string[]>(http.post('/ai-providers/load-models', data)),
 }
 
+export type AssistantClarification = {
+  title: string
+  known_conditions: string[]
+  next_step: string
+  questions: { id: string; title: string; options: string[] }[]
+}
+
 export type AssistantPlan = {
   id: string
   status: 'pending' | 'executed' | 'cancelled'
   summary: string
   expires_at: string
-  result?: { text: string; path: string; count: number } | null
+  result?: { clarification?: AssistantClarification | null; text: string; path: string; count: number } | null
 }
 
 export type AssistantExecution = {
@@ -89,11 +96,11 @@ export type AssistantRun = {
   heartbeat_at: string
   events: { phase: string; message: string; at: string }[]
   execution?: AssistantExecution
-  result?: { text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[]; model_visible?: boolean } | null
+  result?: { clarification?: AssistantClarification | null; text: string; think?: string[]; choices?: { label: string; send: string }[]; plan?: AssistantPlan | null; jumps?: { label: string; path: string; requires_confirmation?: boolean }[]; model_visible?: boolean } | null
 }
 
 export type AssistantConversation = {
-  messages: { role: 'user' | 'assistant'; content: string; model_visible?: boolean }[]
+  messages: { role: 'user' | 'assistant'; content: string; model_visible?: boolean; clarification?: AssistantClarification }[]
   summary: string
   updated_at?: string | null
 }

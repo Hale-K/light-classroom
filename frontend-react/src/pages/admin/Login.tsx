@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { useEffect, useState } from 'react'
 import type { CSSProperties } from 'react'
 import { App, Button, Form, Input } from 'antd'
@@ -20,6 +21,7 @@ const styles: Record<string, CSSProperties> = {
 }
 
 export default function AdminLogin() {
+  useLocale()
   const { message } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
@@ -36,7 +38,7 @@ export default function AdminLogin() {
 
   const onFinish = async (values: AdminLoginForm) => {
     if (!values.username || !values.password) {
-      message.warning('请输入账号和密码')
+      message.warning(t("请输入账号和密码"))
       return
     }
     setLoading(true)
@@ -44,7 +46,7 @@ export default function AdminLogin() {
       await login(values.username, values.password)
       navigate(from || '/admin/schools', { replace: true })
     } catch (error) {
-      message.error(error instanceof Error ? error.message : '登录失败，请重试')
+      message.error(error instanceof Error ? error.message : t("登录失败，请重试"))
     } finally {
       setLoading(false)
     }
@@ -54,28 +56,30 @@ export default function AdminLogin() {
     <div className="login-bg">
       <div className="login-card" style={styles.card}>
         <div style={styles.brand}>
-          <div className="brand-mark brand-mark-admin">管</div>
+          <div className="brand-mark brand-mark-admin">{t("管")}</div>
           <div>
-            <div style={styles.brandName}>平台管理后台</div>
+            <div style={styles.brandName}>{t("平台管理后台")}</div>
             <div style={styles.brandSub}>
-              {APP_NAME} {APP_NAME_EN} · 学校开通与运营
-            </div>
+              {APP_NAME} {APP_NAME_EN} {t("· 学校开通与运营")}</div>
           </div>
         </div>
 
         <Form<AdminLoginForm> layout="vertical" requiredMark={false} onFinish={onFinish}>
-          <Form.Item name="username" rules={[{ required: true, message: '请输入管理员账号' }]}>
-            <Input size="large" placeholder="管理员账号" autoFocus />
+          <Form.Item name="username" rules={[{ required: true, message: t("请输入管理员账号") }]}>
+            <Input size="large" placeholder={t("管理员账号")} autoFocus />
           </Form.Item>
-          <Form.Item name="password" rules={[{ required: true, message: '请输入登录密码' }]}>
-            <Input.Password size="large" placeholder="登录密码" />
+          <Form.Item name="password" rules={[{ required: true, message: t("请输入登录密码") }]}>
+            <Input.Password size="large" placeholder={t("登录密码")} />
           </Form.Item>
           <Button type="primary" htmlType="submit" block size="large" style={styles.submit} loading={loading}>
-            登 录
-          </Button>
+            {t("登 录")}</Button>
         </Form>
 
-        <div style={styles.hint}>进入学校端请前往「学校登录」</div>
+        <div style={styles.hint}>
+          {t("其他端：")}<a onClick={() => navigate('/login')} style={{ color: 'var(--accent)', cursor: 'pointer', margin: '0 6px' }}>{t("教师工作台")}</a>
+          ·
+          <a onClick={() => navigate('/student/login')} style={{ color: 'var(--accent)', cursor: 'pointer', margin: '0 6px' }}>{t("学生选科")}</a>
+        </div>
       </div>
     </div>
   )

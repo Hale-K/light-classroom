@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Awaitable, Callable
 from typing import cast
 
@@ -10,6 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.ai.agent.agent_loop import run_agent_loop
 from app.ai.agent.invocation import invoke_agent
 from app.ai.agent.models import AssistantTurn
+from app.ai.tools.clarification import local_clarification, clarification_text, is_slot_constraint_statement
 from app.ai.agent.context import blocked_destructive_request, last_user_message
 from app.ai.conversations import project_messages, project_summary
 from app.ai.consultation import consultation_reply
@@ -29,8 +31,6 @@ logger = logging.getLogger(__name__)
 
 
 
-# 意图确实无法归类时的本地澄清话术；不预设用户在报错，避免答非所问的观感。
-CLARIFY_REPLY = "你具体想处理什么问题？可以说明要查的数据或想做的操作，也可以附上相关文件，我再帮你核对。"
 async def agent_reply(
     session: AsyncSession,
     tenant_id: int,
@@ -40,7 +40,7 @@ async def agent_reply(
     api_key: str,
     model: str,
     timeout: int,
-    max_tokens: int = 8192,
+    max_tokens: int = 16384,
     page_title: str | None = None,
     page_path: str | None = None,
     user_id: int | None = None,
@@ -89,6 +89,9 @@ async def agent_reply(
     configure_request = getattr(tool_scope, 'configure_request', None)
     if callable(configure_request):
         configure_request(last_user_message(turns))
+    configure_history = getattr(tool_scope, 'configure_planning_history', None)
+    if callable(configure_history):
+        configure_history(turns)
 
     outcome = await run_agent_loop(
             turns, memory_summary, base_url=base_url, api_key=api_key,
@@ -108,7 +111,8 @@ async def agent_reply(
         guide.rule_jumps(last_user, outcome.text, page_path) if guide else rule_jumps(last_user, outcome.text, page_path))
     step_lines = [f"{step.tool}：{step.detail}" for step in outcome.steps]
     return AssistantTurn(
-        text="规则草稿已准备，请核对下方内容后确认。" if plan else outcome.text,
+        text=clarification_text(tool_scope.clarification) if getattr(tool_scope, "clarification", None) else ("规则草稿已准备，请核对下方内容后确认。" if plan else outcome.text),
+        clarification=getattr(tool_scope, "clarification", None),
         think=step_lines,
         plan=plan,
         jumps=jumps,
@@ -160,8 +164,17 @@ async def handle_assistant_turn(
         )
     has_materials = bool((page_context or {}).get("reference_materials"))
     plan_mode = (page_context or {}).get('assistant_mode') == 'plan'
+    if not has_materials and re.search(r'接下来希望我帮你完成什么[？?]?\s*[:：]\s*查询当前情况\s*$', query):
+        card = local_clarification(query, page_path)
+        return AssistantTurn(text=clarification_text(card), clarification=card)
+    if not has_materials and is_slot_constraint_statement(query):
+        card = local_clarification(query, page_path)
+        return AssistantTurn(text=clarification_text(card), clarification=card)
     fixed_consultation = None if has_materials or plan_mode else consultation_reply(query)
     if fixed_consultation:
+        if '等待补充' in fixed_consultation:
+            card = local_clarification(query, page_path)
+            return AssistantTurn(text=clarification_text(card), clarification=card)
         return AssistantTurn(text=fixed_consultation)
     # 本地问候是按“最新一条用户消息”判断的。对话带有历史时，重复问候
     # 仍然不需要经过意图分类、向量检索和模型调用，否则简单的“你好”会被
@@ -186,7 +199,8 @@ async def handle_assistant_turn(
             "assistant.turn clarify id=%s kind=%s source=%s confidence=%.2f",
             message_id or "-", decision.kind.value, decision.source, decision.confidence,
         )
-        return AssistantTurn(text=CLARIFY_REPLY)
+        card = local_clarification(query, page_path)
+        return AssistantTurn(text=clarification_text(card), clarification=card)
     harness = cast(HarnessRouterService, runtime.service("harness_router")).select(decision)
     harness = apply_assistant_mode(harness, page_context)
     await runtime.emit("harness.selected", harness.trace_data())

@@ -376,6 +376,48 @@ def test_subject_allowed_slots_rules_feed_the_generator():
     assert generation_subject_allowed_slots(group) == {30: {(2, 3), (2, 4), (4, 3), (4, 4)}}
 
 
+def test_subject_allowed_slots_intersect_instead_of_weakening_each_other():
+    shared = {"title": "数学允许课位", "code": "subject_allowed_slots",
+              "priority": "hard", "target": {"type": "subject", "ids": [30]},
+              "periods": [3, 4]}
+    group = _group({**shared, "id": "wide", "weekdays": [2, 4]},
+                   {**shared, "id": "narrow", "weekdays": [4], "periods": [4]})
+    assert generation_subject_allowed_slots(group) == {30: {(4, 4)}}
+
+
+def test_disjoint_subject_allowed_slots_keep_an_empty_restriction():
+    shared = {"title": "数学允许课位", "code": "subject_allowed_slots",
+              "priority": "hard", "target": {"type": "subject", "ids": [30]},
+              "periods": [3]}
+    group = _group({**shared, "id": "a", "weekdays": [2]},
+                   {**shared, "id": "b", "weekdays": [4]},
+                   {**shared, "id": "c", "weekdays": [2, 4]})
+    assert generation_subject_allowed_slots(group) == {30: set()}
+
+
+def test_alternating_allowed_slots_do_not_intersect_across_separate_weeks():
+    shared = {"title": "数学允许课位", "code": "subject_allowed_slots",
+              "priority": "hard", "target": {"type": "subject", "ids": [30]},
+              "periods": [3]}
+    group = _group({**shared, "id": "odd", "weekdays": [2], "week_parity": "odd"},
+                   {**shared, "id": "even", "weekdays": [4], "week_parity": "even"})
+    assert generation_subject_allowed_slots(group) == {30: {(2, 3), (4, 3)}}
+
+
+def test_one_week_allowed_slots_do_not_restrict_the_other_week():
+    group = _group({"id": "odd", "title": "数学单周", "code": "subject_allowed_slots",
+                    "priority": "hard", "target": {"type": "subject", "ids": [30]},
+                    "periods": [3], "weekdays": [2], "week_parity": "odd"})
+    assert generation_subject_allowed_slots(group) == {}
+
+
+def test_evening_allow_list_does_not_forbid_daytime_subject_slots():
+    group = _group({"id": "evening", "title": "数学晚课", "code": "subject_allowed_slots",
+                    "priority": "hard", "target": {"type": "subject", "ids": [30]},
+                    "periods": [10], "weekdays": [2], "period_scope": "evening"})
+    assert generation_subject_allowed_slots(group) == {}
+
+
 def test_teacher_daily_limit_rules_feed_the_generator_with_the_strictest_limit():
     group = _group(
         {

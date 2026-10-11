@@ -70,7 +70,7 @@ class Scenario(BaseModel):
 
 class ScenarioQuery(PlanningScope):
     weekdays: list[Day] = Field(default_factory=lambda: [1, 2, 3, 4, 5], min_length=1, max_length=7,
-        description='方案内 periods 仅表示这些教学日的正式课时，默认周一到周五；周末或特殊课位须分别规划，不混加。')
+        description='方案内periods为这些教学日正式课时的全周合计；用户明确周一至周六时必须包含6，不得默认丢弃周六。返回单双周各日及周六课量分配草案。')
     mandatory_periods: list[Period] = Field(default_factory=list, max_length=12,
         description='这些教学日每一天必须排满的节次，例如1至7；不填不验证必排下限。')
     optional_periods: list[Period] = Field(default_factory=list, max_length=12,
@@ -224,6 +224,37 @@ async def _basis(session, tenant_id, query, scope, classes, grid):
             'message': '选科方案没有存储可核实高考分值权重。需用户明确提供权重或核对官方来源，不能把常识当作本届证据。'}}
 
 
+def _distribute_hours(values, available, mandatory):
+    """A capacity-checked hour allocation draft; no teacher/room solver."""
+    if any(value != value.to_integral_value() for value in values.values()):
+        return None
+    total = int(sum(values.values(), Decimal(0)))
+    if not mandatory <= available or not len(mandatory) <= total <= len(available):
+        return None
+    chosen = sorted(mandatory, key=lambda item: (item[1], item[0]))
+    chosen += sorted(available - mandatory, key=lambda item: (item[1], item[0]))[:total - len(mandatory)]
+    remaining = {subject: int(value) for subject, value in values.items()}
+    counts = {subject: defaultdict(int) for subject in values}
+    placements = []
+    for day, period in chosen:
+        candidates = [subject for subject in remaining if remaining[subject] > 0]
+        subject = min(candidates, key=lambda name: (counts[name][day], -remaining[name], name))
+        remaining[subject] -= 1
+        counts[subject][day] += 1
+        placements.append({'weekday': day, 'period': period, 'subject': subject})
+    return {
+        'subject_hours': {subject: {'weekday': sum(count for day, count in days.items() if day <= 5),
+            'saturday': days.get(6, 0), 'sunday': days.get(7, 0),
+            'by_day': {str(day): days.get(day, 0) for day in range(1, 8)}} for subject, days in counts.items()},
+        'daily_totals': {str(day): sum(item['weekday'] == day for item in placements) for day in range(1, 8)},
+        'slot_subjects_by_day': {str(day): {str(item['period']): item['subject']
+            for item in sorted(placements, key=lambda item: item['period']) if item['weekday'] == day}
+            for day in range(1, 8)},
+        'mandatory_filled': mandatory <= {(item['weekday'], item['period']) for item in placements},
+        'basis': '课量分配草案；已核对课位和各科合计，未校验教师、教室、连堂或其他排课规则',
+    }
+
+
 def _validate_scenarios(query, grid, known_subjects):
     actual = allowed_slots(grid, 'daytime')
     requested_mandatory = {(day, period) for day in query.weekdays for period in query.mandatory_periods}
@@ -238,6 +269,9 @@ def _validate_scenarios(query, grid, known_subjects):
         for row in scenario.subjects:
             for leg in ('odd', 'even') if row.week_parity == 'all' else (row.week_parity,):
                 values[leg][row.subject] += Decimal(str(row.periods))
+        for hours in values.values():
+            for row in scenario.subjects:
+                hours.setdefault(row.subject, Decimal(0))
         errors, risks = [], []
         unknown = set(row.subject for row in scenario.subjects) | set(query.fixed_subject_hours)
         for subject in sorted(unknown - known_subjects):
@@ -264,6 +298,8 @@ def _validate_scenarios(query, grid, known_subjects):
             'numeric_constraints_valid': not any(issue['code'] != 'UNKNOWN_SUBJECT' for issue in errors),
             'subject_catalog_valid': not any(issue['code'] == 'UNKNOWN_SUBJECT' for issue in errors),
             'subjects': [row.model_dump() for row in scenario.subjects],
+            'daily_distribution_by_week': {leg: _distribute_hours(values[leg], slots[leg], requested_mandatory)
+                for leg in actual},
             'total_periods_by_week': {leg: float(total) for leg, total in totals.items()},
             'remaining_periods_by_week': {leg: float(maximum[leg] - total) for leg, total in totals.items()},
             'errors': errors, 'risks': risks})

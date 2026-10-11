@@ -1306,6 +1306,11 @@ async def resources(
         User.status == UserStatus.active,
         User.role == BaseUserRole.teacher,
     ).order_by(User.name))).scalars().all())
+    # 只用于解释历史规则的失效对象，不加入可选择、可排课的教师列表。
+    disabled_teachers = (await session.execute(select(User.id, User.name).where(
+        User.tenant_id == tenant_id, User.status == UserStatus.disabled,
+        User.role == BaseUserRole.teacher,
+    ))).all()
     subjects = list((await session.execute(select(Subject).where(
         Subject.tenant_id == tenant_id,
     ).order_by(Subject.id))).scalars().all())
@@ -1367,6 +1372,7 @@ async def resources(
         assignment_data.append(data)
     return {"code": 0, "message": "ok", "data": {
         "teachers": [item.model_dump(exclude={"password_hash"}) for item in teachers],
+        "disabled_teachers": [{"id": teacher_id, "name": name} for teacher_id, name in disabled_teachers],
         "subjects": [item.model_dump() for item in subjects],
         "classes": [item.model_dump() for item in classes],
         "assignments": assignment_data,

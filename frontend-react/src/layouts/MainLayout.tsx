@@ -1,9 +1,11 @@
+import { translate as t, useLocale } from '@/i18n'
 ﻿import { App, Button, Dropdown, Result, Segmented, Spin } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { authApi, type AcademicYearsSettings } from '@/api'
 import AssistantDock from '@/components/AssistantDock'
 import Icon from '@/components/Icon'
+import LanguageSwitcher from '@/components/LanguageSwitcher'
 import OnboardingGuide from '@/components/OnboardingGuide'
 import PageTour from '@/components/PageTour'
 import { routeRoles, routeTitle } from '@/router/meta'
@@ -27,6 +29,7 @@ const MENU_GATED_PATHS = new Set([
  * 迁移前临时用：key 是菜单 key，value 是期望的前端路径。
  */
 const MENU_PATH_OVERRIDE: Record<string, string> = {
+  'exam-scheduling': '/exam-scheduling',
   'teacher-preparation': '/teacher-preparation',
   'teacher-classes': '/teacher-classes',
   'teacher-students': '/teacher-students',
@@ -36,6 +39,7 @@ const MENU_NAME_OVERRIDE: Record<string, string> = {
   'teacher-students': '选课审核',
 }
 function requiredMenuPath(pathname: string): string | null {
+  if (pathname === '/assistant-excel') return '/scheduling'
   if (pathname === '/' || pathname === '/onboarding') return null
   if (EXAM_MODULE_PATHS.includes(pathname)) return '/exam-scheduling'
   if (pathname === '/rooms') return '/campus-buildings'
@@ -45,19 +49,19 @@ function requiredMenuPath(pathname: string): string | null {
 }
 
 function academicTerm(settings: AcademicYearsSettings | null): string {
-  if (!settings?.current_academic_year) return '学年学期读取中'
-  return `${settings.current_academic_year} 学年 · 第 ${settings.current_term} 学期`
+  if (!settings?.current_academic_year) return t("学年学期读取中")
+  return t("{{p0}} 学年 · 第 {{p1}} 学期", { p0: settings.current_academic_year, p1: settings.current_term })
 }
 
 /** 角色展示名：优先用当前生效角色（activeRole），否则回退 user.role */
 function roleLabel(effectiveRole?: string | null): string {
-  if (!effectiveRole) return '任教老师'
+  if (!effectiveRole) return t("任教老师")
   switch (effectiveRole) {
-    case 'director': return '校长管理员'
-    case 'school_admin': return '学校管理员'
-    case 'academic_director': return '教导主任'
-    case 'head_teacher': return '班主任'
-    case 'teacher': return '任课教师'
+    case 'director': return t("校长管理员")
+    case 'school_admin': return t("学校管理员")
+    case 'academic_director': return t("教导主任")
+    case 'head_teacher': return t("班主任")
+    case 'teacher': return t("任课教师")
     default: return effectiveRole
   }
 }
@@ -88,11 +92,11 @@ function writeCollapsedGroups(collapsed: Set<string>) {
 
 /** 学校端主布局：3 组可折叠侧栏 + 顶栏 */
 export default function MainLayout() {
+  const locale = useLocale()
   const { modal } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
-  const schoolCode = useAuthStore((s) => s.schoolCode)
   const logout = useAuthStore((s) => s.logout)
   const activeRole = useAuthStore((s) => s.activeRole)
   const setActiveRole = useAuthStore((s) => s.setActiveRole)
@@ -141,7 +145,7 @@ export default function MainLayout() {
     return () => {
       active = false
     }
-  }, [])
+  }, [locale])
 
   useEffect(() => {
     refreshAcademicSettings()
@@ -168,11 +172,11 @@ export default function MainLayout() {
         }),
       }))
       .filter((group) => (group.children || []).length > 0)
-  }, [menus, effectiveRole])
+  }, [menus, effectiveRole, locale])
 
   const allowedMenuPaths = useMemo(
     () => new Set(visibleMenus.flatMap((group) => (group.children || []).map((item) => item.path).filter(Boolean) as string[])),
-    [visibleMenus],
+    [visibleMenus, locale],
   )
   const gatePath = requiredMenuPath(location.pathname)
   const routeAllowed = gatePath === null || allowedMenuPaths.has(gatePath)
@@ -184,7 +188,7 @@ export default function MainLayout() {
       }
     }
     return null
-  }, [location.pathname, visibleMenus])
+  }, [location.pathname, visibleMenus, locale])
 
   useEffect(() => {
     if (!activeGroupKey) return
@@ -208,17 +212,17 @@ export default function MainLayout() {
       writeCollapsedGroups(next)
       return next
     })
-  }, [])
+  }, [locale])
 
-  const displayName = useMemo(() => selectDisplayName({ user } as never), [user])
-  const currentTitle = routeTitle(location.pathname)
+  const displayName = useMemo(() => selectDisplayName({ user } as never), [user, locale])
+  const currentTitle = t(routeTitle(location.pathname))
 
   const onLogout = () => {
     modal.confirm({
-      title: '退出登录',
-      content: '确定退出当前工作台吗？',
-      okText: '退出工作台',
-      cancelText: '继续使用',
+      title: t("退出登录"),
+      content: t("确定退出当前工作台吗？"),
+      okText: t("退出工作台"),
+      cancelText: t("继续使用"),
       onOk: () => {
         logout()
         navigate('/login', { replace: true })
@@ -231,16 +235,16 @@ export default function MainLayout() {
       <aside className="layout-aside">
         <div className="brand">
           <div className="brand-mark">
-            <span>轻</span>
+            <span>{t("轻")}</span>
           </div>
           <div className="brand-copy">
-            <div className="brand-name">{teacherMode ? '教师工作台' : APP_NAME}</div>
-            <div className="brand-en">轻课堂教务系统</div>
+            <div className="brand-name">{teacherMode ? t("教师工作台") : APP_NAME}</div>
+            <div className="brand-en">{t("轻课堂教务系统")}</div>
           </div>
         </div>
 
         <div className="menu-scroll">
-          <nav className="nav" aria-label="主导航">
+          <nav className="nav" aria-label={t("主导航")}>
             {visibleMenus.map((group) => {
               const children = group.children || []
               if (children.length === 0) return null
@@ -259,8 +263,8 @@ export default function MainLayout() {
                     <span className="nav-icon-wrap">
                       <Icon name={item.icon} size={20} />
                     </span>
-                    <span className="nav-label">{item.title}</span>
-                    {!item.available && <span className="nav-lock">待开放</span>}
+                    <span className="nav-label">{t(item.title)}</span>
+                    {!item.available && <span className="nav-lock">{t("待开放")}</span>}
                   </button>
                 )
               }
@@ -306,7 +310,7 @@ export default function MainLayout() {
         <header className="layout-header app-header-glass">
           <div className="header-left">
             <div className="breadcrumb">
-              <span>轻课堂</span>
+              <span>{t("轻课堂")}</span>
               <span className="breadcrumb-sep">/</span>
               <strong>{currentTitle}</strong>
             </div>
@@ -320,12 +324,12 @@ export default function MainLayout() {
                 const switchable = roles.filter((r) => ['teacher', 'head_teacher'].includes(r))
                 if (switchable.length < 2) {
                   // 只有一个角色，仅展示标签
-                  const label = switchable.includes('head_teacher') ? '班主任' : '任课教师'
+                  const label = switchable.includes('head_teacher') ? t("班主任") : t("任课教师")
                   return <span className="td-role-label">{label}</span>
                 }
                 const options = [
-                  { label: '任课教师', value: 'teacher' },
-                  { label: '班主任', value: 'head_teacher' },
+                  { label: t("任课教师"), value: 'teacher' },
+                  { label: t("班主任"), value: 'head_teacher' },
                 ].filter((o) => switchable.includes(o.value))
                 return (
                   <Segmented
@@ -338,61 +342,34 @@ export default function MainLayout() {
               })()}
             <PageTour />
             <OnboardingGuide />
+            <LanguageSwitcher />
             <Dropdown
               trigger={['click']}
               placement="bottomRight"
               menu={{
                 items: [
                   {
-                    key: 'who',
-                    disabled: true,
-                    label: (
-                      <span className="account-who">
-                        <span className="account-who-avatar">{(displayName || '师')[0]}</span>
-                        <span className="account-who-copy">
-                          <strong>{displayName || '未登录'}</strong>
-                          <small>{roleLabel(effectiveRole)}</small>
-                        </span>
-                      </span>
-                    ),
-                  },
-                  {
-                    key: 'school',
-                    label: (
-                      <span className="account-school" title="点击复制学校代码">
-                        <span>当前学校</span>
-                        <code>{schoolCode || '—'}</code>
-                        <Icon name="clipboard" size={12} />
-                      </span>
-                    ),
-                  },
-                  { type: 'divider' },
-                  {
                     key: 'settings',
                     icon: <Icon name="settings" size={14} />,
-                    label: '系统设置',
+                    label: t("系统设置"),
                   },
                   { type: 'divider' },
                   {
                     key: 'logout',
                     icon: <Icon name="logout" size={14} />,
-                    label: '退出登录',
+                    label: t("退出登录"),
                   },
                 ],
                 onClick: ({ key }) => {
-                  if (key === 'school' && schoolCode) {
-                    void navigator.clipboard.writeText(schoolCode).catch(() => undefined)
-                    return
-                  }
                   if (key === 'settings') navigate('/settings')
                   if (key === 'logout') onLogout()
                 },
               }}
             >
               <button type="button" className="account-chip">
-                <span className="account-chip-avatar">{(displayName || '师')[0]}</span>
+                <span className="account-chip-avatar">{(displayName || t("师"))[0]}</span>
                 <span className="account-chip-copy">
-                  <strong>{displayName || '未登录'}</strong>
+                  <strong>{displayName || t("未登录")}</strong>
                   <small>{roleLabel(effectiveRole)}</small>
                 </span>
                 <Icon name="chevron-down" size={13} />
@@ -404,13 +381,13 @@ export default function MainLayout() {
         <main className="layout-main">
           <div className="page-shell page-enter" key={location.pathname}>
             {!menusLoaded ? (
-              <div style={{ padding: 48, textAlign: 'center' }}><Spin tip="正在校验页面权限" /></div>
+              <div style={{ padding: 48, textAlign: 'center' }}><Spin tip={t("正在校验页面权限")} /></div>
             ) : menusError ? (
-              <Result status="warning" title="菜单权限加载失败" subTitle="暂时无法校验页面访问权限，请刷新后重试。" extra={<Button onClick={() => window.location.reload()}>刷新页面</Button>} />
+              <Result status="warning" title={t("菜单权限加载失败")} subTitle={t("暂时无法校验页面访问权限，请刷新后重试。")} extra={<Button onClick={() => window.location.reload()}>{t("刷新页面")}</Button>} />
             ) : routeAllowed ? (
               <Outlet />
             ) : (
-              <Result status="403" title="无权访问此页面" subTitle="当前角色未配置该菜单权限。" extra={<Button type="primary" onClick={() => navigate('/dashboard', { replace: true })}>返回工作台</Button>} />
+              <Result status="403" title={t("无权访问此页面")} subTitle={t("当前角色未配置该菜单权限。")} extra={<Button type="primary" onClick={() => navigate('/dashboard', { replace: true })}>{t("返回工作台")}</Button>} />
             )}
           </div>
         </main>

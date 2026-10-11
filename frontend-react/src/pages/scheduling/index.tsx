@@ -1489,6 +1489,11 @@ export default function SchedulingView() {
             </div>
           )}
           {issues.length > 0 && (
+            <>
+            <div className="sk-issues-actions">
+              <Button size="small" type="primary" onClick={() => setActiveTab('rules')}>去调整排课规则</Button>
+              <span>调整后请重新检查，确认无硬冲突再生成课表。</span>
+            </div>
             <ul className="sk-issues">
               {(showAllIssues ? issues : issues.slice(0, 8)).map((issue) => (
                 <li key={`${issue.code}-${issue.entity_id}-${issue.related_id || 0}`}>
@@ -1511,6 +1516,7 @@ export default function SchedulingView() {
                 </li>
               )}
             </ul>
+            </>
           )}
         </section>
       )}
@@ -1797,7 +1803,7 @@ export default function SchedulingView() {
             disabled: !gridConfigured,
             children: (
               <>
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+              <div className="sk-schedule-toolbar">
                 {timetableMode === 'walk_class' ? (
                   <Segmented
                     value={scheduleViewMode}

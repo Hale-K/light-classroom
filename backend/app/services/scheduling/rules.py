@@ -599,10 +599,13 @@ def generation_subject_allowed_slots(group: RuleGroupDocument) -> dict[int, set[
     """Return hard subject-level allowed slots (code ``subject_allowed_slots``).
 
     Callers convert the returned allow-list into forbidden complements against
-    the generation time universe (days x periods_per_day).
+    the daytime generation universe. Intersect within each week, then union
+    the two week instances because this legacy return type has no parity axis.
+    A subject unrestricted in either instance cannot be globally restricted;
+    parity-specific enforcement remains part of rule evaluation after generation.
     """
     compiled_by_id = {item.rule_id: item for item in compile_rule_group(group)}
-    result: dict[int, set[tuple[int, int]]] = defaultdict(set)
+    by_week: dict[str, dict[int, set[tuple[int, int]]]] = {"odd": {}, "even": {}}
     for rule in group.rules:
         compiled = compiled_by_id.get(rule.id)
         if compiled is None:
@@ -613,13 +616,22 @@ def generation_subject_allowed_slots(group: RuleGroupDocument) -> dict[int, set[
             or rule.priority != "hard"
             or compiled.status != "ready"
             or rule.target.type != "subject"
+            or rule.period_scope == "evening"
         ):
             continue
         pairs = {(weekday, period) for weekday in rule.weekdays for period in rule.periods}
         if pairs:
             for subject_id in rule.target.ids:
-                result[subject_id].update(pairs)
-    return result
+                for parity, allowed in by_week.items():
+                    if rule.week_parity not in {"all", parity}:
+                        continue
+                    # 同一周每条硬规则都要满足；空交集不能回退为无限制。
+                    if subject_id in allowed:
+                        allowed[subject_id] &= pairs
+                    else:
+                        allowed[subject_id] = set(pairs)
+    return {subject_id: by_week["odd"][subject_id] | by_week["even"][subject_id]
+            for subject_id in by_week["odd"].keys() & by_week["even"].keys()}
 
 
 def generation_class_slot_allowed_subjects(group: RuleGroupDocument) -> dict[int, dict[tuple[int, int], set[int]]]:

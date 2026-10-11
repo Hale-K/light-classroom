@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { Button, Result } from 'antd'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/store/auth'
@@ -10,13 +11,14 @@ import { useAuthStore } from '@/store/auth'
  * 提供"返回首页"和"申请权限"两个操作。
  */
 export default function ForbiddenPage() {
+  useLocale()
   const navigate = useNavigate()
   const location = useLocation()
   const user = useAuthStore((s) => s.user)
   const activeRole = useAuthStore((s) => s.activeRole)
 
   const from = ((location.state as { from?: string } | null)?.from) || '/'
-  const roleLabel = activeRole || user?.role || '未登录'
+  const roleLabel = activeRole || user?.role || t("未登录")
 
   return (
     <div
@@ -33,19 +35,17 @@ export default function ForbiddenPage() {
         title="403"
         subTitle={
           <div style={{ lineHeight: 1.8 }}>
-            <div>抱歉，你当前的角色没有权限访问这个页面。</div>
+            <div>{t("抱歉，你当前的角色没有权限访问这个页面。")}</div>
             <div style={{ color: 'var(--text-tertiary, #999)' }}>
-              当前角色：<b>{roleLabel}</b> · 想去的页面：<code>{from}</code>
+              {t("当前角色：")}<b>{roleLabel}</b> {t("· 想去的页面：")}<code>{from}</code>
             </div>
           </div>
         }
         extra={[
           <Button key="back" type="primary" onClick={() => navigate('/dashboard', { replace: true })}>
-            返回工作台
-          </Button>,
+            {t("返回工作台")}</Button>,
           <Button key="retry" onClick={() => navigate(from)}>
-            再试一次
-          </Button>,
+            {t("再试一次")}</Button>,
         ]}
       />
     </div>

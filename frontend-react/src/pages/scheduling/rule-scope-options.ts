@@ -15,6 +15,7 @@ export function scopeOptionsForRule(family: keyof typeof scopesByFamily, code: S
   if (code === 'teacher_daily_limit' || code === 'teacher_gap_free') return ['教师', '学科'];
   if (code === 'slot_forbidden') return ['学科', '教师', '班级', '全局'];
   if (code === 'subject_allowed_slots') return ['学科'];
+  if (code === 'subject_prefer_early_periods' || code === 'subject_gap_fill_late_periods') return ['学科'];
   if (code === 'slot_teacher_role_required') return ['全局'];
   if (code === 'teacher_period_minimum') return ['教师'];
   if (code === 'subject_consecutive' || code === 'class_slot_pattern') return ['学科'];

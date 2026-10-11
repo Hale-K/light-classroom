@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { App, Button, Form, InputNumber, Modal, Select, Space, Table, Tag } from 'antd'
 import { Link } from 'react-router-dom'
@@ -13,8 +14,8 @@ type SubjectRow = {
   classes: WalkTeachingClass[]; planned?: HourPlan
 }
 
-export default function WalkCourseHoursPanel({ academicYear, term, subjects, initialGradeId }: {
-  academicYear: string; term: string; subjects: SubjectInfo[]; initialGradeId?: number
+export default function WalkCourseHoursPanel({ academicYear, term, subjects, initialGradeId, toolbarLeading }: {
+  academicYear: string; term: string; subjects: SubjectInfo[]; initialGradeId?: number; toolbarLeading?: ReactNode
 }) {
   const { message } = App.useApp()
   const [grades, setGrades] = useState<Grade[]>([])
@@ -112,8 +113,8 @@ export default function WalkCourseHoursPanel({ academicYear, term, subjects, ini
 
   const originalHours = editing?.teachingClass ?? editing?.subject.planned
   return <section className="sk-hours walk-hours">
-    <div className="sk-hours-intro">
-      <div><h2>走班课时</h2><p>按科目设置，教学班自动带入。</p></div>
+    <div className="sk-hours-intro hours-controls">
+      {toolbarLeading || <div><h2>走班课时</h2><p>按科目设置，教学班自动带入。</p></div>}
       <Space wrap className="walk-hours-toolbar">
         <Select aria-label="走班课时年级" className="walk-hours-grade" value={gradeId} disabled={saving} placeholder="选择年级"
           onChange={setGradeId} options={grades.map((item) => ({ value: item.id, label: item.name }))} />

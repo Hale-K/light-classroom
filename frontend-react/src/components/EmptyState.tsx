@@ -1,3 +1,4 @@
+import { translate as t, useLocale } from '@/i18n'
 import { Button } from 'antd'
 import Icon from './Icon'
 
@@ -14,12 +15,13 @@ interface EmptyStateProps {
 /** 空状态占位：高度可配（默认撑满容器），图标用柔和 pastel 底 */
 export default function EmptyState({
   icon = 'file-text',
-  title = '暂无数据',
+  title = t("暂无数据"),
   desc,
   height,
   actionText,
   onAction,
 }: EmptyStateProps) {
+  useLocale()
   return (
     <div
       className="empty-state"
