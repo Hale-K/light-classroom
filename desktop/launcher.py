@@ -136,14 +136,19 @@ class _DesktopBridge:
     因此前端检测到 window.pywebview 时，文件下载改走本桥。
     """
 
-    def __init__(self, base_url: str = "") -> None:
+    def __init__(self, base_url: str = "", trial=None) -> None:
         self._base = base_url.rstrip("/")
+        self._trial = trial
         self._window: "webview.Window | None" = None
 
     def attach(self, window: "webview.Window") -> None:
         self._window = window
 
     def save_file(self, url: str, filename: str = "download") -> str:
+        if self._trial:
+            message = self._trial.check()
+            if message:
+                return message
         import tempfile
         import urllib.request
 
@@ -210,6 +215,49 @@ def validate_server_url(target: str) -> str:
     return target.rstrip("/")
 
 
+def show_trial_block(message: str, data_dir: Path) -> None:
+    from trial import blocked_html
+
+    page = blocked_html(message)
+    try:
+        import webview
+        webview.create_window("轻课堂 · 试用提示", html=page, width=760, height=440)
+        webview.start()
+    except Exception:
+        import webbrowser
+        notice = data_dir / "trial-notice.html"
+        notice.write_text(page, encoding="utf-8")
+        webbrowser.open(notice.as_uri())
+
+
+def monitor_trial(window, guard, stopped) -> None:
+    from trial import blocked_html
+
+    while not stopped.wait(1):
+        message = guard.check()
+        if message:
+            window.load_html(blocked_html(message))
+            return
+
+
+def start_desktop_window(url: str, trial=None) -> None:
+    import threading
+    import webview
+
+    bridge = _DesktopBridge(base_url=url, trial=trial)
+    window = webview.create_window(trial.title() if trial else "轻课堂", url, width=1440, height=900,
+                                   min_size=(1100, 700), text_select=True, js_api=bridge)
+    bridge.attach(window)
+    stopped = threading.Event()
+    try:
+        if trial:
+            webview.start(monitor_trial, (window, trial, stopped))
+        else:
+            webview.start()
+    finally:
+        stopped.set()
+
+
 def main() -> None:
     if getattr(sys, "frozen", False):
         backend_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).parent))
@@ -222,6 +270,20 @@ def main() -> None:
     log_file = data_dir / "launcher.log"
     sys.stdout = sys.stderr = open(log_file, "a", encoding="utf-8", buffering=1)
     print(f"--- launcher 启动 {time.strftime('%Y-%m-%d %H:%M:%S')} ---")
+
+    from trial import TrialGuard, TrialMiddleware, bundled_trial_days
+    try:
+        trial_days = bundled_trial_days()
+    except ValueError as exc:
+        show_trial_block(str(exc), data_dir)
+        return
+    # One per-user record shared by modes and builds, outside the installation.
+    trial = TrialGuard(data_dir.parent / "LightClassroomTrial" / "state.json", trial_days) if trial_days else None
+    if trial:
+        message = trial.check()
+        if message:
+            show_trial_block(message, data_dir)
+            return
 
     # 连接服务器模式：数据目录放一个 server.url（内容为网页端地址，如 http://192.168.1.10:5176），
     # 窗口直接加载网页端；教师/超管/学生三端在登录页内切换（同一路由组）。
@@ -236,12 +298,7 @@ def main() -> None:
         if target:
             target = validate_server_url(target)
             print(f"[desktop] 服务器模式: {target}")
-            import webview
-            bridge = _DesktopBridge(base_url=target)
-            window = webview.create_window("轻课堂", target, width=1440, height=900,
-                                           min_size=(1100, 700), text_select=True, js_api=bridge)
-            bridge.attach(window)
-            webview.start()
+            start_desktop_window(target, trial)
             return
 
     if demo:
@@ -254,7 +311,8 @@ def main() -> None:
     from app.main import app
 
     mount_frontend(app, backend_root / "frontend")
-    config = uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning", lifespan="on")
+    guarded_app = TrialMiddleware(app, trial) if trial else app
+    config = uvicorn.Config(guarded_app, host="127.0.0.1", port=port, log_level="warning", lifespan="on")
     server = uvicorn.Server(config)
 
     import threading
@@ -272,12 +330,7 @@ def main() -> None:
     url = f"http://127.0.0.1:{port}"
     print(f"[desktop] 轻课堂已启动: {url}（数据目录 {data_dir}）")
     try:
-        import webview
-        bridge = _DesktopBridge(base_url=url)
-        window = webview.create_window("轻课堂", url, width=1440, height=900,
-                                       min_size=(1100, 700), text_select=True, js_api=bridge)
-        bridge.attach(window)
-        webview.start()
+        start_desktop_window(url, trial)
     except Exception as exc:  # WebView2 缺失等窗口故障：回退系统浏览器，服务保持运行
         print(f"[desktop] 窗口创建失败（{exc!r}），回退浏览器模式", file=sys.stderr)
         import webbrowser

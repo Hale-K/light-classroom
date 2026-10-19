@@ -5,11 +5,15 @@ param(
     [string]$SeedDir,
     [string]$CompilerPath,
     [string]$PythonPath,
+    [switch]$Trial,
+    [ValidateRange(0, 3650)][int]$TrialDays = 0,
     [switch]$SkipFrontendBuild,
     [switch]$OfflineRuntime
 )
 
 $ErrorActionPreference = 'Stop'
+if ($Trial -and -not $PSBoundParameters.ContainsKey('TrialDays')) { $TrialDays = 7 }
+if ($Trial -and $TrialDays -eq 0) { throw '-Trial cannot be combined with -TrialDays 0.' }
 $repo = Split-Path $PSScriptRoot -Parent
 $python = if ($PythonPath) { (Resolve-Path -LiteralPath $PythonPath).ProviderPath } else { Join-Path $repo 'backend/.venv/Scripts/python.exe' }
 $installerRoot = Join-Path $repo 'output/windows-installer'
@@ -20,6 +24,7 @@ $bundleDir = Join-Path $artifactDir 'bundle'
 $workDir = Join-Path $artifactDir 'work'
 $installerName = "LightClassroom-Setup-x64-$Mode-$stamp"
 $label = @{ online = '联网版'; demo = '演示版'; normal = '普通版'; offline = '离线版' }[$Mode]
+if ($TrialDays -gt 0) { $label += '-试用版'; $installerName += '-trial' }
 $desktopFile = Join-Path $desktopRoot "轻课堂$label-$stamp.exe"
 $hasDemo = $Mode -eq 'demo' -or ($Mode -eq 'offline' -and $SeedDir)
 $hasOfflineRuntime = $Mode -eq 'offline' -or $OfflineRuntime
@@ -73,7 +78,7 @@ if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notm
 }
 New-Item -ItemType Directory -Path $installerRoot, $workDir -Force | Out-Null
 $configFile = Join-Path $workDir 'desktop-package.json'
-@{ mode = $Mode; demo = [bool]$hasDemo; server_url = $ServerUrl } | ConvertTo-Json | Set-Content -LiteralPath $configFile -Encoding utf8
+@{ mode = $Mode; demo = [bool]$hasDemo; server_url = $ServerUrl; trial_days = $TrialDays } | ConvertTo-Json | Set-Content -LiteralPath $configFile -Encoding utf8
 $guideFile = Join-Path $workDir 'install-guide.txt'
 $folder = @{ online = 'LightClassroomOnline'; demo = 'LightClassroomDemo'; normal = 'LightClassroom'; offline = 'LightClassroomOffline' }[$Mode]
 if ($Mode -eq 'offline' -and $hasDemo) { $folder = 'LightClassroomOfflineDemo' }
@@ -86,6 +91,7 @@ $usage = if ($Mode -eq 'online') {
 }
 $runtimeNote = if ($hasOfflineRuntime) { '包含完整 WebView2 安装程序，安装时无需联网。' } else { '缺少 WebView2 时安装程序需要联网下载运行环境。' }
 $localNote = if ($Mode -eq 'online') { '业务数据由学校服务器保存。' } else { '本机 SQLite、基础教务、排课和本地导出可离线使用。' }
+$trialNote = if ($TrialDays -gt 0) { "试用期限：当前电脑用户首次启动试用客户端后 $TrialDays 天。到期将停止使用客户端，业务数据保留；请联系软件提供方获取正式版。重装不会重新计时。" } else { '此安装包未设置客户端试用期限。' }
 @"
 轻课堂$label 安装与使用说明
 
@@ -94,6 +100,7 @@ $localNote = if ($Mode -eq 'online') { '业务数据由学校服务器保存。'
 $runtimeNote
 
 $usage
+$trialNote
 
 数据和日志目录：%APPDATA%\$folder。重新安装保留已有数据，卸载保留数据。
 $localNote
@@ -124,7 +131,7 @@ try {
     $installerFile = Join-Path $installerRoot "$installerName.exe"
     Copy-Item -LiteralPath $installerFile -Destination $desktopFile
     if ((Get-FileHash -LiteralPath $installerFile).Hash -ne (Get-FileHash -LiteralPath $desktopFile).Hash) { throw 'Desktop copy failed. Old packages preserved.' }
-    $record = @{ mode = $Mode; bundle = $bundleDir; work = $workDir; installer = $installerFile; desktop = $desktopFile }
+    $record = @{ mode = $Mode; trial_days = $TrialDays; bundle = $bundleDir; work = $workDir; installer = $installerFile; desktop = $desktopFile }
     $record | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $installerRoot "latest-$Mode.json") -Encoding utf8
     & (Join-Path $PSScriptRoot 'scripts/clean-packages.ps1') -KeepBundleDir $bundleDir -KeepWorkDir $workDir -KeepInstaller $installerFile -KeepDesktopInstaller $desktopFile
     Write-Host "Installer ready: $desktopFile"

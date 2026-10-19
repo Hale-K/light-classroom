@@ -6,6 +6,7 @@
 产物：dist/LightClassroom/（Windows: LightClassroom.exe；macOS: LightClassroom.app）
 """
 import os
+import json
 from pathlib import Path
 
 REPO = Path(SPECPATH).resolve().parent
@@ -13,12 +14,22 @@ FRONTEND_DIST = Path(os.environ.get("LIGHT_FRONTEND_DIST_DIR", str(REPO / "front
 BACKEND = REPO / "backend"
 
 datas = []
+package_settings = {}
 package_config = os.environ.get("LIGHT_DESKTOP_PACKAGE_CONFIG")
 if package_config:
     config_path = Path(package_config).resolve()
     if not config_path.is_file() or config_path.name != "desktop-package.json":
         raise ValueError("LIGHT_DESKTOP_PACKAGE_CONFIG 缺少有效的 desktop-package.json")
     datas.append((str(config_path), "."))
+    package_settings = json.loads(config_path.read_text(encoding="utf-8-sig"))
+# Embed trial policy in the Python archive so editing/deleting the mode JSON does
+# not turn a trial into an unrestricted build. No secret signing keys are bundled.
+trial_days = package_settings.get("trial_days", 0)
+if type(trial_days) is not int or not 0 <= trial_days <= 3650:
+    raise ValueError("trial_days must be an integer between 0 and 3650")
+policy_dir = Path(workpath) / "trial-policy"
+policy_dir.mkdir(parents=True, exist_ok=True)
+(policy_dir / "_trial_policy.py").write_text(f"TRIAL_DAYS = {trial_days!r}\n", encoding="utf-8")
 # 演示数据只在显式指定时打包；包含学校快照的目录保存在 ignored output/。
 demo_seed = os.environ.get("LIGHT_DEMO_SEED_DIR")
 if demo_seed:
@@ -43,6 +54,7 @@ hiddenimports = [
     "uvicorn.lifespan", "uvicorn.lifespan.on",
     "aiosqlite", "anyio._backends._asyncio",
     "webview",
+    "_trial_policy",
     "app.main", "app.db.session",
 ]
 hiddenimports += ortools_hiddenimports
@@ -57,7 +69,7 @@ excludes = [
 
 a = Analysis(
     [str(REPO / "desktop" / "launcher.py")],
-    pathex=[str(BACKEND)],
+    pathex=[str(BACKEND), str(REPO / "desktop"), str(policy_dir)],
     binaries=ortools_binaries,
     datas=datas,
     hiddenimports=hiddenimports,

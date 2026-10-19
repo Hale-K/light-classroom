@@ -34,6 +34,26 @@ pwsh -File desktop/build.ps1 -Mode demo -OfflineRuntime
 
 `build-demo.ps1` 仅为兼容入口，等同于 `build.ps1 -Mode demo`。联网版不填写域名会立即报错；不允许在服务器地址中夹带账号、密码、查询参数或片段。普通版和离线版不会读取其他版本的 `server.url`。
 
+## 限时试用包
+
+四种模式都可附加 `-Trial`，默认首次启动后试用 **7 天**；也可通过 `-TrialDays` 指定其他天数：
+
+```powershell
+pwsh -File desktop/build.ps1 -Mode offline -Trial
+pwsh -File desktop/build.ps1 -Mode demo -Trial
+pwsh -File desktop/build.ps1 -Mode normal -TrialDays 7
+```
+
+不传试用参数生成不限时版本；`-TrialDays` 允许 1–3650 天，单独传 `0` 表示不限时（不能与 `-Trial` 同用）。试用天数编入程序的 Python 存档，安装说明、桌面安装包文件名及运行窗口标题会标明试用信息。正式版使用原有数据目录，覆盖安装同模式正式版后可继续使用原数据，不必重新建学校。
+
+从当前操作系统用户第一次启动任意试用包开始计时，按连续 24 小时计算一天。各模式共用试用记录，切换模式、更新或普通卸载重装不会重新计时；重新打一个更长试用期的包也不会延长已有期限。Windows 记录位于 `%APPDATA%/LightClassroomTrial/state.json`，macOS 为 `~/Library/Application Support/LightClassroomTrial/state.json`（需在 Mac 构建）。卸载和旧包清理均保留记录及业务数据库。
+
+启动前和运行中检查期限，到期显示提示并禁止新的本地业务请求，已有 WebSocket 会话也会关闭；已开始的后台任务可能继续完成。文件下载桥同样检查期限。所有账号（包括超管）均受限制，业务数据保留。记录损坏、无法读写或检测到超过 5 分钟的日期回拨会阻止使用；日期回拨时校准系统时间并重启即可。已经到期的记录不会因回拨时间恢复。
+
+这是本机离线试用控制，不能抵抗有意删除全部试用记录、更换系统用户、还原系统快照或修改程序。联网版仅限制这个客户端，不能限制用户直接通过浏览器使用服务器；如果需要付费授权、防破解或按学校账号控制期限，应增加服务器授权校验。旧的不限时安装包仍然可用，应停止向试用用户分发它们。
+
+试用包仍属于所选模式，成功打包后会按既有策略替换该模式的上一套产物；需要保留用于分发的正式包时先另存到发布目录。
+
 ## 首次登录与账号保存
 
 普通版和空白离线版首次启动会初始化平台超管：**账号 `admin`，密码 `admin123456`**。在登录页选择“平台管理员”，登录后可创建学校和校长账号，再进入学校配置人员与课程。
@@ -61,11 +81,12 @@ desktop/
   build.ps1                    统一打包入口
   build-demo.ps1               旧演示命令兼容入口
   launcher.py                  客户端启动与模式选择
+  trial.py                     试用计时、到期提示及本地接口拦截
   light-classroom.spec         PyInstaller 配置
   export_demo.py               导出演示快照
   installer/                  当前中文安装器及说明
   scripts/                    运行环境下载、旧包清理
-  tests/                      模式测试
+  tests/                      模式和试用控制测试
   legacy/                     已停用的旧安装配置
   artifacts/<类型>/<时间>/     程序目录与构建缓存（不入库）
 ```
