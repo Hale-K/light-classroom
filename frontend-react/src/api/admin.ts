@@ -1,6 +1,8 @@
 /** admin 领域 API（由 api/index.ts 拆分）。 */
 import type {
   AdminSchool,
+  EducationStage,
+  GaokaoMode,
   PlatformAdminInfo,
 } from '@/types'
 import { http, unwrap } from './http'
@@ -16,7 +18,8 @@ export const adminApi = {
     code: string
     name: string
     province: string
-    gaokao_mode: '3+1+2' | '3+3' | 'traditional'
+    education_stage: EducationStage
+    gaokao_mode?: GaokaoMode
     admin_name: string
     admin_phone: string
     admin_password: string
@@ -24,7 +27,7 @@ export const adminApi = {
   updateSchool: (id: number, data: {
     name: string
     province?: string
-    gaokao_mode?: '3+1+2' | '3+3' | 'traditional'
+    gaokao_mode?: GaokaoMode
     admin_phone?: string
   }) => unwrap<AdminSchool>(http.put(`/admin/schools/${id}`, data)),
   resetPassword: (id: number, password: string) =>

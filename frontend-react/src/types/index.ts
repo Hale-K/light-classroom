@@ -848,7 +848,9 @@ export interface MenuNode {
 /** 菜单响应体 */
 export interface MenuResult {
   menus: MenuNode[];
-  gaokao_mode?: "3+1+2" | "3+3" | "traditional";
+  gaokao_mode?: "3+1+2" | "3+3" | "traditional" | null;
+  education_stage?: EducationStage;
+  education_stage_label?: string;
 }
 
 /** 教师职务标签（截图样式："2029届高一年级部·组织成员 ×"） */
@@ -959,7 +961,9 @@ export interface AdminSchool {
   name: string;
   type: string;
   province: string;
-  gaokao_mode: "3+1+2" | "3+3" | "traditional";
+  education_stage: EducationStage;
+  education_stage_label: string;
+  gaokao_mode: GaokaoMode | null;
   created_at: string;
   admin_phone?: string | null;
   admin_status?: string | null;
@@ -969,6 +973,7 @@ export interface AdminSchool {
 }
 
 export type GaokaoMode = "3+1+2" | "3+3" | "traditional";
+export type EducationStage = "primary" | "junior" | "senior" | "higher" | "training";
 
 /** 应用配置常量 */
 export const APP_NAME = "轻课堂";
