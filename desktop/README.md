@@ -95,10 +95,21 @@ desktop/
 
 清理脚本为 `scripts/clean-packages.ps1`，支持 `-WhatIf` 预览。旧 `buildN`、`outN`、`dist` 输出会在新包成功后清理。不要手工删除最新记录指向的程序目录，再用该记录重新封装安装器。
 
-## CI 与 macOS
+## GitHub Release 发布
 
-`.github/workflows/desktop.yml` 的 Windows 构建使用统一入口生成普通版；macOS 使用 PyInstaller 生成压缩包。可手动触发工作流，`desktop-v*` 标签触发 Release 发布。本次未实际运行云端工作流。
+推送 `desktop-v*` 标签会由 `.github/workflows/desktop.yml` 自动生成 GitHub Release，并附带以下 Windows x64 安装包与 SHA-256 校验文件：
 
-macOS 包必须在 macOS 上构建，正式分发需要签名和公证。Windows 四种模式的一键安装脚本不能在 Mac 上直接执行。
+- 普通正式版：空白本机 SQLite，首次登录超管为 `admin / admin123456`。
+- 普通 7 天试用版：与普通版相同，但受本机试用期限限制。
+- 离线 7 天试用版：额外内置完整 WebView2 安装程序，适合不能联网安装依赖的电脑。
+
+```powershell
+git tag -a desktop-v1.0.0 -m "Windows desktop v1.0.0"
+git push origin desktop-v1.0.0
+```
+
+联网版不会在标签发布时生成，因为服务器地址必须由使用者明确提供。需要联网试用版时，在 GitHub Actions 中手动运行“Windows 客户端发布”，填写完整 `server_url`；生成的 EXE 可从该次工作流的 Artifacts 下载。演示数据库包含具体学校数据且默认不入库，因此公开 Release 不自动生成演示版。
+
+macOS 包必须在 macOS 上单独构建，正式分发还需要签名和公证。Windows 四种模式的一键安装脚本不能在 Mac 上直接执行。
 
 WebView2 官方分发说明：https://learn.microsoft.com/microsoft-edge/webview2/concepts/distribution

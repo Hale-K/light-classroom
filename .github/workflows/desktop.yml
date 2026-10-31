@@ -1,23 +1,29 @@
-name: 桌面端构建（Windows / macOS）
+name: Windows 客户端发布
 
 on:
   push:
     tags: ['desktop-v*']
   workflow_dispatch:
+    inputs:
+      server_url:
+        description: '可选：联网试用版服务器地址，例如 https://school.example.com'
+        required: false
+        type: string
+
+permissions:
+  contents: write
 
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
+  build-windows:
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: desktop/requirements-build.txt
 
       - uses: pnpm/action-setup@v4
         with:
@@ -26,53 +32,63 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'pnpm'
+          cache-dependency-path: frontend-react/pnpm-lock.yaml
 
       - name: 构建前端
         working-directory: frontend-react
         run: |
           pnpm install --frozen-lockfile
-          npx vite build
+          pnpm build
 
       - name: 安装后端依赖与打包工具
-        working-directory: backend
         run: |
           python -m pip install --upgrade pip
-          pip install -r ../desktop/requirements-build.txt
-
-      - name: PyInstaller 打包
-        if: runner.os == 'macOS'
-        run: |
-          pyinstaller desktop/light-classroom.spec --noconfirm --distpath desktop/dist --workpath desktop/build
-
-      - name: Windows 一键安装包（Inno Setup）
-        if: runner.os == 'Windows'
-        run: |
+          python -m pip install -r desktop/requirements-build.txt
           choco install innosetup -y --no-progress
-          ./desktop/build.ps1 -Mode normal -PythonPath (Get-Command python.exe).Source -SkipFrontendBuild
 
-      - name: 打包 Windows 压缩包
-        if: runner.os == 'Windows'
+      - name: 构建用户下载包
         shell: pwsh
+        env:
+          SERVER_URL: ${{ inputs.server_url }}
         run: |
-          $package = Get-Content output/windows-installer/latest-normal.json -Raw | ConvertFrom-Json
-          Compress-Archive -Path (Join-Path $package.bundle 'LightClassroom') -DestinationPath desktop/LightClassroom-${{ matrix.os }}.zip
+          $python = (Get-Command python.exe).Source
+          $releaseDir = Join-Path $PWD 'release-assets'
+          New-Item -ItemType Directory -Path $releaseDir -Force | Out-Null
 
-      - name: 打包 macOS 压缩包
-        if: runner.os == 'macOS'
-        run: |
-          cd desktop/dist && zip -qry ../LightClassroom-macos.zip LightClassroom.app LightClassroom 2>/dev/null || zip -qry ../LightClassroom-macos.zip .
+          ./desktop/build.ps1 -Mode normal -PythonPath $python -SkipFrontendBuild
+          $normal = Get-Content output/windows-installer/latest-normal.json -Raw | ConvertFrom-Json
+          Copy-Item -LiteralPath $normal.installer -Destination (Join-Path $releaseDir 'LightClassroom-Windows-x64-Normal.exe')
 
-      - uses: actions/upload-artifact@v4
+          ./desktop/build.ps1 -Mode normal -TrialDays 7 -PythonPath $python -SkipFrontendBuild
+          $normalTrial = Get-Content output/windows-installer/latest-normal.json -Raw | ConvertFrom-Json
+          Copy-Item -LiteralPath $normalTrial.installer -Destination (Join-Path $releaseDir 'LightClassroom-Windows-x64-Normal-7Day-Trial.exe')
+
+          ./desktop/build.ps1 -Mode offline -TrialDays 7 -PythonPath $python -SkipFrontendBuild
+          $offlineTrial = Get-Content output/windows-installer/latest-offline.json -Raw | ConvertFrom-Json
+          Copy-Item -LiteralPath $offlineTrial.installer -Destination (Join-Path $releaseDir 'LightClassroom-Windows-x64-Offline-7Day-Trial.exe')
+
+          $serverUrl = $env:SERVER_URL.Trim()
+          if ($serverUrl) {
+            ./desktop/build.ps1 -Mode online -ServerUrl $serverUrl -TrialDays 7 -PythonPath $python -SkipFrontendBuild
+            $onlineTrial = Get-Content output/windows-installer/latest-online.json -Raw | ConvertFrom-Json
+            Copy-Item -LiteralPath $onlineTrial.installer -Destination (Join-Path $releaseDir 'LightClassroom-Windows-x64-Online-7Day-Trial.exe')
+          }
+
+          Get-ChildItem -LiteralPath $releaseDir -Filter '*.exe' | ForEach-Object {
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $_.Name
+          } | Set-Content -LiteralPath (Join-Path $releaseDir 'SHA256SUMS.txt') -Encoding ascii
+
+      - name: 保存构建产物
+        uses: actions/upload-artifact@v4
         with:
-          name: LightClassroom-${{ matrix.os }}
-          path: |
-            desktop/LightClassroom-*.zip
-            output/windows-installer/LightClassroom-Setup*.exe
+          name: LightClassroom-Windows-installers
+          path: release-assets/*
+          if-no-files-found: error
 
-      - name: 发布到 Release（desktop-v* 标签触发）
+      - name: 发布到 GitHub Release
         if: startsWith(github.ref, 'refs/tags/desktop-v')
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            desktop/LightClassroom-*.zip
-            output/windows-installer/LightClassroom-Setup*.exe
+          generate_release_notes: true
+          files: release-assets/*
