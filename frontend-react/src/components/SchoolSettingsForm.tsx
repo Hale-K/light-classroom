@@ -172,7 +172,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
   /** 基础配置 5 条规则数据 */
   const basicRules = useMemo(() => {
     const curCohort = academicYears.find((item) => item.entry_year === currentEntryYear)
-    const rules = [
+    return [
       {
         key: 'province' as BasicKey,
         icoColor: 'blue',
@@ -242,9 +242,6 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         desc: t("新建排课、考试和考勤默认使用此学期。"),
       },
     ]
-    return settings?.education_stage === 'senior'
-      ? rules
-      : rules.filter((rule) => rule.key !== 'gaokao_mode')
   }, [settings, academicYears, currentEntryYear, currentAcademicYear, currentTerm, locale])
 
   const openEditBasic = (key: BasicKey) => {

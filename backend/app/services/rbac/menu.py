@@ -307,8 +307,6 @@ def build_menu(
     permission_codes: set[str] | None = None,
     menu_permissions: dict[str, set[str]] | None = None,
     menu_items: list[dict[str, Any]] | None = None,
-    allowed_menu_keys: set[str] | None = None,
-    title_overrides: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """根据菜单行 + 权限映射构建侧栏树。
 
@@ -317,7 +315,6 @@ def build_menu(
     """
     capabilities = get_subject_choice_strategy(gaokao_mode).capabilities
     mapping = menu_permissions or {}
-    overrides = title_overrides or {}
     items = menu_items or []
     teacher_roles = {"teacher", "head_teacher", "subject_teacher"}
     if role in teacher_roles:
@@ -326,8 +323,6 @@ def build_menu(
 
     def is_visible(item: dict[str, Any]) -> bool:
         if not item.get("enabled", True) or not item.get("path"):
-            return False
-        if allowed_menu_keys is not None and str(item.get("key") or "") not in allowed_menu_keys:
             return False
         required_capability = item.get("required_capability")
         if required_capability and required_capability not in capabilities:
@@ -347,7 +342,7 @@ def build_menu(
     visible_items = {
         str(item["key"]): {
             "key": item["key"],
-            "title": overrides.get(str(item["key"]), item.get("title") or item.get("name")),
+            "title": item.get("title") or item.get("name"),
             "icon": item.get("icon") or "grid",
             "path": item.get("path"),
             "available": True,

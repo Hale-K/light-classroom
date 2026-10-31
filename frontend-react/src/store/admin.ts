@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { adminApi } from '@/api'
-import type { AdminSchool, EducationStage, GaokaoMode, PlatformAdminInfo } from '@/types'
+import type { AdminSchool, PlatformAdminInfo } from '@/types'
 
 const ADMIN_TOKEN_KEY = 'zh_admin_token'
 const ADMIN_KEY = 'zh_admin_info'
@@ -25,8 +25,7 @@ interface AdminState {
     code: string
     name: string
     province: string
-    education_stage: EducationStage
-    gaokao_mode?: GaokaoMode
+    gaokao_mode: '3+1+2' | '3+3' | 'traditional'
     admin_name: string
     admin_phone: string
     admin_password: string
@@ -34,7 +33,7 @@ interface AdminState {
   updateSchool: (id: number, data: {
     name: string
     province?: string
-    gaokao_mode?: GaokaoMode
+    gaokao_mode?: '3+1+2' | '3+3' | 'traditional'
     admin_phone?: string
   }) => Promise<void>
   resetPassword: (id: number, password: string) => Promise<void>

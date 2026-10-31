@@ -1,6 +1,5 @@
 /** auth 领域 API（由 api/index.ts 拆分）。 */
 import type {
-  EducationStage,
   MenuResult,
   UserInfo,
 } from '@/types'
@@ -24,9 +23,7 @@ export interface SchoolSettings {
   code: string
   name: string
   province: string
-  education_stage: EducationStage
-  education_stage_label: string
-  gaokao_mode: '3+1+2' | '3+3' | 'traditional' | null
+  gaokao_mode: '3+1+2' | '3+3' | 'traditional'
   timetable_mode: 'administrative' | 'walk_class'
 }
 

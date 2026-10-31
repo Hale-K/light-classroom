@@ -10,15 +10,14 @@ import FilterCard from '@/components/FilterCard'
 import PageHeader from '@/components/PageHeader'
 import TableCard from '@/components/TableCard'
 import { useAdminStore } from '@/store/admin'
-import type { AdminSchool, EducationStage, GaokaoMode } from '@/types'
+import type { AdminSchool, GaokaoMode } from '@/types'
 import { GAOKAO_MODE_DICT } from '@/types/dict'
 
 interface CreateSchoolForm {
   code: string
   name: string
   province: string
-  education_stage: EducationStage
-  gaokao_mode?: GaokaoMode
+  gaokao_mode: GaokaoMode
   admin_name: string
   admin_phone: string
   admin_password: string
@@ -39,14 +38,6 @@ const gaokaoModeOptions: Array<{ value: GaokaoMode; label: string }> = [
   { value: '3+1+2', label: '新高考 3+1+2' },
   { value: '3+3', label: '新高考 3+3' },
   { value: 'traditional', label: '传统文理高考' },
-]
-
-const educationStageOptions: Array<{ value: EducationStage; label: string; description: string }> = [
-  { value: 'primary', label: '小学', description: '行政班、课程、排课与综合教务' },
-  { value: 'junior', label: '初中', description: '行政班、课程、排课与考试管理' },
-  { value: 'senior', label: '高中', description: '包含高考选科、走班与排课' },
-  { value: 'higher', label: '大学', description: '开放当前已适配的通用教务功能' },
-  { value: 'training', label: '教培机构', description: '使用课程、学员和资源管理菜单' },
 ]
 
 const provinces = [
@@ -107,12 +98,10 @@ export default function AdminSchools() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [createForm] = Form.useForm<CreateSchoolForm>()
-  const creatingStage = Form.useWatch('education_stage', createForm)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editingId, setEditingId] = useState(0)
   const [editingCode, setEditingCode] = useState('')
-  const [editingStage, setEditingStage] = useState<EducationStage>('senior')
   const [savingEdit, setSavingEdit] = useState(false)
   const [editForm] = Form.useForm<EditSchoolForm>()
 
@@ -169,7 +158,7 @@ export default function AdminSchools() {
 
   const openCreate = () => {
     createForm.resetFields()
-    createForm.setFieldsValue({ education_stage: 'senior', gaokao_mode: '3+1+2' })
+    createForm.setFieldsValue({ gaokao_mode: '3+1+2' })
     setCreateOpen(true)
   }
 
@@ -187,16 +176,14 @@ export default function AdminSchools() {
   }
 
   const openEdit = (row: AdminSchool) => {
-    editForm.resetFields()
     editForm.setFieldsValue({
       name: row.name,
       province: row.province,
-      gaokao_mode: row.gaokao_mode || undefined,
+      gaokao_mode: row.gaokao_mode,
       admin_phone: row.admin_phone || '',
     })
     setEditingId(row.id)
     setEditingCode(row.code)
-    setEditingStage(row.education_stage)
     setEditOpen(true)
   }
 
@@ -206,7 +193,7 @@ export default function AdminSchools() {
       await updateSchool(editingId, {
         name: values.name.trim(),
         province: values.province,
-        gaokao_mode: editingStage === 'senior' ? values.gaokao_mode : undefined,
+        gaokao_mode: values.gaokao_mode,
         admin_phone: values.admin_phone?.trim() || undefined,
       })
       setEditOpen(false)
@@ -253,13 +240,12 @@ export default function AdminSchools() {
     { title: t("学校名称"), dataIndex: 'name', key: 'name', minWidth: 200 },
     { title: t("学校代码"), dataIndex: 'code', key: 'code', width: 150 },
     { title: t("省份"), dataIndex: 'province', key: 'province', width: 100 },
-    { title: t("学段"), dataIndex: 'education_stage_label', key: 'education_stage', width: 110 },
     {
       title: t("高考模式"),
       dataIndex: 'gaokao_mode',
       key: 'gaokao_mode',
       width: 140,
-      render: (value) => value ? <DictTag dict={GAOKAO_MODE_DICT} value={value} /> : '—',
+      render: (value) => <DictTag dict={GAOKAO_MODE_DICT} value={value} />,
     },
     { title: t("类型"), dataIndex: 'type', key: 'type', width: 130 },
     {
@@ -426,32 +412,16 @@ export default function AdminSchools() {
           <Form.Item name="province" label={t("学校所在省份")} rules={[{ required: true, message: t("请选择省份") }]}>
             <Select showSearch placeholder={t("请选择省份")} options={provinceOptions} />
           </Form.Item>
-          <Form.Item name="education_stage" label={t("学校学段")} rules={[{ required: true, message: t("请选择学校学段") }]}>
-            <Select
-              options={educationStageOptions.map(({ value, label }) => ({ value, label }))}
-              onChange={(stage: EducationStage) => {
-                createForm.setFieldValue('gaokao_mode', stage === 'senior' ? '3+1+2' : undefined)
-              }}
-            />
+          <Form.Item name="gaokao_mode" label={t("默认高考模式")} rules={[{ required: true, message: t("请选择高考模式") }]}>
+            <Radio.Group optionType="button" buttonStyle="outline">
+              {gaokaoModeOptions.map((o) => (
+                <Radio.Button key={o.value} value={o.value}>
+                  {o.label}
+                </Radio.Button>
+              ))}
+            </Radio.Group>
           </Form.Item>
-          <div style={styles.codeHint}>
-            {educationStageOptions.find((item) => item.value === creatingStage)?.description}
-            {t("。创建后菜单会自动匹配该学段。")}
-          </div>
-          {creatingStage === 'senior' && (
-            <>
-              <Form.Item name="gaokao_mode" preserve={false} label={t("默认高考模式")} rules={[{ required: true, message: t("请选择高考模式") }]}>
-                <Radio.Group optionType="button" buttonStyle="outline">
-                  {gaokaoModeOptions.map((o) => (
-                    <Radio.Button key={o.value} value={o.value}>
-                      {o.label}
-                    </Radio.Button>
-                  ))}
-                </Radio.Group>
-              </Form.Item>
-              <div style={styles.codeHint}>{t("新建届别方案时继承该模式，之后可按入学年份单独调整。")}</div>
-            </>
-          )}
+          <div style={styles.codeHint}>{t("新建届别方案时继承该模式，之后可按入学年份单独调整。")}</div>
           <Form.Item name="admin_name" label={t("管理员姓名")} rules={[{ required: true, message: t("请输入管理员姓名") }]}>
             <Input placeholder={t("校长姓名")} />
           </Form.Item>
@@ -488,18 +458,10 @@ export default function AdminSchools() {
           <Form.Item name="province" label={t("学校所在省份")} rules={[{ required: true, message: t("请选择省份") }]}>
             <Select showSearch options={provinceOptions} />
           </Form.Item>
-          <Form.Item label={t("学校学段")}>
-            <Input value={educationStageOptions.find((item) => item.value === editingStage)?.label} disabled />
+          <Form.Item name="gaokao_mode" label={t("默认高考模式")} rules={[{ required: true, message: t("请选择高考模式") }]}>
+            <Select options={gaokaoModeOptions} />
           </Form.Item>
-          <div style={styles.codeHint}>{t("学段决定菜单与业务配置，创建后不可直接修改。")}</div>
-          {editingStage === 'senior' && (
-            <>
-              <Form.Item name="gaokao_mode" label={t("默认高考模式")} rules={[{ required: true, message: t("请选择高考模式") }]}>
-                <Select options={gaokaoModeOptions} />
-              </Form.Item>
-              <div style={styles.codeHint}>{t("修改后影响新建届别；已存在的届别方案保持原模式，可单独修改。")}</div>
-            </>
-          )}
+          <div style={styles.codeHint}>{t("修改后影响新建届别；已存在的届别方案保持原模式，可单独修改。")}</div>
           <Form.Item name="admin_phone" label={t("管理员手机号")}>
             <Input placeholder={t("校长登录账号")} />
           </Form.Item>

@@ -5,7 +5,7 @@
 """
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field
 from sqlalchemy import select, func, update
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -15,13 +15,6 @@ from app.api.deps import get_current_admin
 from app.models.admin import PlatformAdmin
 from app.models.org import Tenant, User
 from app.models.enums import BaseUserRole, TenantType, UserStatus
-from app.services.org.school_stage import (
-    EducationStage,
-    get_stage_profile,
-    get_school_stage,
-    load_school_stages,
-    save_school_stage,
-)
 
 router = APIRouter(prefix="/admin", tags=["平台管理"])
 
@@ -44,23 +37,10 @@ class SchoolCreate(BaseModel):
     name: str = Field(min_length=1, max_length=100, description="学校名称")
     type: TenantType = TenantType.org
     province: str = Field(min_length=2, max_length=50, description="学校所在省份")
-    education_stage: EducationStage = EducationStage.senior
-    gaokao_mode: str | None = Field(
-        default=None,
-        pattern=r"^(3\+1\+2|3\+3|traditional)$",
-        description="高中默认高考模式",
-    )
+    gaokao_mode: str = Field(pattern=r"^(3\+1\+2|3\+3|traditional)$", description="学校默认高考模式")
     admin_name: str = Field(min_length=1, max_length=50, description="校长姓名")
     admin_phone: str = Field(min_length=5, max_length=20, description="校长登录手机号")
     admin_password: str = Field(min_length=6, description="校长登录密码")
-
-    @model_validator(mode="after")
-    def validate_stage_settings(self):
-        if self.education_stage is EducationStage.senior and self.gaokao_mode is None:
-            raise ValueError("高中必须选择高考模式")
-        if self.education_stage is not EducationStage.senior and self.gaokao_mode is not None:
-            raise ValueError("非高中学段无需设置高考模式")
-        return self
 
 
 class SchoolOut(BaseModel):
@@ -69,9 +49,7 @@ class SchoolOut(BaseModel):
     name: str
     type: str
     province: str
-    education_stage: EducationStage
-    education_stage_label: str
-    gaokao_mode: str | None
+    gaokao_mode: str
     created_at: str
     admin_phone: str | None = None
     admin_status: str | None = None
@@ -131,20 +109,15 @@ async def list_schools(session: AsyncSession = Depends(get_admin_session),
                        _: PlatformAdmin = Depends(get_current_admin)):
     rows = (await session.execute(
         select(Tenant).order_by(Tenant.id.desc()))).scalars().all()
-    stages = await load_school_stages(session, [t.id for t in rows if t.id is not None])
     # 每校回填其校长手机号（取担任 director 的首位账号）
     out = []
     for t in rows:
-        education_stage = stages.get(t.id, EducationStage.senior)
         admin_user = (await session.execute(
             select(User).where(User.tenant_id == t.id, User.role == BaseUserRole.director)
             .limit(1))).scalar_one_or_none()
         out.append(SchoolOut(
             id=t.id, code=t.code, name=t.name, type=t.type.value,
-            province=t.province,
-            education_stage=education_stage,
-            education_stage_label=get_stage_profile(education_stage).label,
-            gaokao_mode=t.gaokao_mode if education_stage is EducationStage.senior else None,
+            province=t.province, gaokao_mode=t.gaokao_mode,
             created_at=t.created_at.isoformat(),
             admin_phone=admin_user.phone if admin_user else None,
             admin_status=admin_user.status.value if admin_user else None,
@@ -174,11 +147,10 @@ async def create_school(body: SchoolCreate, session: AsyncSession = Depends(get_
         name=body.name,
         type=body.type,
         province=body.province,
-        gaokao_mode=body.gaokao_mode or "3+1+2",
+        gaokao_mode=body.gaokao_mode,
     )
     session.add(tenant)
     await session.flush()  # 取到 tenant.id
-    await save_school_stage(session, tenant.id, body.education_stage)
 
     user = User(name=body.admin_name, phone=body.admin_phone,
                 password_hash=get_password_hash(body.admin_password),
@@ -188,10 +160,7 @@ async def create_school(body: SchoolCreate, session: AsyncSession = Depends(get_
 
     return {"code": 0, "message": "ok", "data": SchoolOut(
         id=tenant.id, code=tenant.code, name=tenant.name, type=tenant.type.value,
-        province=tenant.province,
-        education_stage=body.education_stage,
-        education_stage_label=get_stage_profile(body.education_stage).label,
-        gaokao_mode=tenant.gaokao_mode if body.education_stage is EducationStage.senior else None,
+        province=tenant.province, gaokao_mode=tenant.gaokao_mode,
         created_at=tenant.created_at.isoformat(), admin_phone=body.admin_phone,
         admin_status=UserStatus.active.value, frozen=False, freeze_reason=None,
         last_login_at=None).model_dump()}
@@ -205,14 +174,11 @@ async def update_school(school_id: int, body: SchoolUpdate,
         select(Tenant).where(Tenant.id == school_id))).scalar_one_or_none()
     if tenant is None:
         raise HTTPException(status_code=404, detail="学校不存在")
-    education_stage = await get_school_stage(session, school_id)
 
     if body.name:
         tenant.name = body.name
     if body.province:
         tenant.province = body.province
-    if body.gaokao_mode and education_stage is not EducationStage.senior:
-        raise HTTPException(status_code=422, detail="非高中学段无需设置高考模式")
     if body.gaokao_mode:
         tenant.gaokao_mode = body.gaokao_mode
 
@@ -239,10 +205,7 @@ async def update_school(school_id: int, body: SchoolUpdate,
                                  User.role == BaseUserRole.director).limit(1))).scalar_one_or_none()
     return {"code": 0, "message": "ok", "data": SchoolOut(
         id=tenant.id, code=tenant.code, name=tenant.name, type=tenant.type.value,
-        province=tenant.province,
-        education_stage=education_stage,
-        education_stage_label=get_stage_profile(education_stage).label,
-        gaokao_mode=tenant.gaokao_mode if education_stage is EducationStage.senior else None,
+        province=tenant.province, gaokao_mode=tenant.gaokao_mode,
         created_at=tenant.created_at.isoformat(), admin_phone=phone).model_dump()}
 
 

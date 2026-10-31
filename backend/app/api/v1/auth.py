@@ -20,7 +20,6 @@ from app.services.rbac import (
     load_menus,
 )
 from app.services.org.staff_roles import effective_menu_role, get_staff_role_codes
-from app.services.org.school_stage import get_school_stage, get_stage_profile, stage_menu_options
 
 router = APIRouter(prefix="/auth", tags=["认证"])
 
@@ -187,25 +186,19 @@ async def menus(
 ):
     tenant = await session.get(Tenant, user.tenant_id)
     gaokao_mode = tenant.gaokao_mode if tenant else "3+1+2"
-    education_stage = await get_school_stage(session, user.tenant_id)
-    menu_options = stage_menu_options(education_stage)
     role_codes = await get_staff_role_codes(session, user.id)
     permission_codes = await get_user_permission_codes(session, user.id)
     await ensure_menu_permissions(session)
     menu_permissions = await load_menu_permission_map(session)
     menu_items = await load_menus(session, include_disabled=False)
     return {"code": 0, "message": "ok", "data": {
-        "gaokao_mode": gaokao_mode if education_stage.value == "senior" else None,
-        "education_stage": education_stage.value,
-        "education_stage_label": get_stage_profile(education_stage).label,
+        "gaokao_mode": gaokao_mode,
         "menus": build_menu(
             effective_menu_role(user.role, role_codes),
             gaokao_mode,
             permission_codes=permission_codes,
             menu_permissions=menu_permissions,
             menu_items=menu_items,
-            allowed_menu_keys=menu_options.allowed_menu_keys,
-            title_overrides=menu_options.title_overrides,
         ),
         }}
 
@@ -219,15 +212,12 @@ async def school_settings(
     if tenant is None:
         raise HTTPException(status_code=404, detail="学校不存在")
     timetable_config = await _timetable_mode_config(session, user.tenant_id)
-    education_stage = await get_school_stage(session, user.tenant_id)
     return {"code": 0, "message": "ok", "data": {
         "id": tenant.id,
         "code": tenant.code,
         "name": tenant.name,
         "province": tenant.province,
-        "education_stage": education_stage.value,
-        "education_stage_label": get_stage_profile(education_stage).label,
-        "gaokao_mode": tenant.gaokao_mode if education_stage.value == "senior" else None,
+        "gaokao_mode": tenant.gaokao_mode,
         "timetable_mode": _timetable_mode(timetable_config),
     }}
 
@@ -243,10 +233,7 @@ async def update_school_settings(
     tenant = await session.get(Tenant, user.tenant_id)
     if tenant is None:
         raise HTTPException(status_code=404, detail="学校不存在")
-    education_stage = await get_school_stage(session, user.tenant_id)
     values = body.model_dump(exclude_none=True)
-    if "gaokao_mode" in values and education_stage.value != "senior":
-        raise HTTPException(status_code=422, detail="非高中学段无需设置高考模式")
     timetable_mode = values.pop("timetable_mode", None)
     for key, value in values.items():
         setattr(tenant, key, value)
@@ -281,9 +268,7 @@ async def update_school_settings(
         "code": tenant.code,
         "name": tenant.name,
         "province": tenant.province,
-        "education_stage": education_stage.value,
-        "education_stage_label": get_stage_profile(education_stage).label,
-        "gaokao_mode": tenant.gaokao_mode if education_stage.value == "senior" else None,
+        "gaokao_mode": tenant.gaokao_mode,
         "timetable_mode": _timetable_mode(timetable_config),
     }}
 
