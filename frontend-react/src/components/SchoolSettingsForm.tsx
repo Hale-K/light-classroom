@@ -8,7 +8,6 @@ import Icon from '@/components/Icon'
 import './school-settings-form.css'
 import { ACADEMIC_CONTEXT_CHANGED } from '@/utils/academicContext'
 import { useSearchParams } from 'react-router-dom'
-import type { EducationStage } from '@/types'
 
 type GaokaoMode = '3+1+2' | '3+3' | 'traditional'
 type TimetableMode = 'administrative' | 'walk_class'
@@ -29,61 +28,9 @@ const MODES: Array<{ value: GaokaoMode; label: string; note: string }> = [
 ]
 
 const TIMETABLE_MODES: Array<{ value: TimetableMode; label: string; note: string }> = [
-  { value: 'administrative', label: '固定班级课表', note: '按行政班或固定班级统一排课' },
-  { value: 'walk_class', label: '分组走班课表', note: '按教学班、选课或分组结果生成学生课表' },
+  { value: 'administrative', label: '行政班课表', note: '适用于高一上学期，按行政班统一排课' },
+  { value: 'walk_class', label: '选科走班课表', note: '适用于高一下学期及以后，按选科教学班和学生课表排课' },
 ]
-
-interface StagePresentation {
-  gradeNames: string[]
-  cohortLabel: string
-  cohortTabLabel: string
-  currentCohortTitle: string
-}
-
-const STAGE_PRESENTATIONS: Record<EducationStage, StagePresentation> = {
-  primary: {
-    gradeNames: ['一年级', '二年级', '三年级', '四年级', '五年级', '六年级'],
-    cohortLabel: '入学年级',
-    cohortTabLabel: '入学年级管理',
-    currentCohortTitle: '当前一年级入学年',
-  },
-  junior: {
-    gradeNames: ['初一', '初二', '初三'],
-    cohortLabel: '入学年级',
-    cohortTabLabel: '入学年级管理',
-    currentCohortTitle: '当前初一入学年',
-  },
-  senior: {
-    gradeNames: ['高一', '高二', '高三'],
-    cohortLabel: '届别',
-    cohortTabLabel: '届次管理',
-    currentCohortTitle: '当前高一届别',
-  },
-  higher: {
-    gradeNames: [],
-    cohortLabel: '培养周期',
-    cohortTabLabel: '培养周期',
-    currentCohortTitle: '当前培养周期',
-  },
-  training: {
-    gradeNames: [],
-    cohortLabel: '培训批次',
-    cohortTabLabel: '培训批次',
-    currentCohortTitle: '当前培训批次',
-  },
-}
-
-const academicYearAt = (entryYear: number, offset: number) =>
-  `${entryYear + offset}-${entryYear + offset + 1}`
-
-const stageGradeYears = (entryYear: number, stage: EducationStage) =>
-  STAGE_PRESENTATIONS[stage].gradeNames.map((name, index) => ({
-    name,
-    academicYear: academicYearAt(entryYear, index),
-  }))
-
-const cohortDisplayName = (entryYear: number, stage: EducationStage) =>
-  stage === 'senior' ? `${entryYear}届` : `${entryYear}级`
 
 const STATUS_LABEL: Record<CohortStatus, string> = {
   active: '启用中',
@@ -110,8 +57,6 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
   const locale = useLocale()
   const { message, modal } = App.useApp()
   const [settings, setSettings] = useState<SchoolSettings | null>(null)
-  const stage = settings?.education_stage ?? 'senior'
-  const presentation = STAGE_PRESENTATIONS[stage]
   const [academicYears, setAcademicYears] = useState<AcademicYearEntry[]>([])
   const [currentEntryYear, setCurrentEntryYear] = useState<number>()
   const [currentAcademicYear, setCurrentAcademicYear] = useState<string>()
@@ -180,13 +125,6 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
       .catch((e) => message.error(e instanceof Error ? e.message : t("学校信息加载失败")))
   }, [message])
 
-  useEffect(() => {
-    if (settings && presentation.gradeNames.length === 0 && activeTab !== 'basic') {
-      setActiveTab('basic')
-      setSearchParams({}, { replace: true })
-    }
-  }, [settings, presentation.gradeNames.length, activeTab, setSearchParams])
-
   const refreshAcademicContext = async () => {
     const yearSettings = await authApi.academicYears()
     setAcademicYears(yearSettings.years)
@@ -234,11 +172,6 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
   /** 基础配置 5 条规则数据 */
   const basicRules = useMemo(() => {
     const curCohort = academicYears.find((item) => item.entry_year === currentEntryYear)
-    const stage = settings?.education_stage ?? 'senior'
-    const presentation = STAGE_PRESENTATIONS[stage]
-    const gradeYears = curCohort ? stageGradeYears(curCohort.entry_year, stage) : []
-    const firstGrade = gradeYears[0]
-    const lastGrade = gradeYears.at(-1)
     const rules = [
       {
         key: 'province' as BasicKey,
@@ -249,7 +182,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         chipLabel: settings?.province || t("未设置"),
         modeTag: '',
         desc: settings?.province
-          ? t(stage === 'senior' ? "用于选科方案和考务信息。" : "用于学校信息、课程与考务配置。")
+          ? t("用于选科方案和考务信息。")
           : t("未设置，请编辑。"),
       },
       {
@@ -268,13 +201,13 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         key: 'current_entry_year' as BasicKey,
         icoColor: 'green',
         icoName: 'school' as any,
-        title: t(presentation.currentCohortTitle),
+        title: t("当前高一届别"),
         chipColor: 'green',
-        chipLabel: curCohort ? cohortDisplayName(curCohort.entry_year, stage) : t("未设置"),
-        modeTag: firstGrade ? `${firstGrade.name}：${firstGrade.academicYear}` : '',
-        desc: firstGrade && lastGrade
-          ? `${t("覆盖")} ${firstGrade.name} ${t("至")} ${lastGrade.name}：${firstGrade.academicYear} ${t("至")} ${lastGrade.academicYear}`
-          : t("未设置，请在入学年级管理中新建。"),
+        chipLabel: curCohort?.cohort_label || t("未设置"),
+        modeTag: curCohort ? t("高一：{{p0}}", { p0: curCohort.grade_years['高一'] }) : '',
+        desc: curCohort
+          ? t("覆盖高一至高三：{{p0}} 至 {{p1}}", { p0: curCohort.grade_years['高一'], p1: curCohort.grade_years['高三'] })
+          : t("未设置，请在“届次管理”中新建。"),
       },
       {
         key: 'timetable_mode' as BasicKey,
@@ -296,7 +229,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         chipColor: 'orange',
         chipLabel: currentAcademicYear || t("未设置"),
         modeTag: '',
-        desc: currentAcademicYear ? '' : t(`未设置，请先建立${presentation.cohortLabel}。`),
+        desc: currentAcademicYear ? '' : t("未设置，请先建立届别。"),
       },
       {
         key: 'current_term' as BasicKey,
@@ -311,9 +244,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
     ]
     return settings?.education_stage === 'senior'
       ? rules
-      : rules.filter((rule) => rule.key !== 'gaokao_mode' && (
-        presentation.gradeNames.length > 0 || rule.key !== 'current_entry_year'
-      ))
+      : rules.filter((rule) => rule.key !== 'gaokao_mode')
   }, [settings, academicYears, currentEntryYear, currentAcademicYear, currentTerm, locale])
 
   const openEditBasic = (key: BasicKey) => {
@@ -359,7 +290,7 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         if (editingKey === 'current_entry_year') {
           entry = Number(editDraft)
           const row = academicYears.find((item) => item.entry_year === entry)
-          year = row ? academicYearAt(row.entry_year, 0) : year
+          year = row ? row.grade_years['高一'] : year
         } else if (editingKey === 'current_academic_year') {
           year = String(editDraft)
         } else if (editingKey === 'current_term') {
@@ -389,12 +320,12 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
 
   const submitCohort = async () => {
     if (!cohortYear) {
-      message.warning(t(`请填写${presentation.cohortLabel}年份`))
+      message.warning(t("请填写届别年份"))
       return
     }
     const exists = academicYears.some((item) => item.entry_year === cohortYear)
     if (!editingEntryYear && exists) {
-      message.warning(t(`${cohortDisplayName(cohortYear, stage)}已经存在`))
+      message.warning(t("{{p0}}届已经存在", { p0: cohortYear }))
       return
     }
     let nextYears: AcademicYearEntry[]
@@ -416,17 +347,17 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
     try {
       const nextEntryYear = currentEntryYear ?? nextYears[0]?.entry_year
       await persistCurrent(nextYears, nextEntryYear)
-      message.success(editingEntryYear ? t(`${presentation.cohortLabel}已更新`) : t(`${presentation.cohortLabel}已创建`))
+      message.success(editingEntryYear ? t("届别已更新") : t("届别已创建"))
       setCohortModalOpen(false)
     } catch (e) {
-      message.error(e instanceof Error ? e.message : t(`${presentation.cohortLabel}保存失败`))
+      message.error(e instanceof Error ? e.message : t("届别保存失败"))
     }
   }
 
   const setAsCurrentCohort = async (item: AcademicYearEntry) => {
     try {
       await persistCurrent(academicYears, item.entry_year, `${item.entry_year}-${item.entry_year + 1}`)
-      message.success(t(`已切换到 ${cohortDisplayName(item.entry_year, stage)} · ${academicYearAt(item.entry_year, 0)}学年`))
+      message.success(t("已切换到 {{p0}} · {{p1}}-{{p2}}学年", { p0: item.cohort_label, p1: item.entry_year, p2: item.entry_year + 1 }))
     } catch (e) {
       message.error(e instanceof Error ? e.message : t("切换失败"))
     }
@@ -447,29 +378,26 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
 
   const removeCohort = async (item: AcademicYearEntry) => {
     if (currentEntryYear === item.entry_year) {
-      message.warning(t(`当前${presentation.cohortLabel}无法删除，请先切换到其他${presentation.cohortLabel}`))
+      message.warning(t("当前届别无法删除，请先切换到其他届别"))
       return
     }
     modal.confirm({
-      title: t(`确认删除 ${cohortDisplayName(item.entry_year, stage)}？`),
-      content: t(`删除后，该${presentation.cohortLabel}与排课、班级相关的历史配置将不再引用，操作不可恢复。`),
+      title: t("确认删除 {{p0}}？", { p0: item.cohort_label }),
+      content: t("删除后，该届别与选科、排班相关的历史配置将不再引用，操作不可恢复。"),
       okType: 'danger',
       onOk: async () => {
         const nextYears = academicYears.filter((row) => row.entry_year !== item.entry_year)
         await persistCurrent(nextYears)
-        message.success(t(`${presentation.cohortLabel}已删除`))
+        message.success(t("届别已删除"))
       },
     })
   }
 
   const allAcademicYearOptions = useMemo(() => {
     const set = new Set<string>()
-    const stage = settings?.education_stage ?? 'senior'
-    academicYears.forEach((item) => {
-      stageGradeYears(item.entry_year, stage).forEach((grade) => set.add(grade.academicYear))
-    })
+    academicYears.forEach((item) => Object.values(item.grade_years).forEach((v) => set.add(v)))
     return Array.from(set).sort().reverse()
-  }, [academicYears, settings?.education_stage, locale])
+  }, [academicYears, locale])
 
   const [cohortPage, setCohortPage] = useState(1)
   const COHORT_PAGE_SIZE = 6
@@ -479,33 +407,27 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
   }, [academicYears, cohortPage, locale])
 
   if (!settings) return null
-  const currentCohort = academicYears.find((item) => item.entry_year === currentEntryYear)
-  const currentGradeYears = currentEntryYear ? stageGradeYears(currentEntryYear, stage) : []
-  const firstGrade = currentGradeYears[0]
-  const hasGradeProgression = presentation.gradeNames.length > 0
 
   return (
     <div className="ssf-form-v2">
       {/* 顶部标题 */}
       <div className="ssf-page-head">
         <div className="ssf-page-head-title">
-          <h1>{t("系统设置")} <Tag color="blue">{settings.education_stage_label}</Tag></h1>
+          <h1>{t("系统设置")}</h1>
         </div>
       </div>
 
       {/* 当前生效概览卡 */}
       <div className="ssf-brief">
-        {hasGradeProgression && (
-          <div className="ssf-brief-card active">
-            <span>{t(`当前${presentation.cohortLabel}`)}</span>
-            <strong>{currentCohort ? cohortDisplayName(currentCohort.entry_year, stage) : t("未设置")}</strong>
-            <small>{firstGrade ? `${firstGrade.name}学年：${firstGrade.academicYear}` : t("请新建入学年级")}</small>
-          </div>
-        )}
+        <div className="ssf-brief-card active">
+          <span>{t("当前届别")}</span>
+          <strong>{academicYears.find((c) => c.entry_year === currentEntryYear)?.cohort_label || t("未设置")}</strong>
+          <small>{currentEntryYear ? t("高一学年：{{p0}}-{{p1}}", { p0: currentEntryYear, p1: currentEntryYear + 1 }) : t("请新建届别")}</small>
+        </div>
         <div className="ssf-brief-card">
           <span>{t("当前学年")}</span>
           <strong>{currentAcademicYear || t("未设置")}</strong>
-          <small>{t(stage === 'senior' ? "排课 / 选科默认学年" : "教学与课表默认学年")}</small>
+          <small>{t("排课 / 选科默认学年")}</small>
         </div>
         <div className="ssf-brief-card">
           <span>{t("当前学期")}</span>
@@ -566,24 +488,24 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
               </div>
             ),
           },
-          ...(hasGradeProgression ? [{
+          {
             key: 'cohorts',
-            label: t(presentation.cohortTabLabel),
+            label: t("届次管理"),
             children: (
               <div className="ssf-rule-card">
                 <div className="ssf-rule-subnav">
                   <div>
-                    <h2>{t(`${presentation.cohortLabel}清单`)}</h2>
-                    <p>{t(`每创建一个${presentation.cohortLabel}，系统会按${presentation.gradeNames.join('→')}展示对应学年，用于排课和学生列表。`)}</p>
+                    <h2>{t("学年届别清单")}</h2>
+                    <p>{t("每创建一个届别，系统会按高一→高三生成对应三年的年级名称，用于排课 / 学生列表。")}</p>
                   </div>
                   <Space>
-                    {stage === 'senior' && <Button onClick={openRollover} disabled={currentEntryYear === undefined}>{t("进入下一学年")}</Button>}
-                    <Button type="primary" size="large" icon={<Icon name="plus" size={14} />} onClick={openNewCohort}>{t(`新建${presentation.cohortLabel}`)}</Button>
+                    <Button onClick={openRollover} disabled={currentEntryYear === undefined}>{t("进入下一学年")}</Button>
+                    <Button type="primary" size="large" icon={<Icon name="plus" size={14} />} onClick={openNewCohort}>{t("新建届别")}</Button>
                   </Space>
                 </div>
                 <div className="ssf-rule-head">
-                  <div>{t(`${presentation.cohortLabel}名称`)}</div>
-                  <div>{t(`${presentation.gradeNames.at(-1)}学年`)}</div>
+                  <div>{t("届别名称")}</div>
+                  <div>{t("高三学年")}</div>
                   <div>{t("状态")}</div>
                   <div>{t("说明")}</div>
                   <div style={{ textAlign: 'right' }}>{t("操作")}</div>
@@ -592,16 +514,12 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                   <div className="ssf-empty">
                     <EmptyState
                       height={180}
-                      title={t(`暂无${presentation.cohortLabel}`)}
-                      desc={t(`点击上方「新建${presentation.cohortLabel}」开始配置`)}
+                      title={t("暂无届别")}
+                      desc={t("点击上方「新建届别」创建学年届别")}
                     />
                   </div>
                 ) : (
-                  paginatedCohorts.map((record) => {
-                    const gradeYears = stageGradeYears(record.entry_year, stage)
-                    const first = gradeYears[0]
-                    const last = gradeYears.at(-1)
-                    return (
+                  paginatedCohorts.map((record) => (
                     <div key={record.entry_year} className="ssf-rule-row">
                       <div className="ssf-rule-name">
                       <span className={`ssf-rule-ico ${currentEntryYear === record.entry_year ? 'green' : 'purple'}`}>
@@ -609,16 +527,16 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                       </span>
                         <span className="ssf-rule-text">
                           <strong>
-                            {cohortDisplayName(record.entry_year, stage)}
+                            {record.cohort_label}
                             {currentEntryYear === record.entry_year && (
                               <Tag color="blue">{t("默认")}</Tag>
                             )}
                           </strong>
-                          <small>{first?.name}：{first?.academicYear}</small>
+                          <small>{t("高一：")}{record.grade_years['高一']}</small>
                         </span>
                       </div>
                       <div>
-                        <span className="ssf-rule-chip purple">{last?.academicYear}</span>
+                        <span className="ssf-rule-chip purple">{record.grade_years['高三']}</span>
                       </div>
                       <div>
                         <Tag color={record.status === 'active' ? 'green' : 'default'}>
@@ -626,14 +544,14 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                         </Tag>
                       </div>
                       <div className="ssf-rule-desc">
-                        {cohortDisplayName(record.entry_year, stage)}：{first?.name} {first?.academicYear} → {last?.name} {last?.academicYear}</div>
+                        {record.cohort_label}{t("入学 → 高一")}{record.grade_years['高一']} {t("→ 高三")}{record.grade_years['高三']} {t("毕业")}</div>
                       <div className="ssf-rule-actions">
                         <Space size={2}>
                           <Button
                             type="text"
                             size="small"
                             disabled={currentEntryYear === record.entry_year}
-                            title={t(`设为当前${presentation.cohortLabel}`)}
+                            title={t("设为当前届别")}
                             onClick={() => setAsCurrentCohort(record)}
                           >
                             <Icon name="star" size={14} />
@@ -664,12 +582,11 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                         </Space>
                       </div>
                     </div>
-                    )
-                  })
+                  ))
                 )}
                 {academicYears.length > 0 && (
                   <div className="ssf-pagination">
-                    {t("共")}{academicYears.length} {t(`个${presentation.cohortLabel}`)}<Pagination
+                    {t("共")}{academicYears.length} {t("个届别")}<Pagination
                       size="small"
                       current={cohortPage}
                       pageSize={COHORT_PAGE_SIZE}
@@ -681,8 +598,8 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
                 )}
               </div>
             ),
-          }] : []),
-          ...(gradePanel && hasGradeProgression
+          },
+          ...(gradePanel
             ? [{
                 key: 'grades',
                 label: t("年级数据"),
@@ -777,11 +694,11 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
           )}
           {editingKey === 'current_entry_year' && (
             <label className="ssf-label">
-              {t(`${presentation.currentCohortTitle}（需存在于${presentation.cohortTabLabel}）`)}<Select
+              {t("当前高一届别（需存在于届次列表）")}<Select
                 value={editDraft}
                 onChange={setEditDraft}
                 options={academicYears.map((c) => ({
-                  label: `${cohortDisplayName(c.entry_year, stage)}（${presentation.gradeNames[0]}：${academicYearAt(c.entry_year, 0)}）`,
+                  label: t("{{p0}}（高一：{{p1}}）", { p0: c.cohort_label, p1: c.grade_years['高一'] }),
                   value: c.entry_year,
                 }))}
               />
@@ -809,9 +726,9 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
         </div>
       </Modal>
 
-      {/* 新建/编辑入学年级弹窗 */}
+      {/* 新建/编辑届别弹窗 */}
       <Modal
-        title={editingEntryYear ? t(`编辑${presentation.cohortLabel}`) : t(`新建${presentation.cohortLabel}`)}
+        title={editingEntryYear ? t("编辑届别") : t("新建届别")}
         open={cohortModalOpen}
         onOk={submitCohort}
         onCancel={() => setCohortModalOpen(false)}
@@ -822,22 +739,28 @@ export default function SchoolSettingsForm({ onSaved, gradePanel }: Props) {
       >
         <div className="ssf-form-modal">
           <label className="ssf-label">
-            {t(`${presentation.cohortLabel}年份（${presentation.gradeNames[0]}入学年份）`)}<InputNumber
+            {t("届别年份（高一入学年份）")}<InputNumber
               min={2000}
               max={2100}
               value={cohortYear}
               onChange={(v) => setCohortYear(Number(v) || new Date().getFullYear())}
               style={{ width: '100%' }}
-              addonAfter={t(stage === 'senior' ? "届" : "级")}
+              addonAfter={t("届")}
             />
           </label>
           <div className="ssf-cohort-preview">
-            {stageGradeYears(cohortYear, stage).map((grade) => (
-              <div key={grade.name}>
-                <span>{t(grade.name)}</span>
-                <strong>{grade.academicYear}</strong>
-              </div>
-            ))}
+            <div>
+              <span>{t("高一")}</span>
+              <strong>{cohortYear}-{cohortYear + 1}</strong>
+            </div>
+            <div>
+              <span>{t("高二")}</span>
+              <strong>{cohortYear + 1}-{cohortYear + 2}</strong>
+            </div>
+            <div>
+              <span>{t("高三")}</span>
+              <strong>{cohortYear + 2}-{cohortYear + 3}</strong>
+            </div>
           </div>
         </div>
       </Modal>
